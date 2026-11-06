@@ -1,0 +1,167 @@
+use std::fs;
+use std::path::Path;
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use ignore::WalkBuilder;
+use ignore::overrides::{Override, OverrideBuilder};
+use regex::Regex;
+use serde::Deserialize;
+use serde_json::{Value, json};
+
+use super::project::{Project, is_protected};
+use super::{Tool, ToolError, parse_input};
+use crate::provider::ToolSpec;
+
+const MAX_RESULTS: usize = 500;
+
+pub(super) struct Search {
+    project: Arc<Project>,
+}
+
+impl Search {
+    pub(super) fn new(project: Arc<Project>) -> Self {
+        Self { project }
+    }
+
+    fn walk(&self, glob: Option<&str>) -> Result<Vec<String>, ToolError> {
+        let root = self.project.root();
+        let files = WalkBuilder::new(root)
+            .hidden(false)
+            .require_git(false)
+            .overrides(file_filter(root, glob)?)
+            .filter_entry(|entry| !is_protected(entry.path()))
+            .build()
+            .flatten()
+            .filter(|entry| entry.path().is_file())
+            .filter_map(|entry| relative(root, entry.path()));
+        Ok(files.collect())
+    }
+}
+
+fn relative(root: &Path, path: &Path) -> Option<String> {
+    let relative = path.strip_prefix(root).ok()?;
+    Some(relative.to_string_lossy().into_owned())
+}
+
+fn file_filter(root: &Path, glob: Option<&str>) -> Result<Override, ToolError> {
+    let invalid = |error: ignore::Error| ToolError(format!("invalid glob: {error}"));
+    let mut filter = OverrideBuilder::new(root);
+    if let Some(glob) = glob {
+        filter.add(glob).map_err(invalid)?;
+    }
+    filter.build().map_err(invalid)
+}
+
+/// Unreadable and binary files are skipped rather than failing the whole search.
+fn matching_lines(root: &Path, file: &str, pattern: &Regex) -> Vec<String> {
+    let contents = fs::read_to_string(root.join(file)).unwrap_or_default();
+    contents
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| pattern.is_match(line))
+        .map(|(index, line)| format!("{file}:{}:{line}", index + 1))
+        .collect()
+}
+
+fn summarize(mut results: Vec<String>) -> String {
+    if results.is_empty() {
+        return "no matches".to_owned();
+    }
+    let total = results.len();
+    results.truncate(MAX_RESULTS);
+    if total > MAX_RESULTS {
+        results.push(format!("... {} more", total - MAX_RESULTS));
+    }
+    results.join("\n")
+}
+
+#[derive(Deserialize)]
+struct SearchInput {
+    pattern: Option<String>,
+    glob: Option<String>,
+}
+
+#[async_trait]
+impl Tool for Search {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "search".into(),
+            description: "Find project files. With `pattern`, return lines matching that regex \
+                          as path:line:text. Without it, list file paths."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "pattern": {"type": "string", "description": "Regex matched against each line"},
+                    "glob": {"type": "string", "description": "Only search paths matching this glob"}
+                }
+            }),
+        }
+    }
+
+    async fn run(&self, input: Value) -> Result<String, ToolError> {
+        let input: SearchInput = parse_input(input)?;
+        let files = self.walk(input.glob.as_deref())?;
+        let Some(pattern) = input.pattern else {
+            return Ok(summarize(files));
+        };
+        let pattern =
+            Regex::new(&pattern).map_err(|e| ToolError(format!("invalid pattern: {e}")))?;
+        let root = self.project.root();
+        let lines = files
+            .iter()
+            .flat_map(|file| matching_lines(root, file, &pattern));
+        Ok(summarize(lines.collect()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tools::test_support::git_project;
+
+    fn populated() -> (tempfile::TempDir, Search) {
+        let (dir, project) = git_project();
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        fs::create_dir_all(dir.path().join("ignored")).unwrap();
+        fs::write(dir.path().join("src/a.rs"), "fn alpha() {}\nfn beta() {}\n").unwrap();
+        fs::write(dir.path().join("b.txt"), "alpha\n").unwrap();
+        fs::write(dir.path().join("ignored/c.txt"), "alpha\n").unwrap();
+        fs::write(dir.path().join("debug.log"), "alpha\n").unwrap();
+        fs::write(dir.path().join(".env"), "alpha=secret\n").unwrap();
+        (dir, Search::new(project))
+    }
+
+    #[tokio::test]
+    async fn finds_matching_lines_and_skips_everything_hidden_from_the_model() {
+        let (_dir, search) = populated();
+        let found = search.run(json!({"pattern": "alpha"})).await.unwrap();
+        let mut lines: Vec<_> = found.lines().collect();
+        lines.sort_unstable();
+        assert_eq!(lines, ["b.txt:1:alpha", "src/a.rs:1:fn alpha() {}"]);
+    }
+
+    #[tokio::test]
+    async fn lists_files_and_respects_the_glob() {
+        let (_dir, search) = populated();
+        let found = search.run(json!({"glob": "*.rs"})).await.unwrap();
+        assert_eq!(found, "src/a.rs");
+    }
+
+    #[tokio::test]
+    async fn reports_no_matches_and_invalid_input() {
+        let (_dir, search) = populated();
+        let none = search.run(json!({"pattern": "zzz"})).await.unwrap();
+        assert_eq!(none, "no matches");
+        assert!(search.run(json!({"pattern": "("})).await.is_err());
+        assert!(search.run(json!({"glob": "{"})).await.is_err());
+    }
+
+    #[test]
+    fn long_results_are_truncated_with_a_count() {
+        let summary = summarize(vec!["x".to_owned(); MAX_RESULTS + 2]);
+        assert_eq!(summary.lines().count(), MAX_RESULTS + 1);
+        assert!(summary.ends_with("... 2 more"));
+    }
+}
