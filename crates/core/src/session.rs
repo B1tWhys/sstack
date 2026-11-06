@@ -28,10 +28,20 @@ pub struct Usage {
     pub output_tokens: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StopReason {
+    EndTurn,
+    ToolUse,
+    MaxTokens,
+    Refused,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AssistantEntry {
     pub text: String,
     pub tool_calls: Vec<ToolCall>,
+    pub stop: StopReason,
     pub usage: Usage,
     pub payload: Option<ProviderPayload>,
 }
@@ -127,6 +137,7 @@ mod tests {
                 name: "read".into(),
                 input: json!({"path": "a.rs"}),
             }],
+            stop: StopReason::ToolUse,
             usage: Usage {
                 input_tokens: 10,
                 output_tokens: 2,
