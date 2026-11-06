@@ -1,0 +1,48 @@
+default_install_hook_types: [pre-commit, commit-msg]
+default_stages: [pre-commit]
+fail_fast: true
+
+repos:
+  - repo: local
+    hooks:
+      - id: rustfmt
+        name: rustfmt
+        entry: cargo fmt --all --check
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: clippy
+        name: clippy
+        entry: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: rustdoc
+        name: rustdoc
+        entry: env RUSTDOCFLAGS=-Dwarnings cargo doc --workspace --all-features --no-deps --locked
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      # Writes the coverage report the crap hook reads.
+      - id: tests
+        name: tests with coverage
+        entry: cargo llvm-cov --workspace --all-features --locked --doctests --lcov --output-path target/lcov.info
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: crap
+        name: CRAP score
+        entry: cargo crap --workspace --lcov target/lcov.info --missing pessimistic --threshold 6 --fail-above
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: conventional-commit
+        name: conventional commit message
+        entry: committed --commit-file
+        language: system
+        stages: [commit-msg]

@@ -1,0 +1,3 @@
+# One Provider-neutral Session log with embedded Provider Payloads
+
+A Session is stored as one append-only log of Provider-neutral entries, and each entry can embed a Provider Payload holding the exact data the Provider returned. Sessions must be able to move between Providers, but Claude also requires thinking blocks to be replayed unchanged and only caches byte-identical prefixes, so neither a neutral-only log nor raw Provider transcripts would work. We rejected keeping separate neutral and raw files because they could fall out of sync. Entries are never rewritten, so anything that shortens a Session must append rather than edit.
