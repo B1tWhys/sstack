@@ -109,7 +109,19 @@ pub(crate) mod test_support {
     use std::process::Command;
     use std::sync::Arc;
 
+    use async_trait::async_trait;
+
+    use super::Approver;
     use super::project::Project;
+
+    pub struct AllowAll;
+
+    #[async_trait]
+    impl Approver for AllowAll {
+        async fn approve(&self, _command: &str) -> bool {
+            true
+        }
+    }
 
     /// A temporary git repository holding `.gitignore` rules for `ignored/` and `*.log`.
     pub fn git_project() -> (tempfile::TempDir, Arc<Project>) {

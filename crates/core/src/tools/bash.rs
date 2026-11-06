@@ -117,16 +117,7 @@ impl Tool for Bash {
 mod tests {
     use super::*;
     use crate::tools::DenyAll;
-    use crate::tools::test_support::git_project;
-
-    struct AllowAll;
-
-    #[async_trait]
-    impl Approver for AllowAll {
-        async fn approve(&self, _command: &str) -> bool {
-            true
-        }
-    }
+    use crate::tools::test_support::{AllowAll, git_project};
 
     fn bash(project: Arc<Project>, secret_env: Vec<String>) -> Bash {
         Bash::new(project, Arc::new(AllowAll), secret_env)
