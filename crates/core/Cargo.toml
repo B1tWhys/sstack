@@ -5,6 +5,8 @@ edition.workspace = true
 
 [dependencies]
 async-trait = "0.1"
+futures = "0.3"
+genai = "0.7"
 ignore = "0.4"
 regex = "1"
 serde = { version = "1", features = ["derive"] }

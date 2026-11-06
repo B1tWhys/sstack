@@ -1,11 +1,24 @@
 //! The boundary between the harness and the services that run models.
 
+pub mod anthropic;
 pub mod scripted;
 
 use async_trait::async_trait;
+use serde::Deserialize;
 use serde_json::Value;
 
 use crate::session::{AssistantEntry, Entry};
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Effort {
+    Low,
+    Medium,
+    #[default]
+    High,
+    Xhigh,
+    Max,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ToolSpec {
