@@ -5,19 +5,20 @@ use std::io::{IsTerminal, Write, stdout};
 use std::process::ExitCode;
 use std::sync::Arc;
 
+use anyhow::Result;
 use sstack_core::agent::{AgentEvent, TurnContext, TurnEnd};
 use sstack_core::tools::DenyAll;
 use sstack_core::workspace;
 use tokio_util::sync::CancellationToken;
 
+use crate::Args;
 use crate::describe;
 use crate::setup::{Place, Run, Start, prepare};
-use crate::{AnyError, Args};
 
 /// Runs one prompt with no interaction, denying all shell commands.
 ///
 /// Succeeds only if the Turn finished normally, so scripts can tell when it did not.
-pub async fn run(args: &Args, prompt: &str) -> Result<ExitCode, AnyError> {
+pub async fn run(args: &Args, prompt: &str) -> Result<ExitCode> {
     let start = args
         .resume
         .as_deref()

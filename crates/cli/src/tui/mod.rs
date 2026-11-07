@@ -27,6 +27,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 
+use anyhow::{Result, bail, ensure};
 use app::{App, Exit, Sessions};
 use approver::EventApprover;
 use crossterm::event::{
@@ -43,17 +44,17 @@ use theme::ColorDepth;
 use tokio::sync::mpsc;
 use worker::AgentHandle;
 
+use crate::Args;
 use crate::describe;
 use crate::rebuild::rebuild;
 use crate::setup::{Place, Start, main_checkout, prepare, relaunch_args, sessions_directory};
-use crate::{AnyError, Args};
 
 /// Runs the interactive harness until the person quits, rebuilding when asked.
 ///
 /// # Errors
 /// Fails if the harness is not attached to a terminal, if the Session cannot be readied, or if
 /// the terminal stops working.
-pub async fn run(args: &Args) -> Result<ExitCode, AnyError> {
+pub async fn run(args: &Args) -> Result<ExitCode> {
     require_terminal(io::stdin().is_terminal() && io::stdout().is_terminal())?;
     let (sender, mut events) = mpsc::unbounded_channel();
     let mut sessions = LiveSessions {
@@ -105,7 +106,7 @@ struct LiveSessions<'a> {
 impl LiveSessions<'_> {
     /// Describes the Sessions worth listing: those with something in them, and blank ones with a
     /// worktree, which would otherwise be left behind unnoticed.
-    fn stored(&self) -> Result<Vec<SessionSummary>, AnyError> {
+    fn stored(&self) -> Result<Vec<SessionSummary>> {
         let mut stored = workspace::list_sessions(&self.directory)?;
         stored.retain(|summary| {
             let id = workspace::session_id(&summary.path);
@@ -116,7 +117,7 @@ impl LiveSessions<'_> {
 }
 
 impl Sessions for LiveSessions<'_> {
-    fn open(&mut self, start: Start<'_>) -> Result<Opened, AnyError> {
+    fn open(&mut self, start: Start<'_>) -> Result<Opened> {
         let events = &self.events;
         let report_to = |id: &str| SessionSender::new(id, events.clone());
         let approver =
@@ -130,14 +131,14 @@ impl Sessions for LiveSessions<'_> {
         })
     }
 
-    fn check_archive(&self, id: &str) -> Result<(), AnyError> {
+    fn check_archive(&self, id: &str) -> Result<()> {
         match worktree::unfinished_work(&self.main, id)? {
-            Some(reason) => Err(format!("{reason}: land it, or use /archive --force").into()),
+            Some(reason) => bail!("{reason}: land it, or use /archive --force"),
             None => Ok(()),
         }
     }
 
-    fn archive(&mut self, id: &str) -> Result<(), AnyError> {
+    fn archive(&mut self, id: &str) -> Result<()> {
         worktree::remove(&self.main, id)?;
         workspace::archive_session(&self.directory, id)?;
         Ok(())
@@ -148,7 +149,7 @@ impl Sessions for LiveSessions<'_> {
 ///
 /// # Errors
 /// Fails only if the current directory cannot be found. Finding no Skills is not an error.
-fn load_skills() -> Result<Vec<Skill>, AnyError> {
+fn load_skills() -> Result<Vec<Skill>> {
     let project = std::env::current_dir()?;
     let home = dirs::home_dir();
     let places = skills::locations(&project, home.as_deref(), |name| std::env::var_os(name));
@@ -156,16 +157,16 @@ fn load_skills() -> Result<Vec<Skill>, AnyError> {
 }
 
 /// Refuses to start without a terminal, rather than take over one the harness was not given.
-fn require_terminal(attached: bool) -> Result<(), AnyError> {
-    if attached {
-        Ok(())
-    } else {
-        Err("interactive mode needs a terminal; use --prompt to run without one".into())
-    }
+fn require_terminal(attached: bool) -> Result<()> {
+    ensure!(
+        attached,
+        "interactive mode needs a terminal; use --prompt to run without one"
+    );
+    Ok(())
 }
 
 /// Runs the screen full screen, handing the terminal back however it stops.
-async fn on_screen(app: &mut App<'_>, events: &mut EventReceiver) -> Result<Exit, AnyError> {
+async fn on_screen(app: &mut App<'_>, events: &mut EventReceiver) -> Result<Exit> {
     let mut terminal = ratatui::try_init()?;
     let modes = InputModes::enable();
     let exit = app.run(&mut terminal, events).await;

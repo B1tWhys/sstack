@@ -7,9 +7,9 @@ mod rebuild;
 mod setup;
 mod tui;
 
-use std::error::Error;
 use std::process::ExitCode;
 
+use anyhow::Result;
 use clap::Parser;
 
 /// A coding agent that improves itself.
@@ -32,11 +32,8 @@ struct Args {
 /// The `--resume` value that means the newest Session.
 const LATEST: &str = "latest";
 
-/// Any failure that ends a run, shown to the person as text.
-type AnyError = Box<dyn Error + Send + Sync>;
-
 /// Runs the mode the arguments ask for.
-async fn run(args: Args) -> Result<ExitCode, AnyError> {
+async fn run(args: Args) -> Result<ExitCode> {
     match args.prompt.as_deref() {
         Some(prompt) => headless::run(&args, prompt).await,
         None => tui::run(&args).await,
@@ -49,7 +46,7 @@ async fn main() -> ExitCode {
 }
 
 /// Prints a failure and returns the matching exit code.
-fn report(result: Result<ExitCode, AnyError>) -> ExitCode {
+fn report(result: Result<ExitCode>) -> ExitCode {
     result.unwrap_or_else(|error| {
         eprintln!("error: {error}");
         ExitCode::FAILURE
@@ -59,6 +56,7 @@ fn report(result: Result<ExitCode, AnyError>) -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::anyhow;
 
     /// Parses `cli` as if it followed the program name on the command line.
     pub fn args(cli: &[&str]) -> Args {
@@ -75,6 +73,6 @@ mod tests {
     #[test]
     fn failures_exit_unsuccessfully() {
         let failure = format!("{:?}", ExitCode::FAILURE);
-        assert_eq!(format!("{:?}", report(Err("boom".into()))), failure);
+        assert_eq!(format!("{:?}", report(Err(anyhow!("boom")))), failure);
     }
 }

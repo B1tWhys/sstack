@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 anstyle = "1"
 anstyle-lossy = "1"
+anyhow = "1"
 async-trait = "0.1"
 bon = "3"
 clap = { version = "4", features = ["derive"] }

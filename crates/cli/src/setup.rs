@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use anyhow::{Context, Result};
 use bon::builder;
 use sstack_core::agent::{Agent, AgentConfig};
 use sstack_core::config::{Config, Connection};
@@ -12,14 +13,14 @@ use sstack_core::tools::project::Project;
 use sstack_core::tools::{Approver, Land, ToolBox};
 use sstack_core::{workspace, worktree};
 
-use crate::{AnyError, Args, LATEST};
+use crate::{Args, LATEST};
 
 /// Keeps the harness's files apart from others in the user's shared directories.
 const DIRECTORY_NAME: &str = "sstack";
 
 /// Returns where the harness keeps its files within `base`, failing if `base` is unknown.
-fn app_dir(base: Option<PathBuf>) -> Result<PathBuf, AnyError> {
-    let base = base.ok_or("cannot find the user data directory")?;
+fn app_dir(base: Option<PathBuf>) -> Result<PathBuf> {
+    let base = base.context("cannot find the user data directory")?;
     Ok(base.join(DIRECTORY_NAME))
 }
 
@@ -54,7 +55,7 @@ struct OpenedLog {
 }
 
 /// Opens the log of the Session that `start` asks for.
-fn open_session(directory: &Path, start: Start<'_>) -> Result<OpenedLog, AnyError> {
+fn open_session(directory: &Path, start: Start<'_>) -> Result<OpenedLog> {
     match start {
         Start::New(place) => {
             let path = workspace::new_session_path(directory);
@@ -71,7 +72,7 @@ fn open_session(directory: &Path, start: Start<'_>) -> Result<OpenedLog, AnyErro
 }
 
 /// Opens the log of an existing Session, bringing it back first if it was archived.
-fn resume_session(directory: &Path, wanted: &str) -> Result<OpenedLog, AnyError> {
+fn resume_session(directory: &Path, wanted: &str) -> Result<OpenedLog> {
     let wants_worktree = workspace::restore_session(directory, wanted)?;
     let path = resume_path(directory, wanted)?;
     let (log, entries) = SessionLog::open(&path)?;
@@ -84,10 +85,10 @@ fn resume_session(directory: &Path, wanted: &str) -> Result<OpenedLog, AnyError>
 }
 
 /// Finds the Session to resume.
-fn resume_path(directory: &Path, wanted: &str) -> Result<PathBuf, AnyError> {
+fn resume_path(directory: &Path, wanted: &str) -> Result<PathBuf> {
     if wanted == LATEST {
         let latest = workspace::latest_session(directory)?;
-        latest.ok_or_else(|| "no session to resume".into())
+        latest.context("no session to resume")
     } else {
         Ok(workspace::session_path(directory, wanted))
     }
@@ -137,7 +138,7 @@ pub fn prepare(
     args: &Args,
     start: Start<'_>,
     approver: impl FnOnce(&str) -> Arc<dyn Approver>,
-) -> Result<Run, AnyError> {
+) -> Result<Run> {
     let config = load_settings()?;
     let connection = config.connection(args.connection.as_deref())?;
     let main = main_checkout()?;
@@ -163,22 +164,22 @@ pub fn prepare(
 }
 
 /// Returns the directory the harness was started in, with symlinks resolved.
-pub fn main_checkout() -> Result<PathBuf, AnyError> {
+pub fn main_checkout() -> Result<PathBuf> {
     Ok(Project::new(&std::env::current_dir()?)?.root().to_owned())
 }
 
 /// Returns where the Sessions of the current directory are stored.
-pub fn sessions_directory() -> Result<PathBuf, AnyError> {
+pub fn sessions_directory() -> Result<PathBuf> {
     project_sessions(&main_checkout()?)
 }
 
 /// Returns where the Sessions of the project at `root` are stored.
-fn project_sessions(root: &Path) -> Result<PathBuf, AnyError> {
+fn project_sessions(root: &Path) -> Result<PathBuf> {
     Ok(workspace::sessions_dir(&app_dir(dirs::data_dir())?, root))
 }
 
 /// Returns the user's settings.
-fn load_settings() -> Result<Config, AnyError> {
+fn load_settings() -> Result<Config> {
     let path = app_dir(dirs::config_dir())?.join("config.toml");
     Ok(Config::load(&path)?)
 }
@@ -204,7 +205,7 @@ fn agent_config(
     place: &Workplace,
     /// Decides on the Session's shell commands.
     approver: Arc<dyn Approver>,
-) -> Result<AgentConfig, AnyError> {
+) -> Result<AgentConfig> {
     let connection = backend.connection;
     SystemKeyring::connect();
     let secret = resolve_secret(&connection.secret, &SystemKeyring, backend.main)?;

@@ -4,6 +4,7 @@
 use std::path::Path;
 use std::time::SystemTime;
 
+use anyhow::Result;
 use bon::bon;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::backend::Backend;
@@ -17,7 +18,6 @@ use super::event::{Action, Event, EventReceiver};
 use super::lifecycle::{self, Interrupt};
 use super::pane::{Opened, Pane};
 use super::theme::ColorDepth;
-use crate::AnyError;
 use crate::command::{Command, parse_command};
 use crate::setup::{Place, Start};
 
@@ -46,19 +46,19 @@ pub trait Sessions {
     ///
     /// # Errors
     /// Returns an error if the Session cannot be readied.
-    fn open(&mut self, start: Start<'_>) -> Result<Opened, AnyError>;
+    fn open(&mut self, start: Start<'_>) -> Result<Opened>;
 
     /// Refuses, saying why, if archiving the Session with id `id` would lose work.
     ///
     /// # Errors
     /// Returns an error if there is work to lose, or if that cannot be told.
-    fn check_archive(&self, id: &str) -> Result<(), AnyError>;
+    fn check_archive(&self, id: &str) -> Result<()>;
 
     /// Puts the Session with id `id` away, deleting its worktree and any work there.
     ///
     /// # Errors
     /// Returns an error if the Session could not be put away.
-    fn archive(&mut self, id: &str) -> Result<(), AnyError>;
+    fn archive(&mut self, id: &str) -> Result<()>;
 }
 
 /// Why the interactive harness stopped.
@@ -274,7 +274,7 @@ impl App<'_> {
     }
 
     /// Starts an agent for the Session at position `index`, unless it already has one.
-    fn ensure_agent(&mut self, index: usize) -> Result<(), AnyError> {
+    fn ensure_agent(&mut self, index: usize) -> Result<()> {
         if !self.panes[index].has_agent() {
             let opened = self.sessions.open(Start::Resume(self.panes[index].id()))?;
             self.panes[index].attach(opened);
@@ -452,6 +452,7 @@ mod tests {
     use crate::tui::event::EventSender;
     use crate::tui::lifecycle::SessionState;
     use crate::tui::test_support::{bash_call, ctrl, key, opened, reply, rows};
+    use anyhow::{anyhow, bail};
     use async_trait::async_trait;
     use ratatui::backend::TestBackend;
     use ratatui::style::Color;
@@ -512,9 +513,9 @@ mod tests {
     }
 
     impl Sessions for TestSessions {
-        fn open(&mut self, start: Start<'_>) -> Result<Opened, AnyError> {
+        fn open(&mut self, start: Start<'_>) -> Result<Opened> {
             if let Some(failure) = self.open_failure {
-                return Err(failure.into());
+                bail!(failure);
             }
             let id = match start {
                 Start::Resume(id) => id.to_owned(),
@@ -528,13 +529,13 @@ mod tests {
             Ok(opened(&path, self.provider.clone(), &self.sender))
         }
 
-        fn check_archive(&self, _id: &str) -> Result<(), AnyError> {
-            self.refusal.map_or(Ok(()), |refusal| Err(refusal.into()))
+        fn check_archive(&self, _id: &str) -> Result<()> {
+            self.refusal.map_or(Ok(()), |refusal| Err(anyhow!(refusal)))
         }
 
-        fn archive(&mut self, id: &str) -> Result<(), AnyError> {
+        fn archive(&mut self, id: &str) -> Result<()> {
             if let Some(failure) = self.archive_failure {
-                return Err(failure.into());
+                bail!(failure);
             }
             self.archived.borrow_mut().push(id.to_owned());
             Ok(())
