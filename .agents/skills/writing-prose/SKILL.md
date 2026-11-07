@@ -15,7 +15,7 @@ The text is done when every rule has been applied and step 3 finds nothing.
 
 When a rule makes a sentence worse, fix the sentence another way or leave it alone. A sentence that obeys every rule and still sounds like a machine wrote it has failed.
 
-Terms in `GLOSSARY.md` beat these rules, so Harness and Turn stay as they are there. Skills and `AGENTS.md` also follow `.claude/skills/writing-for-agents/SKILL.md`, which wins where the two differ. `writing-docs` decides what a doc comment says, and these rules decide how it reads.
+Terms in `GLOSSARY.md` beat these rules, so Harness and Turn stay as they are there. Skills and `AGENTS.md` also follow `.agents/skills/writing-for-agents/SKILL.md`, which wins where the two differ. `writing-docs` decides what a doc comment says, and these rules decide how it reads.
 
 ## Rules
 

@@ -14,7 +14,7 @@ Write each doc comment for a reader deciding whether to use the item, who can se
 5. **Add meaning.** A doc on an obvious item gives its role or units, so that it says more than its name and signature do.
 6. **Glossary terms.** Use the terms in `GLOSSARY.md`, capitalized as they are there.
 7. **`# Errors` and `# Panics`.** State the condition in caller terms.
-8. **Prose.** Apply the rules in `.claude/skills/writing-prose/SKILL.md`.
+8. **Prose.** Apply the rules in `.agents/skills/writing-prose/SKILL.md`.
 
 ## Examples
 

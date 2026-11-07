@@ -9,7 +9,7 @@ Skills in this project run on Claude Code and on sstack, so write for what both 
 - It reads `name` and `description` from the header and ignores every other field, including `disable-model-invocation`.
 - It lists every Skill it finds in the system prompt of every Session, so each description is permanent context load.
 - The `skill` tool returns the text of `SKILL.md`, header included, without saying where the file is. A pointer to another file must therefore use the path from the repository root. A relative link gives the model nothing to resolve.
-- The `read` tool stays inside the project. Sibling files work for a Skill in `.claude/skills`, and the model cannot reach them for a Skill in the person's home directory.
+- The `read` tool stays inside the project. Sibling files work for a Skill in `.agents/skills`, and the model cannot reach them for a Skill in the person's home directory.
 - A person cannot invoke a Skill by name, because a Human Command never reaches the model.
 
 ## Invocation

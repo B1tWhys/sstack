@@ -5,7 +5,7 @@ description: Rules for documents agents read. Use when writing a Skill, AGENTS.m
 
 This is the reference for any document an agent consumes: a Skill, `AGENTS.md`, or a doc reached by a pointer. The aim is that the agent takes the same process on every run, which is a different aim from producing the same output.
 
-When the document is a Skill, also read `.claude/skills/writing-for-agents/SKILL-MECHANICS.md`, which covers the header and how Skills are reached in this project.
+When the document is a Skill, also read `.agents/skills/writing-for-agents/SKILL-MECHANICS.md`, which covers the header and how Skills are reached in this project.
 
 ## Context pointers
 
