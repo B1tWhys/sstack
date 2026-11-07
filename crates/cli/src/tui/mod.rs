@@ -26,7 +26,9 @@ use std::sync::Arc;
 
 use app::{App, Exit};
 use approver::EventApprover;
-use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste};
+use crossterm::event::{
+    DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+};
 use crossterm::execute;
 use event::{EventReceiver, EventSender};
 use screen::{Screen, Shown};
@@ -101,11 +103,32 @@ async fn on_screen<F: FnMut() -> Result<Shown, AnyError>>(
     events: &mut EventReceiver,
 ) -> Result<Exit, AnyError> {
     let mut terminal = ratatui::try_init()?;
-    let _ = execute!(io::stdout(), EnableBracketedPaste);
+    let modes = InputModes::enable();
     let exit = screen.run(&mut terminal, events).await;
-    let _ = execute!(io::stdout(), DisableBracketedPaste);
+    drop(modes);
     ratatui::restore();
     Ok(exit?)
+}
+
+/// Has the terminal report pastes in one piece and the mouse wheel, for as long as it lives.
+///
+/// Dropping it hands the terminal back as it was, including when the harness panics, so the
+/// person's shell is never left receiving mouse reports. While it lives, most terminals select
+/// text only with a modifier held, such as Shift, or Option on macOS.
+struct InputModes;
+
+impl InputModes {
+    /// Turns the modes on. A terminal that refuses them still works, without those reports.
+    fn enable() -> Self {
+        let _ = execute!(io::stdout(), EnableBracketedPaste, EnableMouseCapture);
+        Self
+    }
+}
+
+impl Drop for InputModes {
+    fn drop(&mut self) {
+        let _ = execute!(io::stdout(), DisableMouseCapture, DisableBracketedPaste);
+    }
 }
 
 #[cfg(test)]

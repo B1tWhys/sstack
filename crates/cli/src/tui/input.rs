@@ -2,10 +2,10 @@
 
 use std::io;
 
-use crossterm::event::{Event as TerminalEvent, EventStream, KeyEventKind};
+use crossterm::event::{Event as TerminalEvent, EventStream, KeyEventKind, MouseEventKind};
 use futures::{Stream, StreamExt};
 
-use super::event::{Event, EventSender};
+use super::event::{Event, EventSender, Scroll};
 
 /// Starts passing terminal input to `events`, until the terminal or the App goes away.
 pub fn spawn(events: EventSender) {
@@ -29,12 +29,23 @@ async fn forward(
 /// Returns the event for something the terminal reported, or nothing if the harness has no use
 /// for it.
 ///
-/// Only key presses count, because some terminals also report releases and repeats.
+/// Only key presses count, because some terminals also report releases and repeats. Of the
+/// mouse, only vertical scrolling counts.
 fn from_terminal(event: TerminalEvent) -> Option<Event> {
     match event {
         TerminalEvent::Key(key) if key.kind == KeyEventKind::Press => Some(Event::Key(key)),
         TerminalEvent::Paste(text) => Some(Event::Paste(text)),
         TerminalEvent::Resize(..) => Some(Event::Resize),
+        TerminalEvent::Mouse(mouse) => scroll(mouse.kind).map(Event::Scroll),
+        _ => None,
+    }
+}
+
+/// Returns which way a mouse action scrolls, or nothing if it is not a vertical scroll.
+fn scroll(kind: MouseEventKind) -> Option<Scroll> {
+    match kind {
+        MouseEventKind::ScrollUp => Some(Scroll::Up),
+        MouseEventKind::ScrollDown => Some(Scroll::Down),
         _ => None,
     }
 }
@@ -42,7 +53,7 @@ fn from_terminal(event: TerminalEvent) -> Option<Event> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crossterm::event::{KeyCode, KeyEvent, KeyEventState, KeyModifiers};
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventState, KeyModifiers, MouseEvent};
     use tokio::sync::mpsc;
 
     fn key(kind: KeyEventKind) -> TerminalEvent {
@@ -54,6 +65,16 @@ mod tests {
         })
     }
 
+    /// Returns a mouse action of `kind` somewhere on the screen.
+    fn mouse(kind: MouseEventKind) -> TerminalEvent {
+        TerminalEvent::Mouse(MouseEvent {
+            kind,
+            column: 3,
+            row: 4,
+            modifiers: KeyModifiers::NONE,
+        })
+    }
+
     #[tokio::test]
     async fn useful_input_is_forwarded_until_an_error() {
         let input = futures::stream::iter([
@@ -62,6 +83,10 @@ mod tests {
             Ok(TerminalEvent::FocusGained),
             Ok(TerminalEvent::Paste("text".into())),
             Ok(TerminalEvent::Resize(80, 24)),
+            Ok(mouse(MouseEventKind::ScrollUp)),
+            Ok(mouse(MouseEventKind::Moved)),
+            Ok(mouse(MouseEventKind::ScrollLeft)),
+            Ok(mouse(MouseEventKind::ScrollDown)),
             Err(io::Error::other("gone")),
             Ok(TerminalEvent::Paste("never seen".into())),
         ]);
@@ -73,10 +98,10 @@ mod tests {
         while let Ok(event) = events.try_recv() {
             forwarded.push(format!("{event:?}"));
         }
-        assert_eq!(forwarded.len(), 3, "{forwarded:?}");
+        assert_eq!(forwarded.len(), 5, "{forwarded:?}");
         assert!(forwarded[0].starts_with("Key("));
         assert_eq!(forwarded[1], r#"Paste("text")"#);
-        assert_eq!(forwarded[2], "Resize");
+        assert_eq!(forwarded[2..], ["Resize", "Scroll(Up)", "Scroll(Down)"]);
     }
 
     #[tokio::test]

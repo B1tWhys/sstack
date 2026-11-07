@@ -13,11 +13,14 @@ use sstack_core::session::{AssistantEntry, Entry};
 
 use crate::describe;
 use crate::tui::component::{Component, KeyOutcome};
-use crate::tui::event::Event;
+use crate::tui::event::{Event, Scroll};
 use crate::tui::theme;
 
 /// How many lines one Page Up or Page Down scrolls.
 const PAGE: u16 = 10;
+/// How many lines one notch of the mouse wheel scrolls. Trackpads send many small steps, so this
+/// stays small.
+const WHEEL: u16 = 3;
 
 /// Shows the Session as it unfolds: what the person asked, what the model thought and replied,
 /// and what its tools and the harness reported.
@@ -138,6 +141,15 @@ impl Transcript {
         }
     }
 
+    /// Moves the view `lines` towards older or newer output. Scrolling down to the newest output
+    /// follows it again.
+    fn scroll(&mut self, direction: Scroll, lines: u16) {
+        self.scroll_back = match direction {
+            Scroll::Up => self.scroll_back.saturating_add(lines),
+            Scroll::Down => self.scroll_back.saturating_sub(lines),
+        };
+    }
+
     /// Returns everything shown so far, styled.
     fn text(&self) -> Text<'_> {
         self.blocks.iter().flat_map(Block::lines).collect()
@@ -181,14 +193,15 @@ impl Component for Transcript {
                 }
             }
             Event::Notice(text) => self.push(Kind::Note, text.clone()),
+            Event::Scroll(direction) => self.scroll(*direction, WHEEL),
             _ => {}
         }
     }
 
     fn key(&mut self, key: KeyEvent) -> KeyOutcome {
         match key.code {
-            KeyCode::PageUp => self.scroll_back = self.scroll_back.saturating_add(PAGE),
-            KeyCode::PageDown => self.scroll_back = self.scroll_back.saturating_sub(PAGE),
+            KeyCode::PageUp => self.scroll(Scroll::Up, PAGE),
+            KeyCode::PageDown => self.scroll(Scroll::Down, PAGE),
             _ => return KeyOutcome::Ignored,
         }
         KeyOutcome::Handled
@@ -340,5 +353,22 @@ mod tests {
         assert_eq!(draw(&shown), ["29", "30"]);
 
         assert_eq!(shown.key(key(KeyCode::Enter)), KeyOutcome::Ignored);
+    }
+
+    #[test]
+    fn the_mouse_wheel_scrolls_a_few_lines_at_a_time() {
+        let lines: Vec<String> = (1..=30).map(|n| n.to_string()).collect();
+        let mut shown = transcript(vec![Event::Agent(AgentEvent::Text(lines.join("\n")))]);
+        let draw = |shown: &Transcript| screen(5, 2, |frame| shown.render(frame, frame.area()));
+
+        shown.update(&Event::Scroll(Scroll::Up));
+        shown.update(&Event::Scroll(Scroll::Up));
+        assert_eq!(draw(&shown), ["23", "24"]);
+
+        shown.update(&Event::Scroll(Scroll::Down));
+        assert_eq!(draw(&shown), ["26", "27"]);
+        shown.update(&Event::Scroll(Scroll::Down));
+        shown.update(&Event::Scroll(Scroll::Down));
+        assert_eq!(draw(&shown), ["29", "30"]);
     }
 }

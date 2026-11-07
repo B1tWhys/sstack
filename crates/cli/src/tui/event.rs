@@ -26,6 +26,9 @@ pub enum Event {
     Paste(String),
     /// The terminal changed size. Components need not react, because the App redraws anyway.
     Resize,
+    /// The person turned the mouse wheel or swiped on a trackpad, wherever the pointer was.
+    /// Each notch or swipe step arrives as its own event.
+    Scroll(Scroll),
     /// The agent picked up a Session that already has these entries, oldest first, such as after
     /// a Rebuild. Comes before any Turn, and holds nothing for a new Session.
     Resumed(Vec<Entry>),
@@ -39,6 +42,15 @@ pub enum Event {
     Approval(ApprovalRequest),
     /// The harness has something to tell the person, such as a mistyped Human Command.
     Notice(String),
+}
+
+/// Which way the person scrolled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scroll {
+    /// Towards older output.
+    Up,
+    /// Towards newer output.
+    Down,
 }
 
 /// Something a component asks the App to do, because it reaches beyond that component.
