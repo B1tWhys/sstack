@@ -52,6 +52,10 @@ _Avoid_: MVP, prototype
 A slash-prefixed instruction a person gives the Harness directly, which never reaches the model.
 _Avoid_: Skill, slash command
 
+**Skill**:
+A directory of instructions, described by its `SKILL.md`, that a person installed for Claude Code or Codex and that sstack loads from those tools' locations.
+_Avoid_: Plugin, Human Command
+
 **Rebuild**:
 The Human Command that builds the Harness Source and, only if that succeeds, relaunches into the same Session.
 _Avoid_: Restart, reload

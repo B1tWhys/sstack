@@ -3,6 +3,7 @@
 use std::fmt::Display;
 
 use sstack_core::agent::{ToolCallSummary, TurnEnd};
+use sstack_core::skills::Skill;
 
 /// The most characters of a tool call's input to show.
 const MAX_TOOL_INPUT_CHARS: usize = 200;
@@ -21,6 +22,15 @@ pub fn tool_failed(name: &str) -> String {
 /// requests begin to fail. Both counts are in tokens.
 pub fn context_warning(used: u64, limit: u64) -> String {
     format!("[warning] context is {used} of {limit} tokens; start a new Session soon")
+}
+
+/// Tells the person which Skills were loaded, or that none were found.
+pub fn skills_loaded(skills: &[Skill]) -> String {
+    if skills.is_empty() {
+        return "no skills found for Claude Code or Codex".to_owned();
+    }
+    let names: Vec<&str> = skills.iter().map(|skill| skill.name.as_str()).collect();
+    format!("loaded {} skills: {}", skills.len(), names.join(", "))
 }
 
 /// Describes how a Turn ended, if that needs saying.
@@ -73,6 +83,21 @@ mod tests {
     fn failures_and_warnings_name_what_they_concern() {
         assert_eq!(tool_failed("bash"), "[bash] failed");
         assert!(context_warning(8, 10).contains("8 of 10 tokens"));
+    }
+
+    #[test]
+    fn loaded_skills_are_named_and_none_is_said_plainly() {
+        assert_eq!(
+            skills_loaded(&[]),
+            "no skills found for Claude Code or Codex"
+        );
+        let skill = |name: &str| Skill {
+            name: name.into(),
+            description: String::new(),
+            path: name.into(),
+        };
+        let loaded = skills_loaded(&[skill("learn"), skill("quiz")]);
+        assert_eq!(loaded, "loaded 2 skills: learn, quiz");
     }
 
     #[test]

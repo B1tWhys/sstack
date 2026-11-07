@@ -30,11 +30,13 @@ use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste};
 use crossterm::execute;
 use event::{EventReceiver, EventSender};
 use screen::{Screen, Shown};
+use sstack_core::skills::{self, Skill};
 use sstack_core::workspace;
 use theme::ColorDepth;
 use tokio::sync::mpsc;
 use worker::AgentHandle;
 
+use crate::describe;
 use crate::rebuild::rebuild;
 use crate::setup::{Run, prepare, relaunch_args};
 use crate::{AnyError, Args};
@@ -68,8 +70,20 @@ fn open(args: &Args, resume: Option<&str>, events: &EventSender) -> Result<Shown
     let approver = Arc::new(EventApprover::new(events.clone()));
     let Run { agent, session } = prepare(args, resume, approver)?;
     let agent = AgentHandle::spawn(agent, events.clone());
-    let app = App::new(agent, workspace::session_id(&session), ColorDepth::detect());
+    let mut app = App::new(agent, workspace::session_id(&session), ColorDepth::detect());
+    app.notice(describe::skills_loaded(&load_skills()?));
     Ok(Shown { app, session })
+}
+
+/// Finds the Skills installed for Claude Code or Codex, for this project and for the person.
+///
+/// # Errors
+/// Fails only if the current directory cannot be found. Finding no Skills is not an error.
+fn load_skills() -> Result<Vec<Skill>, AnyError> {
+    let project = std::env::current_dir()?;
+    let home = dirs::home_dir();
+    let places = skills::locations(&project, home.as_deref(), |name| std::env::var_os(name));
+    Ok(skills::discover(&places))
 }
 
 /// Refuses to start without a terminal, rather than take over one the harness was not given.

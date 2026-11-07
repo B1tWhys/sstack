@@ -5,5 +5,6 @@ pub mod config;
 pub mod credentials;
 pub mod provider;
 pub mod session;
+pub mod skills;
 pub mod tools;
 pub mod workspace;
