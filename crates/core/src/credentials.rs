@@ -1,6 +1,5 @@
 //! Finding the secret a Connection names.
 
-use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -72,24 +71,24 @@ fn non_empty(value: Option<String>) -> Option<String> {
     value.filter(|value| !value.is_empty())
 }
 
-/// Reads `name` from the `.env` file in `directory`, if the file and the value exist.
+/// Reads `name` from the `.env` file in `directory`, if the file and the value exist. Lines that
+/// cannot be parsed are skipped.
+///
+/// Values follow dotenv rules: `$` expands from the environment unless the value is in single
+/// quotes, so a secret containing one needs them.
 fn dotenv_value(directory: &Path, name: &str) -> Option<String> {
-    let contents = fs::read_to_string(directory.join(".env")).ok()?;
-    contents.lines().find_map(|line| parse_line(line, name))
-}
-
-/// Returns the value on `line` if it assigns `name`, accepting `export` and quotes.
-fn parse_line(line: &str, name: &str) -> Option<String> {
-    let line = line.trim();
-    let line = line.strip_prefix("export ").unwrap_or(line);
-    let (key, value) = line.split_once('=')?;
-    let value = value.trim().trim_matches(['"', '\'']);
-    non_empty((key.trim() == name).then(|| value.to_owned()))
+    dotenvy::from_path_iter(directory.join(".env"))
+        .ok()?
+        // A failed read fails again on every retry, so skipping it like a bad line would hang.
+        .take_while(|assignment| !matches!(assignment, Err(dotenvy::Error::Io(_))))
+        .flatten()
+        .find_map(|(key, value)| non_empty((key == name).then_some(value)))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     struct Stored(Option<&'static str>);
 
@@ -130,6 +129,22 @@ mod tests {
         fs::write(dir.path().join(".env"), "SSTACK_TEST_C=\n").unwrap();
         let found = resolve_secret("SSTACK_TEST_C", &Stored(None), dir.path());
         assert_eq!(found.unwrap_err(), MissingSecret("SSTACK_TEST_C".into()));
+    }
+
+    #[test]
+    fn single_quotes_keep_a_dollar_sign_in_a_secret() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join(".env"), "SSTACK_TEST_E='pa$$word'\n").unwrap();
+        let found = resolve_secret("SSTACK_TEST_E", &Stored(None), dir.path());
+        assert_eq!(found.unwrap(), "pa$$word");
+    }
+
+    #[test]
+    fn a_directory_in_place_of_a_dotenv_file_counts_as_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join(".env")).unwrap();
+        let found = resolve_secret("SSTACK_TEST_F", &Stored(None), dir.path());
+        assert_eq!(found.unwrap_err(), MissingSecret("SSTACK_TEST_F".into()));
     }
 
     #[test]
