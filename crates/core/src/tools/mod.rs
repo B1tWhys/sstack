@@ -180,6 +180,7 @@ pub(crate) mod test_support {
 mod tests {
     use super::test_support::git_project;
     use super::*;
+    use crate::skills::Scope;
     use serde_json::json;
 
     fn call(name: &str, input: Value) -> ToolCall {
@@ -227,6 +228,7 @@ mod tests {
             name: "review".into(),
             description: String::new(),
             path: "SKILL.md".into(),
+            scope: Scope::Project,
         };
         let tools = tools.with_skills(vec![skill]);
         assert!(tools.specs().iter().any(|spec| spec.name == "skill"));

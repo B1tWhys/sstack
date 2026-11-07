@@ -298,7 +298,7 @@ fn installed_skills_reach_the_model() {
     let call = tool_call("skill", &serde_json::json!({"name": "commits"}));
     let api = FakeApi::start(vec![call, text_reply("ok")]);
     let sandbox = Sandbox::new(&api.url);
-    let directory = sandbox.home.join(".claude/skills/commits");
+    let directory = sandbox.home.join(".agents/skills/commits");
     fs::create_dir_all(&directory).unwrap();
     let skill = "---\nname: commits\ndescription: Use when committing.\n---\nKeep titles short.\n";
     fs::write(directory.join("SKILL.md"), skill).unwrap();

@@ -27,7 +27,7 @@ pub fn context_warning(used: u64, limit: u64) -> String {
 /// Tells the person which [`Skill`]s were loaded, or that none were found.
 pub fn skills_loaded(skills: &[Skill]) -> String {
     if skills.is_empty() {
-        return "no skills found for Claude Code or Codex".to_owned();
+        return "no Skills found in .agents/skills".to_owned();
     }
     let names: Vec<&str> = skills.iter().map(|skill| skill.name.as_str()).collect();
     format!("loaded {} skills: {}", skills.len(), names.join(", "))
@@ -67,6 +67,7 @@ fn shorten(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sstack::skills::Scope;
 
     #[test]
     fn long_tool_input_is_cut_and_short_input_is_shown_whole() {
@@ -88,14 +89,12 @@ mod tests {
 
     #[test]
     fn loaded_skills_are_named_and_none_is_said_plainly() {
-        assert_eq!(
-            skills_loaded(&[]),
-            "no skills found for Claude Code or Codex"
-        );
+        assert_eq!(skills_loaded(&[]), "no Skills found in .agents/skills");
         let skill = |name: &str| Skill {
             name: name.into(),
             description: String::new(),
             path: name.into(),
+            scope: Scope::Personal,
         };
         let loaded = skills_loaded(&[skill("learn"), skill("quiz")]);
         assert_eq!(loaded, "loaded 2 skills: learn, quiz");

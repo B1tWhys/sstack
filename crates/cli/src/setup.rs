@@ -198,11 +198,13 @@ struct Backend<'a> {
     main: &'a Path,
 }
 
-/// Finds the [`Skill`]s installed for Claude Code or Codex, for `project` and for the person.
-pub fn installed_skills(project: &Path) -> Vec<Skill> {
+/// Finds the [`Skill`]s for a Session working in the project at `root`: the project's own,
+/// including those of the directory the person started in if it lies inside `root`, and the
+/// person's.
+pub fn installed_skills(root: &Path) -> Vec<Skill> {
     let home = dirs::home_dir();
-    let places = skills::locations(project, home.as_deref(), |name| std::env::var_os(name));
-    skills::discover(&places)
+    let start = std::env::current_dir().unwrap_or_else(|_| root.to_owned());
+    skills::discover(&skills::locations(root, &start, home.as_deref()))
 }
 
 /// Decides what the agent for a Session runs on.

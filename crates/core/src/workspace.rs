@@ -183,6 +183,7 @@ pub fn skills_prompt(prompt: &str, skills: &[Skill]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::skills::Scope;
 
     #[test]
     fn projects_get_separate_session_directories() {
@@ -295,6 +296,7 @@ mod tests {
             name: "review".into(),
             description: "Use when reviewing.".into(),
             path: "SKILL.md".into(),
+            scope: Scope::Project,
         };
         let prompt = skills_prompt("base", &[skill]);
         assert!(prompt.starts_with("base\n\n"));

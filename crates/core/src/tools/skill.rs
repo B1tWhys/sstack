@@ -62,6 +62,7 @@ mod tests {
     use std::path::Path;
 
     use super::*;
+    use crate::skills::Scope;
 
     /// Returns a Skill called `name` whose instructions are at `path`.
     fn skill(name: &str, path: &Path) -> Skill {
@@ -69,6 +70,7 @@ mod tests {
             name: name.into(),
             description: String::new(),
             path: path.to_path_buf(),
+            scope: Scope::Project,
         }
     }
 

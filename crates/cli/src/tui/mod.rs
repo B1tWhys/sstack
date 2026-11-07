@@ -76,7 +76,7 @@ pub async fn run(args: &Args) -> Result<ExitCode> {
         .sessions(Box::new(sessions))
         .colors(ColorDepth::detect())
         .build();
-    let found = installed_skills(&std::env::current_dir()?);
+    let found = installed_skills(&main_checkout()?);
     app.notice(describe::skills_loaded(&found));
     app.continue_parked();
     input::spawn(sender);
