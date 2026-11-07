@@ -12,16 +12,23 @@ use super::project::Project;
 use super::{Approver, Tool, ToolError, parse_input};
 use crate::provider::ToolSpec;
 
+/// How long a command may run before it is stopped.
 const TIMEOUT: Duration = Duration::from_mins(10);
+/// The most output to return to the model from one command.
 const MAX_OUTPUT_CHARS: usize = 30_000;
 
+/// The `bash` tool.
 pub(super) struct Bash {
+    /// The project commands run in.
     project: Arc<Project>,
+    /// Decides whether each command may run.
     approver: Arc<dyn Approver>,
+    /// Environment variables withheld from commands.
     secret_env: Vec<String>,
 }
 
 impl Bash {
+    /// Creates the tool. Variables named in `secret_env` are withheld from commands.
     pub(super) fn new(
         project: Arc<Project>,
         approver: Arc<dyn Approver>,
@@ -34,6 +41,7 @@ impl Bash {
         }
     }
 
+    /// Builds the process for one command, without starting it.
     fn command(&self, script: &str) -> Command {
         let mut command = Command::new("bash");
         command
@@ -62,6 +70,7 @@ fn truncate(text: &str) -> String {
     )
 }
 
+/// Turns a finished command into model-facing output, or an error if it failed.
 fn render(output: &Output) -> Result<String, ToolError> {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -73,6 +82,7 @@ fn render(output: &Output) -> Result<String, ToolError> {
     }
 }
 
+/// Waits for a command's output for up to `limit`.
 async fn finish(
     output: impl Future<Output = io::Result<Output>>,
     limit: Duration,
@@ -84,8 +94,10 @@ async fn finish(
     }
 }
 
+/// The input to the `bash` tool.
 #[derive(Deserialize)]
 struct BashInput {
+    /// The shell command to run.
     command: String,
 }
 

@@ -6,14 +6,17 @@ use std::sync::Arc;
 
 use keyring_core::{CredentialStore, Entry, set_default_store};
 
+/// The service name secrets are filed under in the system keyring.
 const KEYRING_SERVICE: &str = "sstack";
 
+/// No source held the named secret.
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 #[error("no value for {0}: add it to the system keychain, the environment, or a .env file")]
 pub struct MissingSecret(pub String);
 
 /// Where a secret can be stored besides the environment and `.env` files.
 pub trait SecretStore {
+    /// Returns the secret called `name`, if this store has it.
     fn get(&self, name: &str) -> Option<String>;
 }
 
@@ -37,6 +40,7 @@ impl SecretStore for SystemKeyring {
     }
 }
 
+/// Opens the credential store of the operating system this was built for.
 #[cfg(target_os = "macos")]
 fn platform_store() -> keyring_core::Result<Arc<CredentialStore>> {
     Ok(apple_native_keyring_store::keychain::Store::new()?)
@@ -63,15 +67,18 @@ pub fn resolve_secret(
         .ok_or_else(|| MissingSecret(name.to_owned()))
 }
 
+/// Treats an empty value the same as no value.
 fn non_empty(value: Option<String>) -> Option<String> {
     value.filter(|value| !value.is_empty())
 }
 
+/// Reads `name` from the `.env` file in `directory`, if the file and the value exist.
 fn dotenv_value(directory: &Path, name: &str) -> Option<String> {
     let contents = fs::read_to_string(directory.join(".env")).ok()?;
     contents.lines().find_map(|line| parse_line(line, name))
 }
 
+/// Returns the value on `line` if it assigns `name`, accepting `export` and quotes.
 fn parse_line(line: &str, name: &str) -> Option<String> {
     let line = line.trim();
     let line = line.strip_prefix("export ").unwrap_or(line);

@@ -9,56 +9,96 @@ use crate::provider::{ModelRequest, Provider, ProviderError, StreamEvent, ToolSp
 use crate::session::{AssistantEntry, Entry, SessionError, SessionLog, StopReason, ToolCall};
 use crate::tools::ToolBox;
 
+/// Result text for a tool call abandoned because its Turn stopped or crashed.
 const INTERRUPTED: &str = "not run: the turn was interrupted";
+/// Result text for a tool call in a response that ended without asking for tools to run.
 const NOT_RUN: &str = "not run: the response ended before this call could be used";
 
+/// Something that happened during a Turn, reported as it happens.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AgentEvent {
+    /// A piece of the model's reply.
     Text(String),
+    /// A piece of the model's summarized thinking.
     Reasoning(String),
+    /// A tool call is about to run.
     ToolStarted(ToolCallSummary),
-    ToolFinished { name: String, is_error: bool },
-    ContextNearLimit { used: u64, limit: u64 },
+    /// A tool call finished.
+    ToolFinished {
+        /// The name of the tool that ran.
+        name: String,
+        /// Whether the call failed.
+        is_error: bool,
+    },
+    /// The latest request used most of the context window, and requests fail once it is full.
+    ContextNearLimit {
+        /// Tokens in the most recent request.
+        used: u64,
+        /// The model's context window, in tokens.
+        limit: u64,
+    },
 }
 
+/// A readable description of a tool call.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolCallSummary {
+    /// The name of the tool being called.
     pub name: String,
+    /// The call's input, as JSON text.
     pub input: String,
 }
 
+/// How a Turn ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TurnEnd {
+    /// The model finished what it was doing.
     Finished,
+    /// The response reached the output token limit.
     Truncated,
+    /// The model declined the request.
     Refused,
+    /// The person cancelled the Turn.
     Cancelled,
 }
 
+/// A failure that stops a Turn.
 #[derive(Debug, thiserror::Error)]
 pub enum AgentError {
+    /// The Provider failed to produce a response.
     #[error(transparent)]
     Provider(#[from] ProviderError),
+    /// The Session could not be recorded.
     #[error(transparent)]
     Session(#[from] SessionError),
 }
 
 /// What an [`Agent`] runs on.
 pub struct AgentConfig {
+    /// The service that runs the model.
     pub provider: Arc<dyn Provider>,
+    /// The identifier of the model to request.
     pub model: String,
+    /// The system prompt sent with every request.
     pub system: String,
+    /// The tools offered to the model.
     pub tools: ToolBox,
+    /// The model's context window, in tokens.
     pub context_limit: u64,
 }
 
+/// Runs Turns for one Session, recording everything to its log.
 pub struct Agent {
+    /// What this agent runs on.
     config: AgentConfig,
+    /// The tool definitions sent with every request.
     specs: Vec<ToolSpec>,
+    /// The open log that entries are appended to.
     log: SessionLog,
+    /// Every entry in the Session so far, matching the log.
     entries: Vec<Entry>,
 }
 
+/// A callback that receives [`AgentEvent`]s as a Turn progresses.
 type EventSink<'a> = &'a mut (dyn FnMut(AgentEvent) + Send);
 
 impl Agent {
@@ -83,6 +123,7 @@ impl Agent {
         Ok(agent)
     }
 
+    /// Returns every entry in the Session so far, oldest first.
     #[must_use]
     pub fn entries(&self) -> &[Entry] {
         &self.entries
@@ -108,6 +149,7 @@ impl Agent {
         }
     }
 
+    /// Runs one Step, returning how the Turn ended if this Step ended it.
     async fn step(
         &mut self,
         cancel: &CancellationToken,
@@ -129,6 +171,7 @@ impl Agent {
         self.run_tools(&calls, cancel, on_event).await
     }
 
+    /// Sends the Session to the Provider and streams back one response.
     async fn request(&self, on_event: EventSink<'_>) -> Result<AssistantEntry, ProviderError> {
         let request = ModelRequest {
             model: &self.config.model,
@@ -140,6 +183,7 @@ impl Agent {
         self.config.provider.respond(request, &mut forward).await
     }
 
+    /// Runs the calls in one response in order, stopping early if the Turn is cancelled.
     async fn run_tools(
         &mut self,
         calls: &[ToolCall],
@@ -169,6 +213,7 @@ impl Agent {
         Ok(None)
     }
 
+    /// Reports when a response used at least 80% of the context window.
     fn warn_near_limit(&self, response: &AssistantEntry, on_event: EventSink<'_>) {
         let used = response.usage.input_tokens;
         let limit = self.config.context_limit;
@@ -177,12 +222,14 @@ impl Agent {
         }
     }
 
+    /// Records that the Turn was cancelled, leaving the Session valid for the next one.
     fn cancelled(&mut self) -> Result<TurnEnd, AgentError> {
         self.settle_unanswered_calls(INTERRUPTED)?;
         self.record(Entry::TurnCancelled)?;
         Ok(TurnEnd::Cancelled)
     }
 
+    /// Records an error result for every tool call that has no result yet.
     fn settle_unanswered_calls(&mut self, reason: &str) -> Result<(), SessionError> {
         for call_id in unanswered_calls(&self.entries) {
             self.record(Entry::ToolResult {
@@ -194,6 +241,7 @@ impl Agent {
         Ok(())
     }
 
+    /// Appends an entry to the log and to the in-memory copy, keeping the two identical.
     fn record(&mut self, entry: Entry) -> Result<(), SessionError> {
         self.log.append(&entry)?;
         self.entries.push(entry);
@@ -201,6 +249,7 @@ impl Agent {
     }
 }
 
+/// Converts a Provider stream event into the equivalent agent event.
 fn stream_event(event: StreamEvent) -> AgentEvent {
     match event {
         StreamEvent::Text(text) => AgentEvent::Text(text),
@@ -208,6 +257,7 @@ fn stream_event(event: StreamEvent) -> AgentEvent {
     }
 }
 
+/// Converts a response's stop reason into the way the Turn ended.
 fn turn_end(stop: StopReason) -> TurnEnd {
     match stop {
         StopReason::EndTurn | StopReason::ToolUse => TurnEnd::Finished,
@@ -216,6 +266,7 @@ fn turn_end(stop: StopReason) -> TurnEnd {
     }
 }
 
+/// Returns the ids of tool calls that have no result in `entries`.
 fn unanswered_calls(entries: &[Entry]) -> Vec<String> {
     let answered: HashSet<&str> = entries
         .iter()

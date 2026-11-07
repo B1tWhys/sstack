@@ -11,17 +11,24 @@ use serde::Deserialize;
 use crate::provider::anthropic::AnthropicProvider;
 use crate::provider::{Effort, Provider, ProviderError};
 
+/// The name of the built-in Connection.
 const DEFAULT_CONNECTION: &str = "anthropic";
+/// The model used unless settings or arguments choose another.
 const DEFAULT_MODEL: &str = "claude-opus-5-5";
+/// The secret the built-in Connection authenticates with.
 const DEFAULT_SECRET: &str = "ANTHROPIC_API_KEY";
+/// The context window assumed for a Connection that does not set one, in tokens.
 const DEFAULT_CONTEXT_LIMIT: u64 = 1_000_000;
 
+/// The API a Provider speaks, which decides the code that talks to it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ProviderKind {
+    /// The Claude API.
     Anthropic,
 }
 
+/// Supplies the context limit for settings that leave it out.
 fn default_context_limit() -> u64 {
     DEFAULT_CONTEXT_LIMIT
 }
@@ -30,11 +37,16 @@ fn default_context_limit() -> u64 {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Connection {
+    /// Which API this Connection talks to.
     pub provider: ProviderKind,
+    /// The name of the secret that authenticates this Connection, not the secret itself.
     pub secret: String,
+    /// Replaces the Provider's default API address.
     pub base_url: Option<String>,
+    /// How much effort the model should spend on each response.
     #[serde(default)]
     pub effort: Effort,
+    /// The model's context window, in tokens.
     #[serde(default = "default_context_limit")]
     pub context_limit: u64,
 }
@@ -53,11 +65,15 @@ impl Connection {
     }
 }
 
+/// The user's settings.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    /// The Connection used unless a run chooses another.
     pub default_connection: String,
+    /// The model used unless a run chooses another.
     pub default_model: String,
+    /// The Connections available, by name.
     pub connections: BTreeMap<String, Connection>,
 }
 
@@ -78,12 +94,16 @@ impl Default for Config {
     }
 }
 
+/// A problem with the user's settings.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
+    /// The settings file exists but could not be read.
     #[error("cannot read settings: {0}")]
     Read(#[from] io::Error),
+    /// The settings file is not valid.
     #[error("invalid settings: {0}")]
     Invalid(#[from] toml::de::Error),
+    /// A run asked for a Connection the settings do not define.
     #[error("no connection named {0}")]
     UnknownConnection(String),
 }

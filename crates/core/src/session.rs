@@ -7,64 +7,97 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// A request from the model to run a tool.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolCall {
+    /// The identifier linking this call to its result.
     pub id: String,
+    /// The name of the tool to run.
     pub name: String,
+    /// The tool's input, as JSON.
     pub input: Value,
 }
 
 /// The data a Provider returned for a model response, opaque to everything but that Provider.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProviderPayload {
+    /// The name of the Provider that produced this data.
     pub provider: String,
+    /// The identifier of the model that produced this data.
     pub model: String,
+    /// The data itself, whose shape only that Provider understands.
     pub data: Value,
 }
 
+/// How many tokens a model response used.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Usage {
+    /// Tokens sent to the model, including any served from a cache.
     pub input_tokens: u64,
+    /// Tokens the model generated.
     pub output_tokens: u64,
 }
 
+/// Why a model stopped generating a response.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StopReason {
+    /// The model finished its reply.
     EndTurn,
+    /// The model is waiting for tool results.
     ToolUse,
+    /// The response reached the output token limit.
     MaxTokens,
+    /// The model declined the request.
     Refused,
 }
 
+/// One model response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AssistantEntry {
+    /// The visible text of the response.
     pub text: String,
+    /// The tools the model asked to run.
     pub tool_calls: Vec<ToolCall>,
+    /// Why the response ended.
     pub stop: StopReason,
+    /// How many tokens the response used.
     pub usage: Usage,
+    /// The exact data from the Provider, used to replay this response to it.
     pub payload: Option<ProviderPayload>,
 }
 
+/// One recorded event in a Session.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Entry {
+    /// A message from the person.
     User {
+        /// The text of the message.
         text: String,
     },
+    /// A response from the model.
     Assistant(AssistantEntry),
+    /// The outcome of a tool call.
     ToolResult {
+        /// The id of the tool call this answers.
         call_id: String,
+        /// The output shown to the model.
         output: String,
+        /// Whether the call failed.
         is_error: bool,
     },
+    /// The person cancelled the Turn at this point.
     TurnCancelled,
 }
 
+/// A failure reading or writing a Session log.
 #[derive(Debug, thiserror::Error)]
 pub enum SessionError {
+    /// The log file could not be read or written.
     #[error("session file error: {0}")]
     Io(#[from] io::Error),
+    /// An entry could not be converted to or from its stored form.
     #[error("session entry is malformed: {0}")]
     Malformed(#[from] serde_json::Error),
 }
@@ -72,6 +105,7 @@ pub enum SessionError {
 /// An open, append-only Session log.
 #[derive(Debug)]
 pub struct SessionLog {
+    /// The log file, opened for appending.
     file: File,
 }
 

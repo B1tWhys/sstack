@@ -14,11 +14,14 @@ pub type Scripted = Result<AssistantEntry, String>;
 /// Returns its script in order and records the history each request carried.
 #[derive(Debug, Default)]
 pub struct ScriptedProvider {
+    /// The responses not yet returned.
     script: Mutex<VecDeque<Scripted>>,
+    /// The Session history each request carried, oldest request first.
     requests: Mutex<Vec<Vec<Entry>>>,
 }
 
 impl ScriptedProvider {
+    /// Creates a Provider that returns `script` in order.
     #[must_use]
     pub fn new(script: impl IntoIterator<Item = Scripted>) -> Self {
         Self {
@@ -36,6 +39,7 @@ impl ScriptedProvider {
         self.requests.lock().unwrap().clone()
     }
 
+    /// Takes the next canned response, or an error once the script runs out.
     fn next(&self) -> Scripted {
         let next = self.script.lock().unwrap().pop_front();
         next.unwrap_or_else(|| Err("script exhausted".to_owned()))

@@ -14,13 +14,18 @@ use serde_json::json;
 use super::{Effort, ModelRequest, Provider, ProviderError, StreamEvent, ToolSpec};
 use crate::session::{AssistantEntry, Entry, ProviderPayload, StopReason, ToolCall, Usage};
 
+/// The name recorded on Provider Payloads from this Provider.
 const PROVIDER: &str = "anthropic";
+/// The most output tokens to allow in one response.
 const MAX_OUTPUT_TOKENS: u32 = 64_000;
+/// The header that turns on server-side fallback after a refusal.
 const FALLBACK_BETA: (&str, &str) = ("anthropic-beta", "server-side-fallback-2026-07-01");
 
 /// Talks to the Claude API with one API key.
 pub struct AnthropicProvider {
+    /// The underlying API client.
     client: Client,
+    /// The options sent with every request.
     options: ChatOptions,
 }
 
@@ -57,10 +62,12 @@ impl AnthropicProvider {
     }
 }
 
+/// Wraps any displayable failure as a Provider error.
 fn provider_error(error: impl std::fmt::Display) -> ProviderError {
     ProviderError(error.to_string())
 }
 
+/// Builds the options used for every request.
 fn chat_options(effort: Effort) -> ChatOptions {
     ChatOptions::default()
         .with_max_tokens(MAX_OUTPUT_TOKENS)
@@ -76,6 +83,7 @@ fn chat_options(effort: Effort) -> ChatOptions {
         }))
 }
 
+/// Converts a neutral effort level to `genai`'s equivalent.
 fn reasoning_effort(effort: Effort) -> ReasoningEffort {
     match effort {
         Effort::Low => ReasoningEffort::Low,
@@ -86,6 +94,7 @@ fn reasoning_effort(effort: Effort) -> ReasoningEffort {
     }
 }
 
+/// Translates a neutral request into a `genai` request.
 fn chat_request(request: ModelRequest<'_>) -> ChatRequest {
     let mut messages = to_messages(request.entries);
     // A marker on the newest message caches the whole history, not just the system prompt.
@@ -98,6 +107,7 @@ fn chat_request(request: ModelRequest<'_>) -> ChatRequest {
         .with_tools(tools)
 }
 
+/// Translates a neutral tool definition into a `genai` one.
 fn to_tool(spec: &ToolSpec) -> Tool {
     Tool::new(spec.name.as_str())
         .with_description(spec.description.as_str())
@@ -105,6 +115,7 @@ fn to_tool(spec: &ToolSpec) -> Tool {
         .with_eager_input_streaming(true)
 }
 
+/// Returns whether `entry` is a tool result.
 fn is_tool_result(entry: &Entry) -> bool {
     matches!(entry, Entry::ToolResult { .. })
 }
@@ -117,6 +128,7 @@ fn to_messages(entries: &[Entry]) -> Vec<ChatMessage> {
         .collect()
 }
 
+/// Translates a chunk of adjacent entries into one message, if it produces one.
 fn to_message(chunk: &[Entry]) -> Option<ChatMessage> {
     match chunk.first()? {
         Entry::User { text } => Some(ChatMessage::user(text.as_str())),
@@ -126,11 +138,13 @@ fn to_message(chunk: &[Entry]) -> Option<ChatMessage> {
     }
 }
 
+/// Combines adjacent tool results into a single message.
 fn tool_message(results: &[Entry]) -> ChatMessage {
     let responses: Vec<ToolResponse> = results.iter().filter_map(tool_response).collect();
     responses.into()
 }
 
+/// Translates a tool result entry, returning nothing for any other entry.
 fn tool_response(entry: &Entry) -> Option<ToolResponse> {
     let Entry::ToolResult {
         call_id,
@@ -149,6 +163,7 @@ fn tool_response(entry: &Entry) -> Option<ToolResponse> {
     Some(ToolResponse::new(call_id, content))
 }
 
+/// Translates an assistant entry, returning nothing if it has no content to send.
 fn assistant_message(assistant: &AssistantEntry) -> Option<ChatMessage> {
     let content = replayed_content(assistant).unwrap_or_else(|| neutral_content(assistant));
     (!content.is_empty()).then(|| ChatMessage::assistant(content))
@@ -163,6 +178,7 @@ fn replayed_content(assistant: &AssistantEntry) -> Option<MessageContent> {
     serde_json::from_value(payload.data.clone()).ok()
 }
 
+/// Builds message content from an entry's neutral fields alone.
 fn neutral_content(assistant: &AssistantEntry) -> MessageContent {
     let text = (!assistant.text.is_empty()).then(|| ContentPart::Text(assistant.text.clone()));
     let calls = assistant.tool_calls.iter().map(|call| {
@@ -176,6 +192,7 @@ fn neutral_content(assistant: &AssistantEntry) -> MessageContent {
     MessageContent::from_parts(text.into_iter().chain(calls).collect::<Vec<_>>())
 }
 
+/// Converts a `genai` stream event to a neutral one, if it is one worth reporting.
 fn stream_event(event: ChatStreamEvent) -> Option<StreamEvent> {
     match event {
         ChatStreamEvent::Chunk(chunk) => Some(StreamEvent::Text(chunk.content)),
@@ -184,6 +201,7 @@ fn stream_event(event: ChatStreamEvent) -> Option<StreamEvent> {
     }
 }
 
+/// Reads a response stream to its end, forwarding progress to `on_event`.
 async fn consume(
     mut stream: impl Stream<Item = genai::Result<ChatStreamEvent>> + Unpin + Send,
     on_event: &mut (dyn FnMut(StreamEvent) + Send),
@@ -200,6 +218,7 @@ async fn consume(
     Err(ProviderError("stream ended early".to_owned()))
 }
 
+/// Converts `genai`'s stop reason to a neutral one, inferring it from the calls if absent.
 fn stop_reason(stop: Option<&genai::chat::StopReason>, has_calls: bool) -> StopReason {
     use genai::chat::StopReason as Genai;
     match stop {
@@ -211,10 +230,12 @@ fn stop_reason(stop: Option<&genai::chat::StopReason>, has_calls: bool) -> StopR
     }
 }
 
+/// Converts a reported token count, treating a missing or negative value as zero.
 fn token_count(tokens: Option<i32>) -> u64 {
     tokens.and_then(|n| u64::try_from(n).ok()).unwrap_or(0)
 }
 
+/// Converts a finished stream into an assistant entry with its Provider Payload.
 fn to_entry(end: StreamEnd, model: &str) -> Result<AssistantEntry, ProviderError> {
     let content = end.captured_content.unwrap_or_default();
     let tool_calls: Vec<ToolCall> = content

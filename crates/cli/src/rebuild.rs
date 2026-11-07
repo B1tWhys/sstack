@@ -10,6 +10,7 @@ fn source_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
+/// Builds the command that compiles the harness binary from `source`.
 fn build_command(source: &Path, profile: &str) -> Command {
     let mut command = Command::new("cargo");
     command
@@ -18,6 +19,7 @@ fn build_command(source: &Path, profile: &str) -> Command {
     command
 }
 
+/// Returns where cargo puts the binary for a profile's output directory.
 fn binary_path(source: &Path, profile_dir: &str) -> PathBuf {
     source.join("target").join(profile_dir).join("sstack")
 }
@@ -27,6 +29,7 @@ fn succeeded(command: &mut Command) -> bool {
     command.status().is_ok_and(|status| status.success())
 }
 
+/// Returns the cargo profile this binary was built with, and its output directory.
 fn profile() -> (&'static str, &'static str) {
     if cfg!(debug_assertions) {
         ("dev", "debug")

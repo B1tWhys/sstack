@@ -10,27 +10,36 @@ use super::project::Project;
 use super::{Tool, ToolError, parse_input};
 use crate::provider::ToolSpec;
 
+/// The most lines `read` returns unless asked for fewer or more.
 const DEFAULT_LINE_LIMIT: usize = 2000;
 
+/// Describes a filesystem failure, naming the path the model asked for.
 fn io_error(path: &str, error: &std::io::Error) -> ToolError {
     ToolError(format!("{path}: {error}"))
 }
 
+/// The `read` tool.
 pub(super) struct Read {
+    /// The project files are read from.
     project: Arc<Project>,
 }
 
 impl Read {
+    /// Creates the tool for `project`.
     pub(super) fn new(project: Arc<Project>) -> Self {
         Self { project }
     }
 }
 
+/// The input to the `read` tool.
 #[derive(Deserialize)]
 struct ReadInput {
+    /// The file, relative to the project root.
     path: String,
+    /// How many lines to skip.
     #[serde(default)]
     offset: usize,
+    /// The most lines to return.
     limit: Option<usize>,
 }
 
@@ -67,19 +76,25 @@ impl Tool for Read {
     }
 }
 
+/// The `write` tool.
 pub(super) struct Write {
+    /// The project files are written to.
     project: Arc<Project>,
 }
 
 impl Write {
+    /// Creates the tool for `project`.
     pub(super) fn new(project: Arc<Project>) -> Self {
         Self { project }
     }
 }
 
+/// The input to the `write` tool.
 #[derive(Deserialize)]
 struct WriteInput {
+    /// The file, relative to the project root.
     path: String,
+    /// The file's complete new contents.
     content: String,
 }
 
@@ -114,23 +129,31 @@ impl Tool for Write {
     }
 }
 
+/// The `edit` tool.
 pub(super) struct Edit {
+    /// The project files are edited in.
     project: Arc<Project>,
 }
 
 impl Edit {
+    /// Creates the tool for `project`.
     pub(super) fn new(project: Arc<Project>) -> Self {
         Self { project }
     }
 }
 
+/// The input to the `edit` tool.
 #[derive(Deserialize)]
 struct EditInput {
+    /// The file, relative to the project root.
     path: String,
+    /// The text to replace, which must appear exactly once.
     old: String,
+    /// The replacement text.
     new: String,
 }
 
+/// Returns `contents` with the edit applied, or an error unless it matches exactly once.
 fn replace_unique(contents: &str, input: &EditInput) -> Result<String, ToolError> {
     match contents.matches(&input.old).count() {
         1 => Ok(contents.replacen(&input.old, &input.new, 1)),
@@ -142,6 +165,7 @@ fn replace_unique(contents: &str, input: &EditInput) -> Result<String, ToolError
     }
 }
 
+/// Applies the edit to the file at `path`.
 fn edit_file(path: &Path, input: &EditInput) -> Result<(), ToolError> {
     let contents = fs::read_to_string(path).map_err(|e| io_error(&input.path, &e))?;
     let updated = replace_unique(&contents, input)?;

@@ -8,6 +8,7 @@ use sstack_core::agent::{AgentEvent, TurnEnd};
 use sstack_core::tools::Approver;
 use tokio::sync::{Mutex, mpsc};
 
+/// The most characters of a tool call's input to show.
 const MAX_TOOL_INPUT_CHARS: usize = 200;
 
 /// Lines typed at the terminal, shared because approvals interrupt the prompt loop.
@@ -15,11 +16,14 @@ pub type InputLines = Arc<Mutex<mpsc::Receiver<String>>>;
 
 /// Asks at the terminal before each shell command.
 pub struct TerminalApprover<W> {
+    /// The lines typed at the terminal, shared with the prompt loop.
     input: InputLines,
+    /// Where approval questions are written.
     prompt: std::sync::Mutex<W>,
 }
 
 impl<W> TerminalApprover<W> {
+    /// Creates an approver that reads answers from `input` and asks through `prompt`.
     pub fn new(input: InputLines, prompt: W) -> Self {
         Self {
             input,
@@ -37,6 +41,7 @@ impl<W: Write + Send> Approver for TerminalApprover<W> {
     }
 }
 
+/// Returns whether a typed answer means yes.
 fn is_yes(line: &str) -> bool {
     matches!(line.trim().to_lowercase().as_str(), "y" | "yes")
 }
@@ -47,6 +52,7 @@ pub fn render_event(event: &AgentEvent, out: &mut impl Write) {
     let _ = out.flush();
 }
 
+/// Returns the text shown for an agent event.
 fn event_text(event: &AgentEvent) -> String {
     match event {
         AgentEvent::Text(text) | AgentEvent::Reasoning(text) => text.clone(),
@@ -60,6 +66,7 @@ fn event_text(event: &AgentEvent) -> String {
     }
 }
 
+/// Returns the text shown when a tool finishes, which is nothing if it succeeded.
 fn tool_finished(name: &str, is_error: bool) -> String {
     if is_error {
         format!("[{name}] failed\n")
@@ -68,6 +75,7 @@ fn tool_finished(name: &str, is_error: bool) -> String {
     }
 }
 
+/// Cuts long text to [`MAX_TOOL_INPUT_CHARS`], marking that it was cut.
 fn shorten(text: &str) -> String {
     let short: String = text.chars().take(MAX_TOOL_INPUT_CHARS).collect();
     if short.len() < text.len() {

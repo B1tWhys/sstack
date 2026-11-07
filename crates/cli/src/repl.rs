@@ -9,12 +9,18 @@ use tokio_util::sync::CancellationToken;
 
 use crate::terminal::{InputLines, render_event, turn_end_text};
 
+/// What a typed line asks for.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Command<'a> {
+    /// Text to send to the model.
     Prompt(&'a str),
+    /// The `/rebuild` Human Command.
     Rebuild,
+    /// The `/quit` Human Command.
     Quit,
+    /// A slash-prefixed line that is not a known Human Command.
     Unknown(&'a str),
+    /// A blank line.
     Empty,
 }
 
@@ -33,14 +39,19 @@ pub fn parse_command(line: &str) -> Command<'_> {
 /// Why the prompt loop stopped.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Exit {
+    /// The person is finished.
     Quit,
+    /// The person asked to rebuild the harness.
     Rebuild,
 }
 
 /// Input channels and output for one run of the prompt loop.
 pub struct Repl<W> {
+    /// Lines typed at the terminal.
     pub input: InputLines,
+    /// One message for each Ctrl-C.
     pub interrupts: mpsc::Receiver<()>,
+    /// Where output is written.
     pub out: W,
 }
 
@@ -58,6 +69,7 @@ impl<W: Write + Send> Repl<W> {
         }
     }
 
+    /// Acts on one typed line, returning a reason to exit if it calls for one.
     async fn handle(&mut self, agent: &mut Agent, line: &str) -> Option<Exit> {
         match parse_command(line) {
             Command::Prompt(text) => self.turn(agent, text).await,
@@ -74,6 +86,7 @@ impl<W: Write + Send> Repl<W> {
         self.show(format!("rebuild failed: {reason}\n"));
     }
 
+    /// Waits for a line. An interrupt at the prompt counts as the end of input.
     async fn next_line(&mut self) -> Option<String> {
         let input = self.input.clone();
         let mut input = input.lock().await;
@@ -83,6 +96,7 @@ impl<W: Write + Send> Repl<W> {
         }
     }
 
+    /// Runs one Turn, cancelling it if an interrupt arrives, and shows how it ended.
     async fn turn(&mut self, agent: &mut Agent, text: &str) {
         let cancel = CancellationToken::new();
         let outcome = {
@@ -104,6 +118,7 @@ impl<W: Write + Send> Repl<W> {
         self.show(outcome);
     }
 
+    /// Writes `text` and flushes it. Output failures are ignored, as they must not stop a Turn.
     fn show(&mut self, text: impl Display) {
         let _ = write!(self.out, "{text}");
         let _ = self.out.flush();

@@ -1,8 +1,11 @@
 //! The tools the model can use to work on a project.
 
+/// The tool that runs shell commands.
 mod bash;
+/// The tools that read and change files.
 mod files;
 pub mod project;
+/// The tool that finds files and text.
 mod search;
 
 use std::sync::Arc;
@@ -18,6 +21,7 @@ use project::Project;
 /// Decides whether the model may run a shell command.
 #[async_trait]
 pub trait Approver: Send + Sync {
+    /// Returns whether the model may run `command`.
     async fn approve(&self, command: &str) -> bool;
 }
 
@@ -37,24 +41,31 @@ impl Approver for DenyAll {
 #[error("{0}")]
 pub struct ToolError(pub String);
 
+/// The result of a tool call.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolOutput {
+    /// The output shown to the model.
     pub text: String,
+    /// Whether the call failed.
     pub is_error: bool,
 }
 
+/// Something the model can call.
 #[async_trait]
 trait Tool: Send + Sync {
+    /// Returns the definition offered to the model.
     fn spec(&self) -> ToolSpec;
     async fn run(&self, input: Value) -> Result<String, ToolError>;
 }
 
+/// Parses a tool's JSON input into its input type.
 fn parse_input<T: DeserializeOwned>(input: Value) -> Result<T, ToolError> {
     serde_json::from_value(input).map_err(|error| ToolError(format!("invalid input: {error}")))
 }
 
 /// The tools available to one Session.
 pub struct ToolBox {
+    /// The tools, in the order they are offered to the model.
     tools: Vec<Box<dyn Tool>>,
 }
 
@@ -78,6 +89,7 @@ impl ToolBox {
         }
     }
 
+    /// Returns the definitions offered to the model.
     #[must_use]
     pub fn specs(&self) -> Vec<ToolSpec> {
         self.tools.iter().map(|tool| tool.spec()).collect()

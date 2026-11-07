@@ -10,6 +10,7 @@ use super::ToolError;
 /// The directory a Session works in.
 #[derive(Debug)]
 pub struct Project {
+    /// The project's root directory, with symlinks resolved.
     root: PathBuf,
 }
 
@@ -22,6 +23,7 @@ impl Project {
         })
     }
 
+    /// Returns the project's root directory.
     #[must_use]
     pub fn root(&self) -> &Path {
         &self.root
@@ -42,6 +44,7 @@ impl Project {
         visible.then_some(resolved).ok_or_else(denied)
     }
 
+    /// Resolves `path` against the root, following symlinks through the parts that exist.
     fn canonical(&self, path: &str) -> Option<PathBuf> {
         let joined = self.root.join(path);
         if joined.components().any(|c| c == Component::ParentDir) {
@@ -73,6 +76,7 @@ pub(super) fn is_protected(path: &Path) -> bool {
     path.components().any(|c| is_protected_name(c.as_os_str()))
 }
 
+/// Returns whether a path component always stays hidden from the model.
 fn is_protected_name(name: &OsStr) -> bool {
     let name = name.to_string_lossy();
     name == ".git" || name == ".env" || name.starts_with(".env.")

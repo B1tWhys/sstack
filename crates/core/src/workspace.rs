@@ -5,10 +5,13 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// The instructions every Session starts with.
 const BASE_PROMPT: &str = "You are sstack, a coding agent working in the user's project. \
 Use the tools to inspect and change the project, and verify your changes before finishing. \
 Be direct, and report results faithfully, including anything that failed.";
+/// The file a project keeps its own instructions in.
 const INSTRUCTIONS_FILE: &str = "AGENTS.md";
+/// The file extension of Session logs.
 const SESSION_EXTENSION: &str = "jsonl";
 
 /// The directory holding Sessions for `project`, kept outside it so they are never committed.
@@ -28,11 +31,13 @@ pub fn new_session_path(sessions_dir: &Path) -> PathBuf {
     session_path(sessions_dir, &format!("{millis:016}"))
 }
 
+/// Returns the path of the Session with the given id.
 #[must_use]
 pub fn session_path(sessions_dir: &Path, id: &str) -> PathBuf {
     sessions_dir.join(id).with_extension(SESSION_EXTENSION)
 }
 
+/// Returns the id of the Session stored at `path`.
 #[must_use]
 pub fn session_id(path: &Path) -> String {
     path.file_stem()

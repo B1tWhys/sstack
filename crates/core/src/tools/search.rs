@@ -13,17 +13,22 @@ use super::project::{Project, is_protected};
 use super::{Tool, ToolError, parse_input};
 use crate::provider::ToolSpec;
 
+/// The most results returned from one search.
 const MAX_RESULTS: usize = 500;
 
+/// The `search` tool.
 pub(super) struct Search {
+    /// The project to search.
     project: Arc<Project>,
 }
 
 impl Search {
+    /// Creates the tool for `project`.
     pub(super) fn new(project: Arc<Project>) -> Self {
         Self { project }
     }
 
+    /// Lists the project's visible files, optionally limited by `glob`.
     fn walk(&self, glob: Option<&str>) -> Result<Vec<String>, ToolError> {
         let root = self.project.root();
         let files = WalkBuilder::new(root)
@@ -39,11 +44,13 @@ impl Search {
     }
 }
 
+/// Returns `path` relative to `root`, as text.
 fn relative(root: &Path, path: &Path) -> Option<String> {
     let relative = path.strip_prefix(root).ok()?;
     Some(relative.to_string_lossy().into_owned())
 }
 
+/// Builds the filter for an optional glob.
 fn file_filter(root: &Path, glob: Option<&str>) -> Result<Override, ToolError> {
     let invalid = |error: ignore::Error| ToolError(format!("invalid glob: {error}"));
     let mut filter = OverrideBuilder::new(root);
@@ -64,6 +71,7 @@ fn matching_lines(root: &Path, file: &str, pattern: &Regex) -> Vec<String> {
         .collect()
 }
 
+/// Formats results for the model, keeping the first [`MAX_RESULTS`].
 fn summarize(mut results: Vec<String>) -> String {
     if results.is_empty() {
         return "no matches".to_owned();
@@ -76,9 +84,12 @@ fn summarize(mut results: Vec<String>) -> String {
     results.join("\n")
 }
 
+/// The input to the `search` tool.
 #[derive(Deserialize)]
 struct SearchInput {
+    /// A regex to match against each line. Without it, files are listed instead.
     pattern: Option<String>,
+    /// A glob limiting which paths are searched.
     glob: Option<String>,
 }
 

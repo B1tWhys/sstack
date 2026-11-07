@@ -9,38 +9,57 @@ use serde_json::Value;
 
 use crate::session::{AssistantEntry, Entry};
 
+/// How much effort a model should spend on a response.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Effort {
+    /// The least effort, for simple work.
     Low,
+    /// Moderate effort.
     Medium,
+    /// Thorough effort, and the default.
     #[default]
     High,
+    /// More thorough than high.
     Xhigh,
+    /// As much effort as the model can spend.
     Max,
 }
 
+/// A tool definition offered to the model.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ToolSpec {
+    /// The name the model calls the tool by.
     pub name: String,
+    /// What the tool does, written for the model.
     pub description: String,
+    /// The JSON Schema of the tool's input.
     pub input_schema: Value,
 }
 
+/// Everything a Provider needs to produce one response.
 #[derive(Debug, Clone, Copy)]
 pub struct ModelRequest<'a> {
+    /// The identifier of the model to use.
     pub model: &'a str,
+    /// The system prompt.
     pub system: &'a str,
+    /// The Session so far, oldest first.
     pub entries: &'a [Entry],
+    /// The tools the model may call.
     pub tools: &'a [ToolSpec],
 }
 
+/// A piece of a response, reported while it is being generated.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StreamEvent {
+    /// A piece of the visible reply.
     Text(String),
+    /// A piece of the model's summarized thinking.
     Reasoning(String),
 }
 
+/// A failed model request, described for the person.
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
 pub struct ProviderError(pub String);

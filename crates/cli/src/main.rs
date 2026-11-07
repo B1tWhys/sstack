@@ -41,11 +41,15 @@ struct Args {
     resume: Option<String>,
 }
 
+/// The `--resume` value that means the newest Session.
 const LATEST: &str = "latest";
+/// The directory name used inside the user's configuration and data directories.
 const DIRECTORY_NAME: &str = "sstack";
 
+/// Any failure that ends a run, shown to the person as text.
 type AnyError = Box<dyn Error + Send + Sync>;
 
+/// Returns the harness's own directory inside `base`, if `base` is known.
 fn app_dir(base: Option<PathBuf>) -> Result<PathBuf, AnyError> {
     let base = base.ok_or("cannot find the user data directory")?;
     Ok(base.join(DIRECTORY_NAME))
@@ -65,6 +69,7 @@ fn open_session(
     Ok((path, log, entries))
 }
 
+/// Finds the Session to resume, returning nothing if this run starts a new one.
 fn resume_path(directory: &Path, resume: Option<&str>) -> Result<Option<PathBuf>, AnyError> {
     match resume {
         None => Ok(None),
@@ -78,11 +83,15 @@ fn resume_path(directory: &Path, resume: Option<&str>) -> Result<Option<PathBuf>
     }
 }
 
+/// A harness ready to take input.
 struct Run {
+    /// The agent running the Session.
     agent: Agent,
+    /// The path of the Session's log.
     session: PathBuf,
 }
 
+/// Assembles an agent from settings, credentials and the current directory.
 fn prepare(args: &Args, approver: Arc<dyn Approver>) -> Result<Run, AnyError> {
     let config = load_settings()?;
     let connection = config.connection(args.connection.as_deref())?;
@@ -92,11 +101,13 @@ fn prepare(args: &Args, approver: Arc<dyn Approver>) -> Result<Run, AnyError> {
     start_session(agent_config, &project, args.resume.as_deref())
 }
 
+/// Reads the user's settings file.
 fn load_settings() -> Result<Config, AnyError> {
     let path = app_dir(dirs::config_dir())?.join("config.toml");
     Ok(Config::load(&path)?)
 }
 
+/// Resolves a Connection's secret and builds the agent's configuration.
 fn agent_config(
     connection: &Connection,
     model: String,
@@ -114,6 +125,7 @@ fn agent_config(
     })
 }
 
+/// Opens the Session for this run and starts an agent on it.
 fn start_session(
     config: AgentConfig,
     project: &Project,
@@ -137,6 +149,7 @@ fn relaunch_args(args: &Args, session: &Path) -> Vec<String> {
     relaunch
 }
 
+/// Runs one prompt with no interaction, denying all shell commands.
 async fn run_headless(args: &Args, prompt: &str) -> Result<ExitCode, AnyError> {
     let Run { mut agent, session } = prepare(args, Arc::new(DenyAll))?;
     let cancel = CancellationToken::new();
@@ -152,6 +165,7 @@ async fn run_headless(args: &Args, prompt: &str) -> Result<ExitCode, AnyError> {
     Ok(exit_code(result.ok()))
 }
 
+/// Returns a success exit code only if the Turn finished normally.
 fn exit_code(end: Option<TurnEnd>) -> ExitCode {
     match end {
         Some(TurnEnd::Finished) => ExitCode::SUCCESS,
@@ -159,6 +173,7 @@ fn exit_code(end: Option<TurnEnd>) -> ExitCode {
     }
 }
 
+/// Starts reading the terminal in the background, delivering one line at a time.
 fn spawn_input() -> InputLines {
     let (sender, receiver) = mpsc::channel(16);
     tokio::spawn(async move {
@@ -172,6 +187,7 @@ fn spawn_input() -> InputLines {
     Arc::new(Mutex::new(receiver))
 }
 
+/// Starts listening for Ctrl-C in the background, delivering one message for each press.
 fn spawn_interrupts() -> mpsc::Receiver<()> {
     let (sender, receiver) = mpsc::channel(4);
     tokio::spawn(async move {
@@ -182,6 +198,7 @@ fn spawn_interrupts() -> mpsc::Receiver<()> {
     receiver
 }
 
+/// Runs the prompt loop until the person quits, rebuilding on request.
 async fn run_interactive(args: &Args) -> Result<ExitCode, AnyError> {
     let input = spawn_input();
     let approver = TerminalApprover::new(input.clone(), std::io::stderr());
@@ -218,6 +235,7 @@ fn rebuild_and_relaunch<W: Write + Send>(
     }
 }
 
+/// Runs the mode the arguments ask for.
 async fn run(args: Args) -> Result<ExitCode, AnyError> {
     match args.prompt.as_deref() {
         Some(prompt) => run_headless(&args, prompt).await,
@@ -230,6 +248,7 @@ async fn main() -> ExitCode {
     report(run(Args::parse()).await)
 }
 
+/// Prints a failure and returns the matching exit code.
 fn report(result: Result<ExitCode, AnyError>) -> ExitCode {
     result.unwrap_or_else(|error| {
         eprintln!("error: {error}");
