@@ -3,18 +3,25 @@ name = "sstack-core"
 version.workspace = true
 edition.workspace = true
 
+[features]
+default = ["nvim-tests"]
+# Runs the tests that need a real nvim. Turn off where nvim is not installed.
+nvim-tests = []
+
 [dependencies]
 async-trait = "0.1"
+bon = "3"
 dotenvy = "0.15"
 futures = "0.3"
 genai = "0.7"
 ignore = "0.4"
 keyring-core = "1"
 regex = "1"
+rmpv = { version = "1", features = ["with-serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
-tokio = { version = "1", features = ["macros", "process", "time"] }
+tokio = { version = "1", features = ["io-util", "macros", "process", "rt", "sync", "time"] }
 tokio-util = "0.7"
 toml = "1"
 yaml-rust2 = { version = "0.13", default-features = false }

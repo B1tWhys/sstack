@@ -7,5 +7,6 @@ pub mod provider;
 pub mod session;
 pub mod skills;
 pub mod tools;
+pub mod vim;
 pub mod workspace;
 pub mod worktree;

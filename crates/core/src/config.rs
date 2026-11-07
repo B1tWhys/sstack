@@ -77,6 +77,14 @@ pub struct Config {
     pub default_model: String,
     /// The Connections available, by name.
     pub connections: BTreeMap<String, Connection>,
+    /// Whether new Sessions edit their input with a real nvim, where one is installed.
+    #[serde(default = "vim_by_default")]
+    pub vim: bool,
+}
+
+/// Returns the [`Config::vim`] of settings that do not mention it.
+fn vim_by_default() -> bool {
+    true
 }
 
 impl Default for Config {
@@ -92,6 +100,7 @@ impl Default for Config {
             default_connection: DEFAULT_CONNECTION.to_owned(),
             default_model: DEFAULT_MODEL.to_owned(),
             connections: BTreeMap::from([(DEFAULT_CONNECTION.to_owned(), anthropic)]),
+            vim: vim_by_default(),
         }
     }
 }
@@ -145,6 +154,18 @@ mod tests {
         let config = Config::load(&dir.path().join("config.toml")).unwrap();
         assert_eq!(config, Config::default());
         assert_eq!(config.connection(None).unwrap().secret, DEFAULT_SECRET);
+    }
+
+    #[test]
+    fn vim_input_is_on_unless_settings_turn_it_off() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let mut settings = "default_connection = \"a\"\ndefault_model = \"b\"\n".to_owned();
+        settings.push_str("connections = {}\n");
+        fs::write(&path, format!("vim = false\n{settings}")).unwrap();
+        assert!(!Config::load(&path).unwrap().vim);
+        fs::write(&path, settings).unwrap();
+        assert!(Config::load(&path).unwrap().vim);
     }
 
     #[test]
