@@ -16,6 +16,7 @@ mod event;
 mod input;
 #[cfg(test)]
 mod test_support;
+mod theme;
 mod worker;
 
 use std::io::{self, IsTerminal};
@@ -28,6 +29,7 @@ use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste};
 use crossterm::execute;
 use event::EventReceiver;
 use sstack_core::workspace;
+use theme::ColorDepth;
 use tokio::sync::mpsc;
 use worker::AgentHandle;
 
@@ -45,7 +47,7 @@ pub async fn run(args: &Args) -> Result<ExitCode, AnyError> {
     let (sender, mut events) = mpsc::unbounded_channel();
     let Run { agent, session } = prepare(args, Arc::new(EventApprover::new(sender.clone())))?;
     let agent = AgentHandle::spawn(agent, sender.clone());
-    let mut app = App::new(agent, workspace::session_id(&session));
+    let mut app = App::new(agent, workspace::session_id(&session), ColorDepth::detect());
     input::spawn(sender);
     while on_screen(&mut app, &mut events).await? == Exit::Rebuild {
         let failure = rebuild(&relaunch_args(args, &session));

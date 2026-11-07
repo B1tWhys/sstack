@@ -2,11 +2,11 @@
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::Stylize;
 use ratatui::text::Line;
 
 use crate::tui::component::Component;
 use crate::tui::event::Event;
+use crate::tui::theme;
 
 /// Tells the person which Session they are in, whether the agent is working, and how to stop.
 #[derive(Debug)]
@@ -50,7 +50,7 @@ impl Component for Status {
     }
 
     fn render(&self, frame: &mut Frame, area: Rect) {
-        frame.render_widget(Line::from(self.text()).reversed(), area);
+        frame.render_widget(Line::from(self.text()).style(theme::STATUS), area);
     }
 }
 

@@ -10,6 +10,7 @@ use unicode_width::UnicodeWidthChar;
 use crate::tui::component::{Component, KeyOutcome};
 use crate::tui::editor::{Edit, Editor};
 use crate::tui::event::{Action, Event};
+use crate::tui::theme;
 
 /// Shown before the first row of what the person types.
 const MARKER: &str = "> ";
@@ -170,12 +171,13 @@ impl Component for Prompt {
     }
 
     fn render(&self, frame: &mut Frame, area: Rect) {
-        let block = Block::bordered();
+        let block = Block::bordered().border_style(theme::BORDER);
         let inner = block.inner(area);
         let (rows, (row, column)) = self.wrapped(inner.width);
         let top = (row + 1).saturating_sub(usize::from(inner.height));
         let lines: Vec<Line> = rows.into_iter().enumerate().map(gutter).collect();
         let paragraph = Paragraph::new(lines).scroll((to_u16(top), 0));
+        let paragraph = paragraph.style(theme::INPUT);
         frame.render_widget(paragraph.block(block), area);
         let x = inner.x.saturating_add(to_u16(GUTTER + column));
         let y = inner.y.saturating_add(to_u16(row.saturating_sub(top)));
@@ -186,7 +188,7 @@ impl Component for Prompt {
 /// Returns the row at `index` with the marker or indent before it.
 fn gutter((index, row): (usize, String)) -> Line<'static> {
     let lead = if index == 0 { MARKER } else { INDENT };
-    Line::from(vec![Span::raw(lead), Span::raw(row)])
+    Line::from(vec![Span::styled(lead, theme::MARKER), Span::raw(row)])
 }
 
 /// Returns `text` with every line break as a plain newline, since terminals paste them as

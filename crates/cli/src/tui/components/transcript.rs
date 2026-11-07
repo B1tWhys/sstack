@@ -14,6 +14,7 @@ use sstack_core::session::{AssistantEntry, Entry};
 use crate::describe;
 use crate::tui::component::{Component, KeyOutcome};
 use crate::tui::event::Event;
+use crate::tui::theme;
 
 /// How many lines one Page Up or Page Down scrolls.
 const PAGE: u16 = 10;
@@ -161,10 +162,10 @@ impl Block {
 /// Returns the look for text from `kind`.
 fn style(kind: Kind) -> Style {
     match kind {
-        Kind::Prompt => Style::new().bold(),
-        Kind::Reply => Style::new(),
-        Kind::Reasoning => Style::new().dim().italic(),
-        Kind::Note => Style::new().dark_gray(),
+        Kind::Prompt => theme::PROMPT,
+        Kind::Reply => theme::TEXT,
+        Kind::Reasoning => theme::REASONING,
+        Kind::Note => theme::NOTE,
     }
 }
 

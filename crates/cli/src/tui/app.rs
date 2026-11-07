@@ -9,6 +9,7 @@ use ratatui::{Frame, Terminal};
 use super::component::{Component, KeyOutcome};
 use super::components::{Approval, Prompt, Status, Transcript};
 use super::event::{Action, Event, EventReceiver};
+use super::theme::ColorDepth;
 use super::worker::AgentHandle;
 use crate::command::{Command, parse_command};
 
@@ -39,11 +40,14 @@ pub struct App {
     agent: AgentHandle,
     /// Whether a Turn has been started and has not yet ended.
     busy: bool,
+    /// How many colors the terminal can show, which the theme's colors are fitted to.
+    colors: ColorDepth,
 }
 
 impl App {
-    /// Creates the harness for the Session with id `session`, run by `agent`.
-    pub fn new(agent: AgentHandle, session: String) -> Self {
+    /// Creates the harness for the Session with id `session`, run by `agent`, drawing in the
+    /// colors a terminal with `colors` can show.
+    pub fn new(agent: AgentHandle, session: String, colors: ColorDepth) -> Self {
         Self {
             approval: Approval::default(),
             prompt: Prompt::default(),
@@ -51,6 +55,7 @@ impl App {
             status: Status::new(session),
             agent,
             busy: false,
+            colors,
         }
     }
 
@@ -193,6 +198,7 @@ impl App {
         self.status.render(frame, status);
         self.prompt.render(frame, prompt);
         self.approval.render(frame, frame.area());
+        self.colors.fit_buffer(frame.buffer_mut());
     }
 }
 
@@ -206,6 +212,7 @@ mod tests {
     };
     use async_trait::async_trait;
     use ratatui::backend::TestBackend;
+    use ratatui::style::Color;
     use sstack_core::agent::Agent;
     use sstack_core::provider::scripted::{Scripted, ScriptedProvider};
     use sstack_core::provider::{ModelRequest, Provider, ProviderError, StreamEvent};
@@ -236,7 +243,7 @@ mod tests {
         let agent = AgentHandle::spawn(make(dir.path(), approver), sender.clone());
         Harness {
             dir,
-            app: App::new(agent, "7".into()),
+            app: App::new(agent, "7".into(), ColorDepth::Ansi256),
             sender,
             events,
         }
@@ -399,6 +406,20 @@ mod tests {
 
         h.app.handle(Event::Paste("\n".repeat(20)));
         assert!(h.screen().lines().nth(5).unwrap().starts_with("session 7"));
+    }
+
+    #[tokio::test]
+    async fn the_screen_uses_only_colors_the_terminal_can_show() {
+        let h = scripted(vec![]);
+        let mut terminal = Terminal::new(TestBackend::new(60, 12)).unwrap();
+        terminal.draw(|frame| h.app.render(frame)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let status_row = 8;
+        assert!(matches!(buffer[(0, status_row)].bg, Color::Indexed(_)));
+        for cell in &buffer.content {
+            assert!(!matches!(cell.fg, Color::Rgb(..)), "{cell:?}");
+            assert!(!matches!(cell.bg, Color::Rgb(..)), "{cell:?}");
+        }
     }
 
     #[tokio::test]

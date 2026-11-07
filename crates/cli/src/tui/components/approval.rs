@@ -9,6 +9,7 @@ use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
 
 use crate::tui::component::{Component, KeyOutcome};
 use crate::tui::event::{ApprovalRequest, Event};
+use crate::tui::theme;
 
 /// Asks the person about each shell command the model wants to run, holding the keyboard until
 /// they answer.
@@ -46,9 +47,14 @@ impl Component for Approval {
         };
         let popup = area.centered(Constraint::Percentage(60), Constraint::Length(5));
         let question = format!("Run `{}`? [y/N]", request.command);
-        let block = Block::bordered().title(" Approve shell command ");
+        let block = Block::bordered()
+            .title(" Approve shell command ")
+            .border_style(theme::ATTENTION)
+            .title_style(theme::ATTENTION);
         frame.render_widget(Clear, popup);
-        let paragraph = Paragraph::new(question).wrap(Wrap { trim: false });
+        let paragraph = Paragraph::new(question)
+            .style(theme::TEXT)
+            .wrap(Wrap { trim: false });
         frame.render_widget(paragraph.block(block), popup);
     }
 }
