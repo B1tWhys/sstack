@@ -99,7 +99,15 @@ pub struct Agent {
 }
 
 /// A callback that receives [`AgentEvent`]s as a Turn progresses.
-type EventSink<'a> = &'a mut (dyn FnMut(AgentEvent) + Send);
+pub type EventSink<'a> = &'a mut (dyn FnMut(AgentEvent) + Send);
+
+/// Lets the caller of a Turn watch it and stop it.
+pub struct TurnContext<'a> {
+    /// Stops the Turn when cancelled, leaving the Session resumable.
+    pub cancel: &'a CancellationToken,
+    /// Receives each event as the Turn progresses.
+    pub on_event: EventSink<'a>,
+}
 
 impl Agent {
     /// Picks up a Session from its log and entries, repairing anything a crash left unfinished.
@@ -128,38 +136,33 @@ impl Agent {
         &self.entries
     }
 
-    /// Runs one Turn to its end. Cancelling `cancel` stops it, leaving the Session resumable.
+    /// Runs one Turn to its end, unless `context` cancels it first.
     ///
     /// # Errors
     /// Returns an error if the Provider fails or the Session cannot be recorded.
     pub async fn run_turn(
         &mut self,
         input: &str,
-        cancel: &CancellationToken,
-        on_event: EventSink<'_>,
+        context: &mut TurnContext<'_>,
     ) -> Result<TurnEnd, AgentError> {
         self.record(Entry::User {
             text: input.to_owned(),
         })?;
         loop {
-            if let Some(end) = self.step(cancel, on_event).await? {
+            if let Some(end) = self.step(context).await? {
                 return Ok(end);
             }
         }
     }
 
     /// Runs one Step, returning how the Turn ended if this Step ended it.
-    async fn step(
-        &mut self,
-        cancel: &CancellationToken,
-        on_event: EventSink<'_>,
-    ) -> Result<Option<TurnEnd>, AgentError> {
+    async fn step(&mut self, context: &mut TurnContext<'_>) -> Result<Option<TurnEnd>, AgentError> {
         let response = tokio::select! {
             biased;
-            () = cancel.cancelled() => return self.cancelled().map(Some),
-            response = self.request(on_event) => response?,
+            () = context.cancel.cancelled() => return self.cancelled().map(Some),
+            response = self.request(context.on_event) => response?,
         };
-        self.warn_near_limit(&response, on_event);
+        self.warn_near_limit(&response, context.on_event);
         let calls = response.tool_calls.clone();
         let stop = response.stop;
         self.record(Entry::Assistant(response))?;
@@ -167,7 +170,7 @@ impl Agent {
             self.settle_unanswered_calls(NOT_RUN)?;
             return Ok(Some(turn_end(stop)));
         }
-        self.run_tools(&calls, cancel, on_event).await
+        self.run_tools(&calls, context).await
     }
 
     /// Asks the Provider for the next response, reporting it as it arrives.
@@ -186,20 +189,19 @@ impl Agent {
     async fn run_tools(
         &mut self,
         calls: &[ToolCall],
-        cancel: &CancellationToken,
-        on_event: EventSink<'_>,
+        context: &mut TurnContext<'_>,
     ) -> Result<Option<TurnEnd>, AgentError> {
         for call in calls {
-            on_event(AgentEvent::ToolStarted(ToolCallSummary {
+            (context.on_event)(AgentEvent::ToolStarted(ToolCallSummary {
                 name: call.name.clone(),
                 input: call.input.to_string(),
             }));
             let output = tokio::select! {
                 biased;
-                () = cancel.cancelled() => return self.cancelled().map(Some),
+                () = context.cancel.cancelled() => return self.cancelled().map(Some),
                 output = self.config.tools.run(call) => output,
             };
-            on_event(AgentEvent::ToolFinished {
+            (context.on_event)(AgentEvent::ToolFinished {
                 name: call.name.clone(),
                 is_error: output.is_error,
             });
@@ -332,7 +334,7 @@ mod tests {
         let (dir, project) = git_project();
         let session = dir.path().join("ignored/session.jsonl");
         let provider = Arc::new(ScriptedProvider::new(script));
-        let agent = agent_on(&session, provider.clone(), project, approver);
+        let agent = agent_on(&session, config(provider.clone(), project, approver));
         Harness {
             _dir: dir,
             agent,
@@ -341,14 +343,18 @@ mod tests {
         }
     }
 
-    fn agent_on(
-        session: &Path,
-        provider: Arc<dyn Provider>,
-        project: Arc<crate::tools::project::Project>,
-        approver: Arc<dyn Approver>,
-    ) -> Agent {
+    fn agent_on(session: &Path, config: AgentConfig) -> Agent {
         let log = SessionLog::create(session).unwrap();
-        Agent::new(config(provider, project, approver), log, vec![]).unwrap()
+        Agent::new(config, log, vec![]).unwrap()
+    }
+
+    async fn turn(
+        agent: &mut Agent,
+        cancel: &CancellationToken,
+        on_event: EventSink<'_>,
+    ) -> Result<TurnEnd, AgentError> {
+        let mut context = TurnContext { cancel, on_event };
+        agent.run_turn("go", &mut context).await
     }
 
     fn config(
@@ -367,9 +373,8 @@ mod tests {
 
     async fn run(agent: &mut Agent) -> (Result<TurnEnd, AgentError>, Vec<AgentEvent>) {
         let mut events = Vec::new();
-        let end = agent
-            .run_turn("go", &CancellationToken::new(), &mut |e| events.push(e))
-            .await;
+        let cancel = CancellationToken::new();
+        let end = turn(agent, &cancel, &mut |event| events.push(event)).await;
         (end, events)
     }
 
@@ -481,14 +486,12 @@ mod tests {
         let cancel = CancellationToken::new();
         let on_start = cancel.clone();
 
-        let end = h
-            .agent
-            .run_turn("go", &cancel, &mut |event| {
-                if matches!(event, AgentEvent::ToolStarted(_)) {
-                    on_start.cancel();
-                }
-            })
-            .await;
+        let end = turn(&mut h.agent, &cancel, &mut |event| {
+            if matches!(event, AgentEvent::ToolStarted(_)) {
+                on_start.cancel();
+            }
+        })
+        .await;
 
         assert_eq!(end.unwrap(), TurnEnd::Cancelled);
         assert_eq!(tool_results(h.agent.entries()), [("1", INTERRUPTED, true)]);
@@ -512,16 +515,12 @@ mod tests {
     async fn cancelling_a_model_request_ends_the_turn() {
         let (dir, project) = git_project();
         let session = dir.path().join("ignored/session.jsonl");
-        let mut agent = agent_on(
-            &session,
-            Arc::new(NeverResponds),
-            project,
-            Arc::new(DenyAll),
-        );
+        let config = config(Arc::new(NeverResponds), project, Arc::new(DenyAll));
+        let mut agent = agent_on(&session, config);
         let cancel = CancellationToken::new();
         cancel.cancel();
 
-        let end = agent.run_turn("go", &cancel, &mut |_| {}).await;
+        let end = turn(&mut agent, &cancel, &mut |_| {}).await;
 
         assert_eq!(end.unwrap(), TurnEnd::Cancelled);
     }

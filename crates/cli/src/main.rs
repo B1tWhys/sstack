@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use clap::Parser;
 use repl::{Exit, Repl, outcome_text};
-use sstack_core::agent::{Agent, AgentConfig, TurnEnd};
+use sstack_core::agent::{Agent, AgentConfig, TurnContext, TurnEnd};
 use sstack_core::config::{Config, Connection};
 use sstack_core::credentials::{SystemKeyring, resolve_secret};
 use sstack_core::session::{Entry, SessionLog};
@@ -96,8 +96,11 @@ fn prepare(args: &Args, approver: Arc<dyn Approver>) -> Result<Run, AnyError> {
     let config = load_settings()?;
     let connection = config.connection(args.connection.as_deref())?;
     let project = Arc::new(Project::new(&std::env::current_dir()?)?);
-    let model = args.model.as_ref().unwrap_or(&config.default_model).clone();
-    let agent_config = agent_config(connection, model, project.clone(), approver)?;
+    let backend = Backend {
+        connection,
+        model: args.model.as_ref().unwrap_or(&config.default_model).clone(),
+    };
+    let agent_config = agent_config(&backend, project.clone(), approver)?;
     start_session(agent_config, &project, args.resume.as_deref())
 }
 
@@ -107,18 +110,26 @@ fn load_settings() -> Result<Config, AnyError> {
     Ok(Config::load(&path)?)
 }
 
-/// Decides what the agent runs on for a given Connection and project.
-fn agent_config(
-    connection: &Connection,
+/// The model a run has chosen, and how to reach it.
+struct Backend<'a> {
+    /// How to reach the model's Provider.
+    connection: &'a Connection,
+    /// The identifier of the model to request.
     model: String,
+}
+
+/// Decides what the agent runs on for a given model and project.
+fn agent_config(
+    backend: &Backend<'_>,
     project: Arc<Project>,
     approver: Arc<dyn Approver>,
 ) -> Result<AgentConfig, AnyError> {
+    let connection = backend.connection;
     SystemKeyring::connect();
     let secret = resolve_secret(&connection.secret, &SystemKeyring, project.root())?;
     Ok(AgentConfig {
         provider: connection.provider(secret)?,
-        model,
+        model: backend.model.clone(),
         system: workspace::system_prompt(project.root()),
         tools: ToolBox::standard(project, approver, vec![connection.secret.clone()]),
         context_limit: connection.context_limit,
@@ -154,9 +165,11 @@ async fn run_headless(args: &Args, prompt: &str) -> Result<ExitCode, AnyError> {
     let Run { mut agent, session } = prepare(args, Arc::new(DenyAll))?;
     let cancel = CancellationToken::new();
     let mut out = stdout();
-    let result = agent
-        .run_turn(prompt, &cancel, &mut |event| render_event(&event, &mut out))
-        .await;
+    let mut context = TurnContext {
+        cancel: &cancel,
+        on_event: &mut |event| render_event(&event, &mut out),
+    };
+    let result = agent.run_turn(prompt, &mut context).await;
     print!(
         "{}",
         outcome_text(result.as_ref().map(|end| *end).map_err(ToString::to_string))
@@ -213,27 +226,39 @@ async fn run_interactive(args: &Args) -> Result<ExitCode, AnyError> {
         out: stdout(),
     };
     while repl.run(&mut agent).await == Exit::Rebuild {
-        rebuild_and_relaunch(args, &session, &mut repl, rebuild::build, rebuild::relaunch);
+        let rebuilder = Rebuilder {
+            build: rebuild::build,
+            relaunch: rebuild::relaunch,
+        };
+        rebuilder.run(&relaunch_args(args, &session), &mut repl);
     }
     Ok(ExitCode::SUCCESS)
 }
 
-/// Replaces the running harness with a fresh build, keeping the Session.
-///
-/// Only returns if that could not be done.
-fn rebuild_and_relaunch<W: Write + Send>(
-    args: &Args,
-    session: &Path,
-    repl: &mut Repl<W>,
-    build: impl FnOnce() -> Option<PathBuf>,
-    relaunch: impl FnOnce(&Path, &[String]) -> io::Error,
-) {
-    match build() {
-        Some(binary) => {
-            let error = relaunch(&binary, &relaunch_args(args, session));
-            repl.report_rebuild_failure(error);
+/// The two steps of a rebuild, kept apart so that the decision between them can be tested.
+struct Rebuilder<B, R> {
+    /// Builds the Harness Source, returning the new binary if that worked.
+    build: B,
+    /// Replaces this process with a binary, returning only if that fails.
+    relaunch: R,
+}
+
+impl<B, R> Rebuilder<B, R>
+where
+    B: FnOnce() -> Option<PathBuf>,
+    R: FnOnce(&Path, &[String]) -> io::Error,
+{
+    /// Replaces the running harness with a fresh build, passing it `relaunch_args`.
+    ///
+    /// Only returns if that could not be done.
+    fn run<W: Write + Send>(self, relaunch_args: &[String], repl: &mut Repl<W>) {
+        match (self.build)() {
+            Some(binary) => {
+                let error = (self.relaunch)(&binary, relaunch_args);
+                repl.report_rebuild_failure(error);
+            }
+            None => repl.report_rebuild_failure("the build did not succeed"),
         }
-        None => repl.report_rebuild_failure("the build did not succeed"),
     }
 }
 
@@ -334,35 +359,30 @@ mod tests {
     #[test]
     fn a_failed_build_leaves_the_harness_running_and_says_so() {
         let mut repl = repl();
-        let relaunch = |_: &Path, _: &[String]| panic!("a failed build must not relaunch");
-        rebuild_and_relaunch(
-            &args(&[]),
-            Path::new("/s/1.jsonl"),
-            &mut repl,
-            || None,
-            relaunch,
-        );
+        let rebuilder = Rebuilder {
+            build: || None,
+            relaunch: |_: &Path, _: &[String]| panic!("a failed build must not relaunch"),
+        };
+        rebuilder.run(&[], &mut repl);
         let shown = String::from_utf8(repl.out).unwrap();
         assert!(shown.contains("the build did not succeed"));
     }
 
     #[test]
-    fn a_successful_build_relaunches_into_the_same_session() {
+    fn a_successful_build_relaunches_with_the_given_arguments() {
         let mut repl = repl();
         let mut launched = None;
-        rebuild_and_relaunch(
-            &args(&[]),
-            Path::new("/s/1.jsonl"),
-            &mut repl,
-            || Some(PathBuf::from("/bin/sstack")),
-            |binary, relaunch_args| {
-                launched = Some((binary.to_owned(), relaunch_args.to_vec()));
+        let rebuilder = Rebuilder {
+            build: || Some(PathBuf::from("/bin/sstack")),
+            relaunch: |binary: &Path, arguments: &[String]| {
+                launched = Some((binary.to_owned(), arguments.to_vec()));
                 io::Error::other("exec failed")
             },
-        );
-        let (binary, relaunch_args) = launched.unwrap();
+        };
+        rebuilder.run(&["--resume".to_owned()], &mut repl);
+        let (binary, arguments) = launched.unwrap();
         assert_eq!(binary, Path::new("/bin/sstack"));
-        assert_eq!(relaunch_args, ["--resume", "1"]);
+        assert_eq!(arguments, ["--resume"]);
         assert!(String::from_utf8(repl.out).unwrap().contains("exec failed"));
     }
 

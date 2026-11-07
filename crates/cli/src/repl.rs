@@ -3,7 +3,7 @@
 use std::fmt::Display;
 use std::io::Write;
 
-use sstack_core::agent::{Agent, TurnEnd};
+use sstack_core::agent::{Agent, TurnContext, TurnEnd};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -106,7 +106,11 @@ impl<W: Write + Send> Repl<W> {
                 interrupts, out, ..
             } = self;
             let mut sink = |event| render_event(&event, out);
-            let turn = agent.run_turn(text, &cancel, &mut sink);
+            let mut context = TurnContext {
+                cancel: &cancel,
+                on_event: &mut sink,
+            };
+            let turn = agent.run_turn(text, &mut context);
             tokio::pin!(turn);
             let result = tokio::select! {
                 result = &mut turn => result,
