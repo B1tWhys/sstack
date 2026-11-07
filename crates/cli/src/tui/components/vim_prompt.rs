@@ -6,7 +6,7 @@ use std::ops::Range;
 use crossterm::cursor::SetCursorStyle;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::Frame;
-use ratatui::layout::{Alignment, Constraint, Layout, Rect};
+use ratatui::layout::{Alignment, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
 use sstack_core::vim::{Draft, Vim, VimEvent, VimMode, VimState};
@@ -16,10 +16,6 @@ use super::wrap::{BORDER, GUTTER, gutter, normalize_newlines, to_u16, wrap};
 use crate::tui::component::{Component, KeyOutcome};
 use crate::tui::event::{Event, SessionSender};
 use crate::tui::theme;
-
-/// The row under the text that shows the command line and errors. Always there, so that pressing
-/// `:` does not move everything else on screen.
-const CMDLINE_ROWS: u16 = 1;
 
 /// The keys that have a name in nvim's key notation. `PageUp` and `PageDown` are left out on
 /// purpose, so that they keep scrolling the transcript.
@@ -163,7 +159,7 @@ impl VimPrompt {
             self.state.cursor,
             width.saturating_sub(BORDER),
         );
-        to_u16(rows.len()).saturating_add(BORDER + CMDLINE_ROWS)
+        to_u16(rows.len()).saturating_add(BORDER)
     }
 
     /// Returns the cursor shape for the current mode.
@@ -201,8 +197,9 @@ impl VimPrompt {
         (x.min(area.right().saturating_sub(1)), y)
     }
 
-    /// Draws the command line or latest error into `area`, returning where the cursor belongs if
-    /// it is on the command line.
+    /// Draws the command line or latest error over the bottom border in `area`, so that pressing
+    /// `:` does not move everything else on screen, returning where the cursor belongs if it is
+    /// on the command line.
     fn render_cmdline(&self, frame: &mut Frame, area: Rect) -> Option<(u16, u16)> {
         if let Some(cmdline) = &self.state.cmdline {
             frame.render_widget(Paragraph::new(cmdline.text.as_str()), area);
@@ -248,13 +245,16 @@ impl Component for VimPrompt {
         let block = Block::bordered()
             .border_style(theme::BORDER)
             .title(label.alignment(Alignment::Right));
-        let inner = block.inner(area);
+        let text = block.inner(area);
         frame.render_widget(block, area);
-        let [text, cmdline] =
-            Layout::vertical([Constraint::Min(0), Constraint::Length(CMDLINE_ROWS)]).areas(inner);
         self.fit_to(text);
         let in_text = self.render_text(frame, text);
-        let on_cmdline = self.render_cmdline(frame, cmdline);
+        let bottom_border = Rect {
+            y: text.bottom(),
+            height: 1,
+            ..text
+        };
+        let on_cmdline = self.render_cmdline(frame, bottom_border.intersection(area));
         frame.set_cursor_position(on_cmdline.unwrap_or(in_text));
     }
 }
@@ -366,16 +366,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn empty_input_needs_room_for_one_line() {
+        let (prompt, _events) = idle_prompt();
+        assert_eq!(prompt.height(30), 3);
+        let (screen, cursor) = draw(&prompt, 30, 3);
+        assert!(screen[0].starts_with('┌'), "{screen:?}");
+        assert_eq!(screen[1], "│>                           │");
+        assert!(screen[2].starts_with('└'), "{screen:?}");
+        assert_eq!(cursor, (3, 1));
+    }
+
+    #[tokio::test]
     async fn long_text_scrolls_to_keep_the_cursor_in_view() {
         let (mut prompt, _events) = idle_prompt();
         prompt.update(&Event::Vim(VimEvent::State(state(
             "one\ntwo\nthree",
             VimMode::Insert,
         ))));
-        assert_eq!(prompt.height(30), 6);
+        assert_eq!(prompt.height(30), 5);
         let (screen, cursor) = draw(&prompt, 30, 4);
-        assert_eq!(screen[1], "│  three                     │");
-        assert_eq!(cursor, (8, 1));
+        assert_eq!(screen[2], "│  three                     │");
+        assert_eq!(cursor, (8, 2));
     }
 
     #[tokio::test]
@@ -405,19 +416,20 @@ mod tests {
             cursor: 2,
         });
         prompt.update(&Event::Vim(VimEvent::State(shown)));
-        let (screen, cursor) = draw(&prompt, 30, 4);
-        assert_eq!(screen[2], "│:wq                         │");
+        let (screen, cursor) = draw(&prompt, 30, 3);
+        assert_eq!(screen[1], "│> text                      │");
+        assert_eq!(screen[2], "└:wq─────────────────────────┘");
         assert_eq!(cursor, (3, 2));
     }
 
     #[tokio::test]
-    async fn an_error_shows_on_the_command_line_row() {
+    async fn an_error_shows_on_the_bottom_border() {
         let (mut prompt, _events) = idle_prompt();
         let mut shown = state("text", VimMode::Normal);
         shown.message = Some("E492: nope".to_owned());
         prompt.update(&Event::Vim(VimEvent::State(shown)));
-        let (screen, cursor) = draw(&prompt, 30, 4);
-        assert_eq!(screen[2], "│E492: nope                  │");
+        let (screen, cursor) = draw(&prompt, 30, 3);
+        assert_eq!(screen[2], "└E492: nope──────────────────┘");
         assert_eq!(cursor, (7, 1));
     }
 
