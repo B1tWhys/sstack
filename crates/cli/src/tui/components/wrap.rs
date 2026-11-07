@@ -17,15 +17,37 @@ pub const GUTTER: usize = MARKER.len();
 /// How the border around the input adds to its height and width.
 pub const BORDER: u16 = 2;
 
-/// Returns `text` broken into rows that fit `width` columns after the gutter, and the row and
-/// column of the byte offset `cursor`.
-pub fn wrap(text: &str, cursor: usize, width: u16) -> (Vec<String>, (usize, usize)) {
+/// Text laid out to fit a width.
+pub struct Wrapped {
+    /// Each row on screen.
+    pub rows: Vec<String>,
+    /// The row and column the cursor is at.
+    pub cursor: (usize, usize),
+    /// Which row each line of the text starts on, in order. A line can take several rows.
+    pub line_starts: Vec<usize>,
+}
+
+/// Lays out `text` in rows of `columns` columns, finding the byte offset `cursor` in them.
+pub fn wrap_to(text: &str, cursor: usize, columns: usize) -> Wrapped {
     let (before, after) = text.split_at(cursor);
-    let mut rows = Rows::new(usize::from(width).saturating_sub(GUTTER));
+    let mut rows = Rows::new(columns);
     before.chars().for_each(|character| rows.push(character));
     let position = rows.position();
     after.chars().for_each(|character| rows.push(character));
-    (rows.finish(), position)
+    let line_starts = rows.line_starts.clone();
+    Wrapped {
+        rows: rows.finish(),
+        cursor: position,
+        line_starts,
+    }
+}
+
+/// Returns `text` broken into rows that fit `width` columns after the gutter, and the row and
+/// column of the byte offset `cursor`.
+pub fn wrap(text: &str, cursor: usize, width: u16) -> (Vec<String>, (usize, usize)) {
+    let columns = usize::from(width).saturating_sub(GUTTER);
+    let wrapped = wrap_to(text, cursor, columns);
+    (wrapped.rows, wrapped.cursor)
 }
 
 /// Returns the row at `index`, already styled, with the marker or indent before it.
@@ -58,6 +80,8 @@ struct Rows {
     width: usize,
     /// How many columns of the row being filled are used.
     column: usize,
+    /// Which row each line of the text starts on.
+    line_starts: Vec<usize>,
 }
 
 impl Rows {
@@ -68,6 +92,7 @@ impl Rows {
             row: String::new(),
             width: width.max(1),
             column: 0,
+            line_starts: vec![0],
         }
     }
 
@@ -75,6 +100,7 @@ impl Rows {
     fn push(&mut self, character: char) {
         if character == '\n' {
             self.break_row();
+            self.line_starts.push(self.full.len());
             return;
         }
         let width = character.width().unwrap_or(0);

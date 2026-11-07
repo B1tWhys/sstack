@@ -84,6 +84,12 @@ pub struct VimState {
     /// What is selected, as byte ranges into `text`. A selection spanning lines gets one range per
     /// line, and is empty outside Visual mode.
     pub selection: Vec<Range<usize>>,
+    /// What nvim's number options put beside each line of `text`, in order and all the same
+    /// width, spacing included. Empty if they are off. Nvim leaves that width out of the width it
+    /// wraps at, so a front end drawing these should give [`Vim::resize`] the width with them
+    /// included.
+    #[serde(default)]
+    pub line_numbers: Vec<String>,
     /// The command line, if one is being typed.
     #[serde(default)]
     pub cmdline: Option<VimCmdline>,

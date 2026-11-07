@@ -12,7 +12,7 @@ use ratatui::widgets::{Block, Paragraph};
 use sstack_core::vim::{Draft, Vim, VimEvent, VimMode, VimState};
 use unicode_width::UnicodeWidthStr;
 
-use super::wrap::{BORDER, GUTTER, gutter, normalize_newlines, to_u16, wrap};
+use super::wrap::{BORDER, GUTTER, Wrapped, gutter, normalize_newlines, to_u16, wrap_to};
 use crate::tui::component::{Component, KeyOutcome};
 use crate::tui::event::{Event, SessionSender};
 use crate::tui::theme;
@@ -109,6 +109,13 @@ fn highlighted(
     rows.into_iter().map(&mut styled_row).collect()
 }
 
+/// Returns `row`, already styled, with the line number `lead` before it.
+fn numbered(lead: String, row: Vec<Span<'static>>) -> Line<'static> {
+    let mut spans = vec![Span::styled(lead, theme::MARKER)];
+    spans.extend(row);
+    Line::from(spans)
+}
+
 /// Passes what the person types to a real nvim and draws what comes back, without knowing any
 /// vim behavior itself. Alt-Enter submits, because Enter means what it means in vim.
 #[derive(Debug)]
@@ -130,6 +137,7 @@ impl VimPrompt {
             cursor: draft.cursor,
             mode: VimMode::Insert,
             selection: Vec::new(),
+            line_numbers: Vec::new(),
             cmdline: None,
             message: None,
         };
@@ -154,12 +162,8 @@ impl VimPrompt {
     /// Returns how many rows the input needs, border included, to show all the text when it is
     /// `width` columns wide.
     pub fn height(&self, width: u16) -> u16 {
-        let (rows, _) = wrap(
-            &self.state.text,
-            self.state.cursor,
-            width.saturating_sub(BORDER),
-        );
-        to_u16(rows.len()).saturating_add(BORDER)
+        let wrapped = self.wrapped(width.saturating_sub(BORDER));
+        to_u16(wrapped.rows.len()).saturating_add(BORDER)
     }
 
     /// Returns the cursor shape for the current mode.
@@ -171,9 +175,42 @@ impl VimPrompt {
         }
     }
 
-    /// Tells nvim the size of `area`, the text, if that changed.
+    /// Returns how many columns come before the text: the line numbers if nvim has any, or else
+    /// the marker.
+    fn lead_columns(&self) -> usize {
+        self.state
+            .line_numbers
+            .first()
+            .map_or(GUTTER, |label| label.width())
+    }
+
+    /// Returns the text laid out to fit `width` columns, what comes before it included.
+    fn wrapped(&self, width: u16) -> Wrapped {
+        let columns = usize::from(width).saturating_sub(self.lead_columns());
+        wrap_to(&self.state.text, self.state.cursor, columns)
+    }
+
+    /// Returns what goes before the row at `index` if nvim has line numbers. Only a line's first
+    /// row gets a number, as in nvim.
+    fn number_lead(&self, index: usize, line_starts: &[usize]) -> Option<String> {
+        let numbers = &self.state.line_numbers;
+        if numbers.is_empty() {
+            return None;
+        }
+        let line = line_starts.binary_search(&index).ok();
+        let label = line.and_then(|line| numbers.get(line)).cloned();
+        Some(label.unwrap_or_else(|| " ".repeat(self.lead_columns())))
+    }
+
+    /// Tells nvim the size of `area`, the text, if that changed. Line numbers are left in, because
+    /// nvim takes them out itself.
     fn fit_to(&self, area: Rect) {
-        let columns = area.width.saturating_sub(to_u16(GUTTER));
+        let marker = if self.state.line_numbers.is_empty() {
+            GUTTER
+        } else {
+            0
+        };
+        let columns = area.width.saturating_sub(to_u16(marker));
         let size = (area.height, columns);
         if self.size.replace(size) != size {
             self.vim.resize(area.height, columns);
@@ -182,17 +219,23 @@ impl VimPrompt {
 
     /// Draws the text into `area`, returning where the cursor belongs in it.
     fn render_text(&self, frame: &mut Frame, area: Rect) -> (u16, u16) {
-        let (rows, (row, column)) = wrap(&self.state.text, self.state.cursor, area.width);
+        let wrapped = self.wrapped(area.width);
+        let (row, column) = wrapped.cursor;
         let top = (row + 1).saturating_sub(usize::from(area.height));
-        let styled = highlighted(rows, &self.state.text, &self.state.selection);
+        let styled = highlighted(wrapped.rows, &self.state.text, &self.state.selection);
         let lines: Vec<Line> = styled
             .into_iter()
             .enumerate()
-            .map(|(index, row)| gutter(index, row))
+            .map(
+                |(index, row)| match self.number_lead(index, &wrapped.line_starts) {
+                    Some(lead) => numbered(lead, row),
+                    None => gutter(index, row),
+                },
+            )
             .collect();
         let paragraph = Paragraph::new(lines).scroll((to_u16(top), 0));
         frame.render_widget(paragraph.style(theme::INPUT), area);
-        let x = area.x.saturating_add(to_u16(GUTTER + column));
+        let x = area.x.saturating_add(to_u16(self.lead_columns() + column));
         let y = area.y.saturating_add(to_u16(row.saturating_sub(top)));
         (x.min(area.right().saturating_sub(1)), y)
     }
@@ -290,6 +333,7 @@ mod tests {
             cursor: text.len(),
             mode,
             selection: Vec::new(),
+            line_numbers: Vec::new(),
             cmdline: None,
             message: None,
         }
@@ -387,6 +431,21 @@ mod tests {
         let (screen, cursor) = draw(&prompt, 30, 4);
         assert_eq!(screen[2], "│  three                     │");
         assert_eq!(cursor, (8, 2));
+    }
+
+    #[tokio::test]
+    async fn line_numbers_replace_the_marker_on_each_lines_first_row() {
+        let (mut prompt, _events) = idle_prompt();
+        let mut shown = state("abcdefghij\nk", VimMode::Normal);
+        shown.line_numbers = vec!["1   ".to_owned(), "  1 ".to_owned()];
+        prompt.update(&Event::Vim(VimEvent::State(shown)));
+        assert_eq!(prompt.height(10), 6);
+        let (screen, cursor) = draw(&prompt, 10, 6);
+        assert_eq!(screen[1], "│1   abcd│");
+        assert_eq!(screen[2], "│    efgh│");
+        assert_eq!(screen[3], "│    ij  │");
+        assert_eq!(screen[4], "│  1 k   │");
+        assert_eq!(cursor, (6, 4));
     }
 
     #[tokio::test]
@@ -509,6 +568,26 @@ mod tests {
             let (mut prompt, mut events) = idle_prompt();
             prompt.update(&Event::Paste("one\r\ntwo".to_owned()));
             until_text(&mut prompt, &mut events, "one\ntwo").await;
+        }
+
+        #[tokio::test(flavor = "multi_thread")]
+        async fn wrapping_matches_nvim_with_line_numbers_on() {
+            let (mut prompt, mut events) = idle_prompt();
+            prompt.key(key(KeyCode::Esc));
+            type_into(&mut prompt, ":set number");
+            prompt.key(key(KeyCode::Enter));
+            let numbered = |event: &Event| matches!(event, Event::Vim(VimEvent::State(state)) if !state.line_numbers.is_empty());
+            until(&mut prompt, &mut events, numbered).await;
+            draw(&prompt, 26, 5);
+            let long = "x".repeat(30);
+            prompt.update(&Event::Paste(long.clone()));
+            until_text(&mut prompt, &mut events, &long).await;
+            prompt.key(key(KeyCode::Esc));
+            type_into(&mut prompt, "0gjx");
+            until_text(&mut prompt, &mut events, &"x".repeat(29)).await;
+            let (screen, _) = draw(&prompt, 26, 5);
+            assert_eq!(screen[1], format!("│  1 {}│", "x".repeat(20)));
+            assert_eq!(prompt.state.cursor, 20);
         }
 
         #[tokio::test(flavor = "multi_thread")]

@@ -284,6 +284,50 @@ mod real {
     }
 
     #[tokio::test]
+    async fn line_numbers_follow_the_options_of_the_moment() {
+        let mut vim = Harness::new().await;
+        vim.typed("a\nb\nc").await;
+        let state = vim.press("k", |state| state.cursor == 2).await;
+        assert_eq!(state.line_numbers, Vec::<String>::new());
+        let shows =
+            |labels: [&'static str; 3]| move |state: &VimState| state.line_numbers == labels;
+        vim.press(":set number<CR>", shows(["  1 ", "  2 ", "  3 "]))
+            .await;
+        vim.press(":set relativenumber<CR>", shows(["  1 ", "2   ", "  1 "]))
+            .await;
+        vim.press(":set nonumber<CR>", shows(["  1 ", "  0 ", "  1 "]))
+            .await;
+        vim.press("k", shows(["  0 ", "  1 ", "  2 "])).await;
+    }
+
+    #[tokio::test]
+    async fn line_numbers_grow_with_the_number_column() {
+        let mut vim = Harness::new().await;
+        vim.press("<Esc>:set number<CR>", |state| {
+            state.line_numbers.len() == 1
+        })
+        .await;
+        vim.press("999o<Esc>", |state| state.line_numbers.len() == 1000)
+            .await;
+        let state = vim.until(|state| state.line_numbers[0].len() == 5).await;
+        assert_eq!(state.line_numbers[999], "1000 ");
+    }
+
+    #[tokio::test]
+    async fn the_number_column_comes_out_of_the_width_lines_wrap_at() {
+        let mut vim = Harness::new().await;
+        vim.press("<Esc>:set number<CR>", |state| {
+            !state.line_numbers.is_empty()
+        })
+        .await;
+        vim.vim.resize(10, 24);
+        vim.vim.paste(&"x".repeat(30));
+        vim.until(|state| state.text.len() == 30).await;
+        vim.press("<Esc>0", |state| state.cursor == 0).await;
+        vim.press("gj", |state| state.cursor == 20).await;
+    }
+
+    #[tokio::test]
     async fn charwise_selection_is_reported_in_bytes() {
         let mut vim = Harness::new().await;
         vim.typed("aé日b").await;

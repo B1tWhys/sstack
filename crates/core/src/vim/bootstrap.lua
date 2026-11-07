@@ -64,6 +64,25 @@ local function selection(mode, starts)
   return ranges
 end
 
+-- Returns what nvim's number options put beside each line, every label as wide as the number
+-- column, or nothing if they put nothing there. Options are read each time so that `:set` works.
+local function line_numbers(count, current)
+  local numbered, relative = vim.wo.number, vim.wo.relativenumber
+  if not (numbered or relative) then
+    return {}
+  end
+  local width = fn.getwininfo(api.nvim_get_current_win())[1].textoff - 1
+  local labels = {}
+  for line = 1, count do
+    local distance = math.abs(line - current)
+    local on_cursor = distance == 0
+    local shown = (relative and not (on_cursor and numbered)) and distance or line
+    local align = (relative and numbered and on_cursor) and "-" or ""
+    labels[line] = string.format("%" .. align .. width .. "d ", shown)
+  end
+  return labels
+end
+
 -- Returns the command line being typed, if there is one.
 local function cmdline()
   local kind = fn.getcmdtype()
@@ -83,6 +102,7 @@ local function push()
     cursor = starts[position[1]] + position[2],
     mode = MODES[mode:sub(1, 1)] or "normal",
     selection = selection(mode, starts),
+    line_numbers = line_numbers(#lines, position[1]),
     cmdline = cmdline(),
     message = message,
   })
@@ -108,14 +128,13 @@ local function load_draft()
 end
 
 -- Makes screen motions such as `gj` match how the text is drawn, whatever the person's config
--- chose for their own windows.
+-- chose for their own windows. The number options stay theirs, because the labels are drawn too.
 local function match_the_drawn_prompt()
   vim.bo.swapfile = false
   vim.o.laststatus = 0
   vim.o.showtabline = 0
   vim.o.cmdheight = 0
-  vim.wo.number = false
-  vim.wo.relativenumber = false
+  vim.wo.statuscolumn = ""
   vim.wo.signcolumn = "no"
   vim.wo.foldcolumn = "0"
   vim.wo.list = false
@@ -148,6 +167,11 @@ api.nvim_create_autocmd({
   "TextChangedP",
   "CmdlineChanged",
 }, { callback = push })
+
+api.nvim_create_autocmd("OptionSet", {
+  pattern = { "number", "relativenumber", "numberwidth" },
+  callback = push,
+})
 
 vim.ui_attach(namespace, { ext_messages = true }, function(event, kind, content)
   if event == "msg_show" and ERRORS[kind] then

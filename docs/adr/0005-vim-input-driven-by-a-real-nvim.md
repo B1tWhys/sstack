@@ -14,6 +14,8 @@ We wrote a small client on `rmpv` rather than depend on `nvim-rs`, to avoid link
 
 Each Session runs its own nvim, so a crash stays in one Session, but registers are shared only through the system clipboard. Quitting nvim on purpose replaces it, keeping the text but not undo history. Any other exit hands the Draft to the plain prompt. Window-opening plugins run but stay invisible, because no UI is attached. A config can check `g:sstack` to skip them.
 
+Line numbers come from the person's `number` and `relativenumber` options: nvim sends a label for each line, and its own number column sets their width, so both sides wrap at the same column. Other things nvim draws, such as signs and folds, stay off in the prompt.
+
 Global keys use Alt, the one modifier vim leaves free, and Alt-Enter submits, because Enter means what it means in vim. Terminals send Alt as Esc plus the key, so Esc followed by another key in the same read counts as Alt plus that key, which can happen over a slow connection.
 
 Tests of Vim Input run a real nvim with `--clean`, behind the `nvim-tests` feature, because how nvim behaves is the main risk.
