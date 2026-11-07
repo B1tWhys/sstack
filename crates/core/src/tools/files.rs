@@ -48,11 +48,13 @@ impl Tool for Read {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "read".into(),
-            description: "Read a text file in the project. Lines are numbered from 1.".into(),
+            description: "Read a text file in the project, or in the directory of a loaded Skill. \
+                Lines are numbered from 1."
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Path relative to the project root"},
+                    "path": {"type": "string", "description": "Path relative to the project root, or an absolute path inside a loaded Skill's directory"},
                     "offset": {"type": "integer", "description": "Number of lines to skip"},
                     "limit": {"type": "integer", "description": "Maximum lines to return"}
                 },
@@ -63,7 +65,7 @@ impl Tool for Read {
 
     async fn run(&self, input: Value) -> Result<String, ToolError> {
         let input: ReadInput = parse_input(input)?;
-        let path = self.project.resolve(&input.path)?;
+        let path = self.project.resolve_for_reading(&input.path)?;
         let contents = fs::read_to_string(path).map_err(|e| io_error(&input.path, &e))?;
         let numbered: Vec<String> = contents
             .lines()

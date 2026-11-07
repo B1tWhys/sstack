@@ -294,19 +294,37 @@ fn user_instructions_reach_the_model() {
 }
 
 #[test]
-fn installed_skills_reach_the_model() {
+fn installed_skills_reach_the_model_with_their_files() {
+    let skill = tempfile::tempdir().unwrap();
+    let header = "---\nname: commits\ndescription: Use when committing.\n---\n";
+    fs::write(
+        skill.path().join("SKILL.md"),
+        format!("{header}Keep titles short.\n"),
+    )
+    .unwrap();
+    let notes = skill.path().join("notes.md");
+    fs::write(&notes, "Say why.").unwrap();
     let call = tool_call("skill", &serde_json::json!({"name": "commits"}));
-    let api = FakeApi::start(vec![call, text_reply("ok")]);
+    let read = tool_call(
+        "read",
+        &serde_json::json!({"path": notes.display().to_string()}),
+    );
+    let api = FakeApi::start(vec![call, read, text_reply("ok")]);
     let sandbox = Sandbox::new(&api.url);
-    let directory = sandbox.home.join(".agents/skills/commits");
-    fs::create_dir_all(&directory).unwrap();
-    let skill = "---\nname: commits\ndescription: Use when committing.\n---\nKeep titles short.\n";
-    fs::write(directory.join("SKILL.md"), skill).unwrap();
+    let installed = sandbox.home.join(".agents/skills");
+    fs::create_dir_all(installed.join("by-hand")).unwrap();
+    std::os::unix::fs::symlink(skill.path(), installed.join("commits")).unwrap();
+    let by_hand =
+        "---\nname: by-hand\ndescription: Only by hand.\ndisable-model-invocation: true\n---\n";
+    fs::write(installed.join("by-hand/SKILL.md"), by_hand).unwrap();
 
     sandbox.run(&["--prompt", "commit this"]);
 
     assert!(api.request(0).contains("- commits: Use when committing."));
+    assert!(!api.request(0).contains("by-hand"));
     assert!(api.request(1).contains("Keep titles short."));
+    assert!(!api.request(1).contains("name: commits"));
+    assert!(api.request(2).contains("Say why."));
 }
 
 #[test]

@@ -13,6 +13,9 @@ use crate::worktree::REPOSITORY_ENV;
 pub struct Project {
     /// The project's root directory, with symlinks resolved.
     root: PathBuf,
+    /// Directories outside the project whose files the model may read but not change, with
+    /// symlinks resolved.
+    readable: Vec<PathBuf>,
 }
 
 impl Project {
@@ -23,7 +26,19 @@ impl Project {
     pub fn new(root: &Path) -> io::Result<Self> {
         Ok(Self {
             root: root.canonicalize()?,
+            readable: Vec::new(),
         })
+    }
+
+    /// Also lets the model read, but not change, the files in `directories`, such as those of
+    /// the Skills it is offered. Directories that do not exist are left out.
+    #[must_use]
+    pub fn with_readable(mut self, directories: impl IntoIterator<Item = PathBuf>) -> Self {
+        let real = directories
+            .into_iter()
+            .filter_map(|d| d.canonicalize().ok());
+        self.readable.extend(real);
+        self
     }
 
     /// Returns the project's root directory.
@@ -45,6 +60,24 @@ impl Project {
             && !is_protected(&resolved)
             && !self.is_git_ignored(&resolved);
         visible.then_some(resolved).ok_or_else(denied)
+    }
+
+    /// Resolves a model-supplied path to a file the model may read, which is any file it may
+    /// access plus those in the directories given to [`Project::with_readable`]. A path into
+    /// one of those directories must be absolute.
+    ///
+    /// # Errors
+    /// Returns an error if the model may not read the path.
+    pub fn resolve_for_reading(&self, path: &str) -> Result<PathBuf, ToolError> {
+        self.resolve(path).or_else(|denied| {
+            let resolved = self.canonical(path).ok_or(denied)?;
+            let readable = self.readable.iter().any(|d| resolved.starts_with(d));
+            if readable && !is_protected(&resolved) {
+                Ok(resolved)
+            } else {
+                Err(ToolError(format!("access denied: {path}")))
+            }
+        })
     }
 
     /// Resolves `path` against the root, following symlinks through the parts that exist.
@@ -138,6 +171,25 @@ mod tests {
         assert!(project.resolve(".env").is_err());
         assert!(project.resolve("sub/.env.local").is_err());
         assert!(project.resolve(".git/config").is_err());
+    }
+
+    #[test]
+    fn readable_directories_can_be_read_but_not_otherwise_accessed() {
+        let dir = tempfile::tempdir().unwrap();
+        let skill = tempfile::tempdir().unwrap();
+        fs::write(skill.path().join("notes.md"), "").unwrap();
+        fs::write(skill.path().join(".env"), "").unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        fs::write(elsewhere.path().join("secret.md"), "").unwrap();
+        let project = Project::new(dir.path()).unwrap();
+        let project = project.with_readable([skill.path().to_owned(), "/not/here".into()]);
+        let inside = |name: &str| skill.path().join(name).display().to_string();
+
+        assert!(project.resolve_for_reading(&inside("notes.md")).is_ok());
+        assert!(project.resolve(&inside("notes.md")).is_err());
+        assert!(project.resolve_for_reading(&inside(".env")).is_err());
+        let outside = elsewhere.path().join("secret.md").display().to_string();
+        assert!(project.resolve_for_reading(&outside).is_err());
     }
 
     #[test]

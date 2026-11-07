@@ -60,6 +60,9 @@ pub struct Skill {
     pub path: PathBuf,
     /// Where the Skill was found.
     pub scope: Scope,
+    /// Whether the model may load the Skill on its own. A Skill whose header sets
+    /// `disable-model-invocation: true` runs only when a person asks for it by name.
+    pub model_invocable: bool,
 }
 
 /// Returns where the Skills of a Session working in the project at `root` may be, most specific
@@ -200,24 +203,40 @@ fn read_skill(file: PathBuf, directory: &Path, scope: &Scope) -> Option<Skill> {
         description: field("description").unwrap_or_default(),
         path: file,
         scope: scope.clone(),
+        model_invocable: header["disable-model-invocation"].as_bool() != Some(true),
     })
 }
 
-/// Parses the YAML header that opens `text` between `---` lines, if there is a valid one.
+/// Returns the instructions in the text of a `SKILL.md`, without the header that describes the
+/// Skill.
+#[must_use]
+pub fn instructions(text: &str) -> &str {
+    split_header(text).1.trim_start_matches('\n')
+}
+
+/// Parses the YAML header that opens `text`, if there is a valid one.
 fn header(text: &str) -> Option<Yaml> {
-    let mut lines = text.split_inclusive('\n');
-    if lines.next()?.trim_end() != "---" {
-        return None;
+    YamlLoader::load_from_str(split_header(text).0?).ok()?.pop()
+}
+
+/// Splits `text` into the header between its opening `---` lines, if it has one, and the rest.
+/// A header that is never closed counts as part of the rest.
+fn split_header(text: &str) -> (Option<&str>, &str) {
+    let Some(first_end) = text.find('\n') else {
+        return (None, text);
+    };
+    if text[..first_end].trim_end() != "---" {
+        return (None, text);
     }
-    let start = text.find('\n')? + 1;
+    let start = first_end + 1;
     let mut end = start;
-    for line in lines {
+    for line in text[start..].split_inclusive('\n') {
         if line.trim_end() == "---" {
-            return YamlLoader::load_from_str(&text[start..end]).ok()?.pop();
+            return (Some(&text[start..end]), &text[end + line.len()..]);
         }
         end += line.len();
     }
-    None
+    (None, text)
 }
 
 #[cfg(test)]
@@ -276,6 +295,7 @@ mod tests {
             description: "Use when reviewing.".into(),
             path: dir.path().join("folder").join(SKILL_FILE),
             scope: Scope::Project,
+            model_invocable: true,
         };
         assert_eq!(found, [expected]);
     }
@@ -293,6 +313,29 @@ mod tests {
         let found: Vec<_> = found.iter().map(|s| (&*s.name, &*s.description)).collect();
         let bare = ["broken", "listed", "plain", "unended"].map(|name| (name, ""));
         assert_eq!(found, bare);
+    }
+
+    #[test]
+    fn a_skill_can_be_kept_from_the_model() {
+        let dir = tempfile::tempdir().unwrap();
+        let header = "---\nname: by-hand\ndescription: d\ndisable-model-invocation: true\n---\n";
+        skill_at(&dir.path().join("by-hand"), header);
+        skill_at(&dir.path().join("open"), &described("open", "o"));
+
+        let found = discover(&[project(dir.path())]);
+
+        let flags: Vec<_> = found
+            .iter()
+            .map(|s| (&*s.name, s.model_invocable))
+            .collect();
+        assert_eq!(flags, [("by-hand", false), ("open", true)]);
+    }
+
+    #[test]
+    fn instructions_leave_out_the_header() {
+        assert_eq!(instructions(&described("a", "b")), "# Body\n");
+        assert_eq!(instructions("# No header\n"), "# No header\n");
+        assert_eq!(instructions("---\nname: never\n"), "---\nname: never\n");
     }
 
     #[test]

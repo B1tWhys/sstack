@@ -223,15 +223,21 @@ fn agent_config(
     SystemKeyring::connect();
     let secret = resolve_secret(&connection.secret, &SystemKeyring, backend.main)?;
     let root = place.worktree.as_deref().unwrap_or(backend.main);
-    let project = Arc::new(Project::new(root)?);
+    let offered: Vec<Skill> = installed_skills(root)
+        .into_iter()
+        .filter(|skill| skill.model_invocable)
+        .collect();
+    let skill_directories = offered
+        .iter()
+        .filter_map(|s| s.path.parent().map(Path::to_owned));
+    let project = Arc::new(Project::new(root)?.with_readable(skill_directories));
     let secret_env = vec![connection.secret.clone()];
-    let found = installed_skills(root);
     let tools = ToolBox::standard(project.clone(), approver.clone(), secret_env.clone())
-        .with_skills(found.clone());
+        .with_skills(offered.clone());
     let home = dirs::home_dir();
     let claude = skills::claude_directory(home.as_deref(), |name| std::env::var_os(name));
     let system = workspace::system_prompt(root, claude.as_deref());
-    let system = workspace::skills_prompt(&system, &found);
+    let system = workspace::skills_prompt(&system, &offered);
     let (tools, system) = if place.worktree.is_some() {
         let land = Land {
             worktree: project,

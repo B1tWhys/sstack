@@ -95,6 +95,7 @@ mod tests {
             description: String::new(),
             path: name.into(),
             scope: Scope::Personal,
+            model_invocable: true,
         };
         let loaded = skills_loaded(&[skill("learn"), skill("quiz")]);
         assert_eq!(loaded, "loaded 2 skills: learn, quiz");

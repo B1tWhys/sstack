@@ -229,6 +229,7 @@ mod tests {
             description: String::new(),
             path: "SKILL.md".into(),
             scope: Scope::Project,
+            model_invocable: true,
         };
         let tools = tools.with_skills(vec![skill]);
         assert!(tools.specs().iter().any(|spec| spec.name == "skill"));

@@ -297,6 +297,7 @@ mod tests {
             description: "Use when reviewing.".into(),
             path: "SKILL.md".into(),
             scope: Scope::Project,
+            model_invocable: true,
         };
         let prompt = skills_prompt("base", &[skill]);
         assert!(prompt.starts_with("base\n\n"));
