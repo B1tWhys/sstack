@@ -34,7 +34,7 @@ impl Status {
             ("ready", "Ctrl-C quit")
         };
         format!(
-            "session {} · {state} · {stop} · PgUp/PgDn scroll · /rebuild /quit",
+            "session {} · {state} · {stop} · PgUp/PgDn scroll · /new /rebuild /quit",
             self.session
         )
     }

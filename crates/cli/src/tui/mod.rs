@@ -14,6 +14,7 @@ mod components;
 mod editor;
 mod event;
 mod input;
+mod screen;
 #[cfg(test)]
 mod test_support;
 mod theme;
@@ -27,7 +28,8 @@ use app::{App, Exit};
 use approver::EventApprover;
 use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste};
 use crossterm::execute;
-use event::EventReceiver;
+use event::{EventReceiver, EventSender};
+use screen::{Screen, Shown};
 use sstack_core::workspace;
 use theme::ColorDepth;
 use tokio::sync::mpsc;
@@ -45,15 +47,29 @@ use crate::{AnyError, Args};
 pub async fn run(args: &Args) -> Result<ExitCode, AnyError> {
     require_terminal(io::stdin().is_terminal() && io::stdout().is_terminal())?;
     let (sender, mut events) = mpsc::unbounded_channel();
-    let Run { agent, session } = prepare(args, Arc::new(EventApprover::new(sender.clone())))?;
-    let agent = AgentHandle::spawn(agent, sender.clone());
-    let mut app = App::new(agent, workspace::session_id(&session), ColorDepth::detect());
-    input::spawn(sender);
-    while on_screen(&mut app, &mut events).await? == Exit::Rebuild {
-        let failure = rebuild(&relaunch_args(args, &session));
-        app.notice(format!("rebuild failed: {failure}"));
+    let mut screen = Screen {
+        shown: open(args, args.resume.as_deref(), &sender)?,
+        open_new: || open(args, None, &sender),
+    };
+    input::spawn(sender.clone());
+    while on_screen(&mut screen, &mut events).await? == Exit::Rebuild {
+        let failure = rebuild(&relaunch_args(args, &screen.shown.session));
+        screen
+            .shown
+            .app
+            .notice(format!("rebuild failed: {failure}"));
     }
     Ok(ExitCode::SUCCESS)
+}
+
+/// Opens a Session, resuming the one `resume` names or starting a new one, and an App to show it
+/// whose events go to `events`.
+fn open(args: &Args, resume: Option<&str>, events: &EventSender) -> Result<Shown, AnyError> {
+    let approver = Arc::new(EventApprover::new(events.clone()));
+    let Run { agent, session } = prepare(args, resume, approver)?;
+    let agent = AgentHandle::spawn(agent, events.clone());
+    let app = App::new(agent, workspace::session_id(&session), ColorDepth::detect());
+    Ok(Shown { app, session })
 }
 
 /// Refuses to start without a terminal, rather than take over one the harness was not given.
@@ -65,11 +81,14 @@ fn require_terminal(attached: bool) -> Result<(), AnyError> {
     }
 }
 
-/// Runs the App full screen, handing the terminal back however it stops.
-async fn on_screen(app: &mut App, events: &mut EventReceiver) -> Result<Exit, AnyError> {
+/// Runs the screen full screen, handing the terminal back however it stops.
+async fn on_screen<F: FnMut() -> Result<Shown, AnyError>>(
+    screen: &mut Screen<F>,
+    events: &mut EventReceiver,
+) -> Result<Exit, AnyError> {
     let mut terminal = ratatui::try_init()?;
     let _ = execute!(io::stdout(), EnableBracketedPaste);
-    let exit = app.run(&mut terminal, events).await;
+    let exit = screen.run(&mut terminal, events).await;
     let _ = execute!(io::stdout(), DisableBracketedPaste);
     ratatui::restore();
     Ok(exit?)

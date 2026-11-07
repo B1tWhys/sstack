@@ -23,6 +23,9 @@ pub enum Exit {
     Quit,
     /// The person asked for a Rebuild. The App can be run again if the Rebuild fails.
     Rebuild,
+    /// The person asked to leave this Session for a new one, which needs its own App. This App can
+    /// be run again if no new Session can be opened.
+    NewSession,
 }
 
 /// Runs the interactive harness: the one place that knows every component, the agent, and
@@ -157,13 +160,19 @@ impl App {
     /// Acts on a line the person entered.
     fn submit(&mut self, line: &str) -> Option<Exit> {
         let command = parse_command(line);
-        if self.busy && matches!(command, Command::Prompt(_) | Command::Rebuild) {
+        if self.busy
+            && matches!(
+                command,
+                Command::Prompt(_) | Command::Rebuild | Command::New
+            )
+        {
             self.notice(BUSY.to_owned());
             return None;
         }
         match command {
             Command::Prompt(text) => self.start_turn(text),
             Command::Rebuild => return Some(Exit::Rebuild),
+            Command::New => return Some(Exit::NewSession),
             Command::Quit => return Some(Exit::Quit),
             Command::Unknown(name) => self.notice(format!("unknown command: {name}")),
             Command::Empty => {}
@@ -336,6 +345,7 @@ mod tests {
         assert_eq!(h.enter("/nope"), None);
         assert!(h.screen().contains("unknown command: /nope"));
         assert_eq!(h.enter("/rebuild"), Some(Exit::Rebuild));
+        assert_eq!(h.enter("/new"), Some(Exit::NewSession));
         assert_eq!(h.enter("/quit"), Some(Exit::Quit));
         assert_eq!(h.session(), Vec::new());
     }
@@ -382,6 +392,7 @@ mod tests {
 
         assert_eq!(h.enter("again"), None);
         assert_eq!(h.enter("/rebuild"), None);
+        assert_eq!(h.enter("/new"), None);
         assert!(h.screen().contains("a Turn is running"));
 
         assert_eq!(h.app.handle(Event::Key(ctrl('c'))), None);

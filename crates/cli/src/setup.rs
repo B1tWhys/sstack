@@ -58,10 +58,16 @@ pub struct Run {
     pub session: PathBuf,
 }
 
-/// Readies a harness for the current directory, as the run's arguments ask.
+/// Readies a harness for the current directory, with the Connection and model the run's
+/// arguments ask for.
 ///
-/// `approver` decides whether each shell command the model asks for may run.
-pub fn prepare(args: &Args, approver: Arc<dyn Approver>) -> Result<Run, AnyError> {
+/// `resume` names the Session to resume, as `--resume` does, and a new one is started without
+/// it. `approver` decides whether each shell command the model asks for may run.
+pub fn prepare(
+    args: &Args,
+    resume: Option<&str>,
+    approver: Arc<dyn Approver>,
+) -> Result<Run, AnyError> {
     let config = load_settings()?;
     let connection = config.connection(args.connection.as_deref())?;
     let project = Arc::new(Project::new(&std::env::current_dir()?)?);
@@ -70,7 +76,7 @@ pub fn prepare(args: &Args, approver: Arc<dyn Approver>) -> Result<Run, AnyError
         model: args.model.as_ref().unwrap_or(&config.default_model).clone(),
     };
     let agent_config = agent_config(&backend, project.clone(), approver)?;
-    start_session(agent_config, &project, args.resume.as_deref())
+    start_session(agent_config, &project, resume)
 }
 
 /// Returns the user's settings.

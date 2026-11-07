@@ -7,6 +7,9 @@ pub enum Command<'a> {
     Prompt(&'a str),
     /// The `/rebuild` Human Command.
     Rebuild,
+    /// The `/new` Human Command, also spelled `/n`, which leaves the current Session for a new
+    /// one.
+    New,
     /// The `/quit` Human Command, also spelled `/exit`.
     Quit,
     /// A slash-prefixed line that is not a known Human Command.
@@ -23,6 +26,7 @@ pub fn parse_command(line: &str) -> Command<'_> {
     match line.trim() {
         "" => Command::Empty,
         "/rebuild" => Command::Rebuild,
+        "/new" | "/n" => Command::New,
         "/quit" | "/exit" => Command::Quit,
         other if other.starts_with('/') => Command::Unknown(other),
         other => Command::Prompt(other),
@@ -37,6 +41,8 @@ mod tests {
     fn lines_parse_into_commands() {
         assert_eq!(parse_command(" hello "), Command::Prompt("hello"));
         assert_eq!(parse_command("/rebuild"), Command::Rebuild);
+        assert_eq!(parse_command("/new"), Command::New);
+        assert_eq!(parse_command("/n"), Command::New);
         assert_eq!(parse_command("/quit"), Command::Quit);
         assert_eq!(parse_command("/exit"), Command::Quit);
         assert_eq!(parse_command("/nope"), Command::Unknown("/nope"));
