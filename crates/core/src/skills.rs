@@ -38,17 +38,10 @@ pub fn locations(
     home: Option<&Path>,
     env: impl Fn(&str) -> Option<OsString>,
 ) -> Vec<PathBuf> {
-    let in_home = |name: &str| home.map(|home| home.join(name));
-    let config = |variable: &str, default: &str| {
-        env(variable)
-            .filter(|value| !value.is_empty())
-            .map(PathBuf::from)
-            .or_else(|| in_home(default))
-    };
     let user = [
-        config("CLAUDE_CONFIG_DIR", ".claude"),
-        config("CODEX_HOME", ".codex"),
-        in_home(".agents"),
+        claude_directory(home, &env),
+        tool_directory(env("CODEX_HOME"), home.map(|home| home.join(".codex"))),
+        home.map(|home| home.join(".agents")),
     ];
     [Some(project.join(".claude")), Some(project.join(".agents"))]
         .into_iter()
@@ -56,6 +49,28 @@ pub fn locations(
         .flatten()
         .map(|directory| directory.join("skills"))
         .collect()
+}
+
+/// Returns the directory Claude Code keeps the person's files in, if it can be known.
+///
+/// `home` and `env` mean what they do for [`locations`]. The directory need not exist.
+#[must_use]
+pub fn claude_directory(
+    home: Option<&Path>,
+    env: impl Fn(&str) -> Option<OsString>,
+) -> Option<PathBuf> {
+    tool_directory(
+        env("CLAUDE_CONFIG_DIR"),
+        home.map(|home| home.join(".claude")),
+    )
+}
+
+/// Returns the directory `configured` names, or else `default`. An empty value counts as unset.
+fn tool_directory(configured: Option<OsString>, default: Option<PathBuf>) -> Option<PathBuf> {
+    configured
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or(default)
 }
 
 /// Finds every [`Skill`] in `locations`, searching earlier locations first.
@@ -328,6 +343,15 @@ mod tests {
             "/env/CODEX_HOME/skills",
         ];
         assert_eq!(found, expected.map(PathBuf::from));
+    }
+
+    #[test]
+    fn claude_directory_follows_the_environment_then_the_home_directory() {
+        let moved = |_: &str| Some(OsString::from("/env"));
+        let home = Some(Path::new("/h"));
+        assert_eq!(claude_directory(home, moved), Some("/env".into()));
+        assert_eq!(claude_directory(home, |_| None), Some("/h/.claude".into()));
+        assert_eq!(claude_directory(None, |_| None), None);
     }
 
     #[test]

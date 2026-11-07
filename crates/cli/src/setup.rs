@@ -226,7 +226,10 @@ fn agent_config(
     let found = installed_skills(root);
     let tools = ToolBox::standard(project.clone(), approver.clone(), secret_env.clone())
         .with_skills(found.clone());
-    let system = workspace::skills_prompt(&workspace::system_prompt(root), &found);
+    let home = dirs::home_dir();
+    let claude = skills::claude_directory(home.as_deref(), |name| std::env::var_os(name));
+    let system = workspace::system_prompt(root, claude.as_deref());
+    let system = workspace::skills_prompt(&system, &found);
     let (tools, system) = if place.worktree.is_some() {
         let land = Land {
             worktree: project,

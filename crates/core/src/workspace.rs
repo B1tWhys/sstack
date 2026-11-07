@@ -14,6 +14,8 @@ Use the tools to inspect and change the project, and verify your changes before 
 Be direct, and report results faithfully, including anything that failed.";
 /// The file a project keeps its own instructions in.
 const INSTRUCTIONS_FILE: &str = "AGENTS.md";
+/// The file, in Claude Code's directory, a person keeps instructions for every project in.
+const USER_INSTRUCTIONS_FILE: &str = "CLAUDE.md";
 /// The file extension of Session logs.
 const SESSION_EXTENSION: &str = "jsonl";
 /// The directory, among a project's Sessions, of the ones the person has put away.
@@ -143,13 +145,20 @@ pub fn restore_session(sessions_dir: &Path, id: &str) -> io::Result<bool> {
     Ok(true)
 }
 
-/// Builds the system prompt from the base instructions and the project's own, if any.
+/// Builds the system prompt from the base instructions, then the person's own and the project's
+/// own, if there are any. The project's come last, so that they can overrule the person's.
+///
+/// `claude_directory` is where Claude Code keeps the person's files, if known.
 #[must_use]
-pub fn system_prompt(project: &Path) -> String {
-    match fs::read_to_string(project.join(INSTRUCTIONS_FILE)) {
-        Ok(instructions) => format!("{BASE_PROMPT}\n\n{instructions}"),
-        Err(_) => BASE_PROMPT.to_owned(),
+pub fn system_prompt(project: &Path, claude_directory: Option<&Path>) -> String {
+    let user = claude_directory.map(|directory| directory.join(USER_INSTRUCTIONS_FILE));
+    let files = user.into_iter().chain([project.join(INSTRUCTIONS_FILE)]);
+    let mut prompt = BASE_PROMPT.to_owned();
+    for instructions in files.filter_map(|file| fs::read_to_string(file).ok()) {
+        prompt.push_str("\n\n");
+        prompt.push_str(&instructions);
     }
+    prompt
 }
 
 /// Extends `prompt` for a Session that has its own worktree.
@@ -260,9 +269,24 @@ mod tests {
     #[test]
     fn project_instructions_extend_the_system_prompt() {
         let dir = tempfile::tempdir().unwrap();
-        assert_eq!(system_prompt(dir.path()), BASE_PROMPT);
+        assert_eq!(system_prompt(dir.path(), None), BASE_PROMPT);
         fs::write(dir.path().join(INSTRUCTIONS_FILE), "Use tabs.").unwrap();
-        assert!(system_prompt(dir.path()).ends_with("\n\nUse tabs."));
+        assert!(system_prompt(dir.path(), None).ends_with("\n\nUse tabs."));
+    }
+
+    #[test]
+    fn user_instructions_come_before_the_projects() {
+        let dir = tempfile::tempdir().unwrap();
+        let (project, claude) = (dir.path().join("project"), dir.path().join("claude"));
+        fs::create_dir(&project).unwrap();
+        fs::create_dir(&claude).unwrap();
+        assert_eq!(system_prompt(&project, Some(&claude)), BASE_PROMPT);
+
+        fs::write(claude.join(USER_INSTRUCTIONS_FILE), "No emoji.").unwrap();
+        fs::write(project.join(INSTRUCTIONS_FILE), "Use tabs.").unwrap();
+
+        let prompt = system_prompt(&project, Some(&claude));
+        assert_eq!(prompt, format!("{BASE_PROMPT}\n\nNo emoji.\n\nUse tabs."));
     }
 
     #[test]

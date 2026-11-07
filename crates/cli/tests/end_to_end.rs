@@ -195,6 +195,7 @@ impl Sandbox {
             .args(args)
             .current_dir(&self.project)
             .env("HOME", &self.home)
+            .env_remove("CLAUDE_CONFIG_DIR")
             .env("XDG_CONFIG_HOME", self.home.join(".config"))
             .env("XDG_DATA_HOME", self.home.join(".local/share"))
             .env(SECRET_NAME, SECRET);
@@ -277,6 +278,19 @@ fn project_instructions_reach_the_model() {
     sandbox.run(&["--prompt", "hi"]);
 
     assert!(api.request(0).contains("Prefer tabs."));
+}
+
+#[test]
+fn user_instructions_reach_the_model() {
+    let api = FakeApi::start(vec![text_reply("ok")]);
+    let sandbox = Sandbox::new(&api.url);
+    let directory = sandbox.home.join(".claude");
+    fs::create_dir_all(&directory).unwrap();
+    fs::write(directory.join("CLAUDE.md"), "Never use emoji.").unwrap();
+
+    sandbox.run(&["--prompt", "hi"]);
+
+    assert!(api.request(0).contains("Never use emoji."));
 }
 
 #[test]
