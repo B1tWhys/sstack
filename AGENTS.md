@@ -5,7 +5,7 @@ Use the vocabulary in `GLOSSARY.md`. Design decisions are in `docs/adr/`.
 ## Setup
 
 ```sh
-cargo install --locked cargo-llvm-cov cargo-crap committed
+cargo install --locked cargo-llvm-cov cargo-crap4rust committed
 brew install prek
 prek install
 ```

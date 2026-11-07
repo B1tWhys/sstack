@@ -29,14 +29,14 @@ repos:
       # Writes the coverage report the crap hook reads.
       - id: tests
         name: tests with coverage
-        entry: cargo llvm-cov --workspace --all-features --locked --doctests --lcov --output-path target/lcov.info
+        entry: cargo llvm-cov --workspace --all-features --locked --doctests --json --output-path target/coverage.json
         language: system
         pass_filenames: false
         always_run: true
 
       - id: crap
         name: CRAP score
-        entry: cargo crap --workspace --lcov target/lcov.info --missing pessimistic --threshold 6 --fail-above
+        entry: cargo crap4rust --coverage target/coverage.json --threshold 6 --warn-threshold 6 --project-threshold 0 --strict
         language: system
         pass_filenames: false
         always_run: true
