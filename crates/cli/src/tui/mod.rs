@@ -11,6 +11,7 @@ mod app;
 mod approver;
 mod component;
 mod components;
+mod editor;
 mod event;
 mod input;
 #[cfg(test)]

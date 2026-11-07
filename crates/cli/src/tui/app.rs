@@ -178,13 +178,17 @@ impl App {
     }
 
     /// Draws every component in its place, with any question for the person on top.
+    ///
+    /// The prompt grows with what is typed, up to half the screen.
     fn render(&self, frame: &mut Frame) {
+        let area = frame.area();
+        let prompt_height = self.prompt.height(area.width).min(area.height / 2).max(3);
         let [transcript, status, prompt] = Layout::vertical([
             Constraint::Min(1),
             Constraint::Length(1),
-            Constraint::Length(3),
+            Constraint::Length(prompt_height),
         ])
-        .areas(frame.area());
+        .areas(area);
         self.transcript.render(frame, transcript);
         self.status.render(frame, status);
         self.prompt.render(frame, prompt);
@@ -347,6 +351,22 @@ mod tests {
         assert_eq!(h.session().last(), Some(&Entry::TurnCancelled));
 
         assert_eq!(h.app.handle(Event::Key(ctrl('c'))), Some(Exit::Quit));
+    }
+
+    #[tokio::test]
+    async fn the_prompt_grows_with_long_input_up_to_half_the_screen() {
+        let mut h = scripted(vec![]);
+        let typed = "word ".repeat(40);
+        h.app.handle(Event::Paste(typed.clone()));
+        let screen = h.screen();
+        let rows: Vec<&str> = screen.lines().collect();
+        assert_eq!(rows.len(), 12);
+        assert!(rows[5].starts_with("session 7"), "{screen}");
+        assert!(rows[6].starts_with("┌"), "{screen}");
+        assert!(rows[11].starts_with("└"), "{screen}");
+
+        h.app.handle(Event::Paste("\n".repeat(20)));
+        assert!(h.screen().lines().nth(5).unwrap().starts_with("session 7"));
     }
 
     #[tokio::test]
