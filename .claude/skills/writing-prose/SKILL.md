@@ -1,6 +1,6 @@
 ---
 name: writing-prose
-description: How to write prose in this project. Use when writing, editing or reviewing a README, an ADR, a commit message or a PR description, or when asked to unslop text.
+description: Rules for prose. Use when writing or reviewing a README, ADR, commit message or PR description, or when asked to unslop text.
 ---
 
 Write for a tired engineer, who should understand each sentence on the first read and learn something true of this project from it.

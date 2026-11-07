@@ -1,6 +1,6 @@
 ---
 name: writing-for-agents
-description: Writing documents for agents. Use when creating or editing a Skill, or modifying AGENTS.md or CLAUDE.md.
+description: Rules for documents agents read. Use when writing a Skill, AGENTS.md or CLAUDE.md.
 ---
 
 This is the reference for any document an agent consumes: a Skill, `AGENTS.md`, or a doc reached by a pointer. The aim is that the agent takes the same process on every run, which is a different aim from producing the same output.

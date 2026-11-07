@@ -1,6 +1,6 @@
 ---
 name: writing-docs
-description: How to write doc comments in this project. Use when writing, editing or reviewing any doc comment.
+description: Rules for doc comments. Use when writing or reviewing one.
 ---
 
 Write each doc comment for a reader deciding whether to use the item, who can see only its name and this comment. Every item gets one.
