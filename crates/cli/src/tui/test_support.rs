@@ -1,6 +1,6 @@
 //! Helpers for testing components and the App without a real terminal.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -74,16 +74,39 @@ pub fn bash_call(command: &str) -> AssistantEntry {
     }
 }
 
-/// Returns an agent working in `directory`, recording its Session at `session`.
+/// Returns where agents from [`agent`] and [`resumed_agent`] record their Session in `directory`.
+pub fn session_path(directory: &Path) -> PathBuf {
+    directory.join("session.jsonl")
+}
+
+/// Returns an agent working in `directory` on a new Session, stored at [`session_path`].
 pub fn agent(directory: &Path, provider: Arc<dyn Provider>, approver: Arc<dyn Approver>) -> Agent {
+    let log = SessionLog::create(&session_path(directory)).unwrap();
+    Agent::new(agent_config(directory, provider, approver), log, vec![]).unwrap()
+}
+
+/// Returns an agent working in `directory` that picks up the Session an earlier [`agent`] left.
+pub fn resumed_agent(
+    directory: &Path,
+    provider: Arc<dyn Provider>,
+    approver: Arc<dyn Approver>,
+) -> Agent {
+    let (log, entries) = SessionLog::open(&session_path(directory)).unwrap();
+    Agent::new(agent_config(directory, provider, approver), log, entries).unwrap()
+}
+
+/// Returns what a test agent working in `directory` runs on, with no system prompt.
+fn agent_config(
+    directory: &Path,
+    provider: Arc<dyn Provider>,
+    approver: Arc<dyn Approver>,
+) -> AgentConfig {
     let project = Arc::new(Project::new(directory).unwrap());
-    let config = AgentConfig {
+    AgentConfig {
         provider,
         model: "scripted".into(),
         system: String::new(),
         tools: ToolBox::standard(project, approver, vec![]),
         context_limit: 1000,
-    };
-    let log = SessionLog::create(&directory.join("session.jsonl")).unwrap();
-    Agent::new(config, log, vec![]).unwrap()
+    }
 }

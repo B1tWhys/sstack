@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use crossterm::event::KeyEvent;
 use sstack_core::agent::{AgentEvent, TurnEnd};
+use sstack_core::session::Entry;
 use tokio::sync::{mpsc, oneshot};
 
 /// Lets any task tell the App that something happened. Sending never blocks, so it is safe from
@@ -25,6 +26,9 @@ pub enum Event {
     Paste(String),
     /// The terminal changed size. Components need not react, because the App redraws anyway.
     Resize,
+    /// The agent picked up a Session that already has these entries, oldest first, such as after
+    /// a Rebuild. Comes before any Turn, and holds nothing for a new Session.
+    Resumed(Vec<Entry>),
     /// The agent started a Turn on this input from the person.
     TurnStarted(String),
     /// Something happened during the running Turn.

@@ -168,7 +168,7 @@ impl Agent {
         self.record(Entry::Assistant(response))?;
         if stop != StopReason::ToolUse || calls.is_empty() {
             self.settle_unanswered_calls(NOT_RUN)?;
-            return Ok(Some(turn_end(stop)));
+            return Ok(Some(TurnEnd::from(stop)));
         }
         self.run_tools(&calls, context).await
     }
@@ -192,10 +192,7 @@ impl Agent {
         context: &mut TurnContext<'_>,
     ) -> Result<Option<TurnEnd>, AgentError> {
         for call in calls {
-            (context.on_event)(AgentEvent::ToolStarted(ToolCallSummary {
-                name: call.name.clone(),
-                input: call.input.to_string(),
-            }));
+            (context.on_event)(AgentEvent::ToolStarted(ToolCallSummary::from(call)));
             let output = tokio::select! {
                 biased;
                 () = context.cancel.cancelled() => return self.cancelled().map(Some),
@@ -258,12 +255,24 @@ fn stream_event(event: StreamEvent) -> AgentEvent {
     }
 }
 
-/// Converts a response's stop reason into the way the Turn ended.
-fn turn_end(stop: StopReason) -> TurnEnd {
-    match stop {
-        StopReason::EndTurn | StopReason::ToolUse => TurnEnd::Finished,
-        StopReason::MaxTokens => TurnEnd::Truncated,
-        StopReason::Refused => TurnEnd::Refused,
+/// Tells how a Turn ended from why its last response stopped.
+impl From<StopReason> for TurnEnd {
+    fn from(stop: StopReason) -> Self {
+        match stop {
+            StopReason::EndTurn | StopReason::ToolUse => TurnEnd::Finished,
+            StopReason::MaxTokens => TurnEnd::Truncated,
+            StopReason::Refused => TurnEnd::Refused,
+        }
+    }
+}
+
+/// Describes a recorded tool call the same way as one that is about to run.
+impl From<&ToolCall> for ToolCallSummary {
+    fn from(call: &ToolCall) -> Self {
+        Self {
+            name: call.name.clone(),
+            input: call.input.to_string(),
+        }
     }
 }
 

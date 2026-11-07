@@ -201,13 +201,19 @@ mod tests {
     use super::*;
     use crate::tui::approver::EventApprover;
     use crate::tui::event::EventSender;
-    use crate::tui::test_support::{agent, bash_call, ctrl, key, reply, rows};
+    use crate::tui::test_support::{
+        agent, bash_call, ctrl, key, reply, resumed_agent, rows, session_path,
+    };
     use async_trait::async_trait;
     use ratatui::backend::TestBackend;
+    use sstack_core::agent::Agent;
     use sstack_core::provider::scripted::{Scripted, ScriptedProvider};
     use sstack_core::provider::{ModelRequest, Provider, ProviderError, StreamEvent};
     use sstack_core::session::{AssistantEntry, Entry, SessionLog};
+    use sstack_core::tools::Approver;
+    use std::path::Path;
     use std::sync::Arc;
+    use tempfile::TempDir;
     use tokio::sync::mpsc;
 
     /// An App wired to a real agent, with the events it would receive held back for the test.
@@ -220,9 +226,14 @@ mod tests {
 
     fn harness(provider: Arc<dyn Provider>) -> Harness {
         let dir = tempfile::tempdir().unwrap();
+        start(dir, |path, approver| agent(path, provider, approver))
+    }
+
+    /// Starts an App in `dir` on the agent `make` returns.
+    fn start(dir: TempDir, make: impl FnOnce(&Path, Arc<dyn Approver>) -> Agent) -> Harness {
         let (sender, events) = mpsc::unbounded_channel();
-        let approver = Arc::new(EventApprover::new(sender.clone()));
-        let agent = AgentHandle::spawn(agent(dir.path(), provider, approver), sender.clone());
+        let approver: Arc<dyn Approver> = Arc::new(EventApprover::new(sender.clone()));
+        let agent = AgentHandle::spawn(make(dir.path(), approver), sender.clone());
         Harness {
             dir,
             app: App::new(agent, "7".into()),
@@ -236,6 +247,14 @@ mod tests {
     }
 
     impl Harness {
+        /// Replaces the App with a new one on the same Session, as a Rebuild does.
+        fn rebuilt(self) -> Harness {
+            let provider = Arc::new(ScriptedProvider::new(vec![]));
+            start(self.dir, |path, approver| {
+                resumed_agent(path, provider, approver)
+            })
+        }
+
         /// Types `line` at the prompt and presses Enter.
         fn enter(&mut self, line: &str) -> Option<Exit> {
             for character in line.chars() {
@@ -271,9 +290,7 @@ mod tests {
         }
 
         fn session(&self) -> Vec<Entry> {
-            SessionLog::open(&self.dir.path().join("session.jsonl"))
-                .unwrap()
-                .1
+            SessionLog::open(&session_path(self.dir.path())).unwrap().1
         }
     }
 
@@ -288,6 +305,21 @@ mod tests {
         assert!(screen.contains("hello back"), "{screen}");
         assert!(screen.contains("session 7 · ready"), "{screen}");
         assert_eq!(h.session().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn after_a_rebuild_the_session_so_far_is_shown() {
+        let mut h = scripted(vec![Ok(reply("hello back"))]);
+        h.enter("hello");
+        h.until_turn_ends().await;
+
+        let mut h = h.rebuilt();
+        h.until(|event| matches!(event, Event::Resumed(_))).await;
+
+        let screen = h.screen();
+        assert!(screen.contains("> hello"), "{screen}");
+        assert!(screen.contains("hello back"), "{screen}");
+        assert!(screen.contains("session 7 · ready"), "{screen}");
     }
 
     #[tokio::test]

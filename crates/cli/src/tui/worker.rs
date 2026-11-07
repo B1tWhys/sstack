@@ -8,8 +8,9 @@ use super::event::{Event, EventSender};
 
 /// Lets the App start and cancel Turns on an agent that runs on its own task.
 ///
-/// Everything the Turn does comes back as events: [`Event::TurnStarted`], then any number of
-/// [`Event::Agent`], then [`Event::TurnEnded`].
+/// Everything comes back as events. First [`Event::Resumed`] tells what the Session already holds.
+/// Then each Turn sends [`Event::TurnStarted`], any number of [`Event::Agent`], and
+/// [`Event::TurnEnded`].
 pub struct AgentHandle {
     /// Where Turns are queued for the agent's task.
     prompts: mpsc::UnboundedSender<Prompt>,
@@ -30,6 +31,7 @@ impl AgentHandle {
     ///
     /// The task ends once this handle is dropped and any queued Turns have finished.
     pub fn spawn(agent: Agent, events: EventSender) -> Self {
+        let _ = events.send(Event::Resumed(agent.entries().to_vec()));
         let (prompts, queued) = mpsc::unbounded_channel();
         tokio::spawn(serve(agent, queued, events));
         Self {
