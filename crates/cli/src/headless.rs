@@ -1,50 +1,48 @@
-//! Talking to the person at the terminal.
+//! Running one prompt with nobody watching, as plain text on standard output.
 
 use std::ffi::OsString;
-use std::io::{IsTerminal, Write};
+use std::io::{IsTerminal, Write, stdout};
+use std::process::ExitCode;
 use std::sync::Arc;
 
-use async_trait::async_trait;
-use sstack_core::agent::{AgentEvent, TurnEnd};
-use sstack_core::tools::Approver;
-use tokio::sync::{Mutex, mpsc};
+use sstack_core::agent::{AgentEvent, TurnContext, TurnEnd};
+use sstack_core::tools::DenyAll;
+use sstack_core::workspace;
+use tokio_util::sync::CancellationToken;
 
-/// The most characters of a tool call's input to show.
-const MAX_TOOL_INPUT_CHARS: usize = 200;
+use crate::describe;
+use crate::setup::{Run, prepare};
+use crate::{AnyError, Args};
 
-/// Lines typed at the terminal, shared because approvals interrupt the prompt loop.
-pub type InputLines = Arc<Mutex<mpsc::Receiver<String>>>;
-
-/// Lets the person decide at the terminal whether each shell command runs.
-pub struct TerminalApprover<W> {
-    /// The lines typed at the terminal, shared with the prompt loop.
-    input: InputLines,
-    /// Where approval questions are written.
-    prompt: std::sync::Mutex<W>,
+/// Runs one prompt with no interaction, denying all shell commands.
+///
+/// Succeeds only if the Turn finished normally, so scripts can tell when it did not.
+pub async fn run(args: &Args, prompt: &str) -> Result<ExitCode, AnyError> {
+    let Run { mut agent, session } = prepare(args, Arc::new(DenyAll))?;
+    let cancel = CancellationToken::new();
+    let out = stdout();
+    let mut view = EventView::new(&out, wants_style(&out));
+    let mut context = TurnContext {
+        cancel: &cancel,
+        on_event: &mut |event| view.show(&event),
+    };
+    let result = agent.run_turn(prompt, &mut context).await;
+    let outcome =
+        describe::outcome_text(result.as_ref().map(|end| *end).map_err(ToString::to_string));
+    print!(
+        "{}",
+        outcome.map_or_else(String::new, |text| format!("\n{text}\n"))
+    );
+    println!("\n[session {}]", workspace::session_id(&session));
+    Ok(exit_code(result.ok()))
 }
 
-impl<W> TerminalApprover<W> {
-    /// Creates an approver that reads answers from `input` and asks through `prompt`.
-    pub fn new(input: InputLines, prompt: W) -> Self {
-        Self {
-            input,
-            prompt: std::sync::Mutex::new(prompt),
-        }
+/// Returns a success exit code only if the Turn finished normally.
+fn exit_code(end: Option<TurnEnd>) -> ExitCode {
+    match end {
+        Some(TurnEnd::Finished) => ExitCode::SUCCESS,
+        _ => ExitCode::FAILURE,
     }
-}
-
-#[async_trait]
-impl<W: Write + Send> Approver for TerminalApprover<W> {
-    async fn approve(&self, command: &str) -> bool {
-        let shown = write!(self.prompt.lock().unwrap(), "\nRun `{command}`? [y/N] ");
-        let answer = self.input.lock().await.recv().await;
-        shown.is_ok() && answer.is_some_and(|line| is_yes(&line))
-    }
-}
-
-/// Returns whether a typed answer means yes.
-fn is_yes(line: &str) -> bool {
-    matches!(line.trim().to_lowercase().as_str(), "y" | "yes")
 }
 
 /// Starts the look given to the model's reasoning: dim and italic.
@@ -55,7 +53,7 @@ const RESET_STYLE: &str = "\x1b[0m";
 /// Returns whether output to `stream` may be styled.
 ///
 /// Only a terminal is styled, and never when the `NO_COLOR` variable is set to anything non-empty.
-pub fn wants_style(stream: &impl IsTerminal) -> bool {
+fn wants_style(stream: &impl IsTerminal) -> bool {
     style_allowed(stream.is_terminal(), std::env::var_os("NO_COLOR"))
 }
 
@@ -64,11 +62,11 @@ fn style_allowed(is_terminal: bool, no_color: Option<OsString>) -> bool {
     is_terminal && no_color.is_none_or(|value| value.is_empty())
 }
 
-/// Shows a Turn's events to the person, setting the model's reasoning apart from its reply.
+/// Shows a Turn's events as text, setting the model's reasoning apart from its reply.
 ///
 /// Use one for each Turn, because it remembers what was shown last. Write failures are ignored,
 /// because they must not stop a Turn.
-pub struct EventView<W> {
+struct EventView<W> {
     /// Where events are shown.
     out: W,
     /// Whether reasoning may be shown with terminal styling. Without it, reasoning is plain text.
@@ -79,7 +77,7 @@ pub struct EventView<W> {
 
 impl<W: Write> EventView<W> {
     /// Creates a view that writes to `out`, styling reasoning only if `styled` is set.
-    pub fn new(out: W, styled: bool) -> Self {
+    fn new(out: W, styled: bool) -> Self {
         Self {
             out,
             styled,
@@ -88,7 +86,7 @@ impl<W: Write> EventView<W> {
     }
 
     /// Shows one event.
-    pub fn show(&mut self, event: &AgentEvent) {
+    fn show(&mut self, event: &AgentEvent) {
         let text = self.text_for(event);
         let _ = self.out.write_all(text.as_bytes());
         let _ = self.out.flush();
@@ -112,12 +110,10 @@ fn event_text(event: &AgentEvent, styled: bool) -> String {
     match event {
         AgentEvent::Text(text) => text.clone(),
         AgentEvent::Reasoning(text) => reasoning_text(text, styled),
-        AgentEvent::ToolStarted(call) => {
-            format!("\n[{}] {}\n", call.name, shorten(&call.input))
-        }
+        AgentEvent::ToolStarted(call) => format!("\n{}\n", describe::tool_started(call)),
         AgentEvent::ToolFinished { name, is_error } => tool_finished(name, *is_error),
         AgentEvent::ContextNearLimit { used, limit } => {
-            format!("\n[warning] context is {used} of {limit} tokens; start a new Session soon\n")
+            format!("\n{}\n", describe::context_warning(*used, *limit))
         }
     }
 }
@@ -137,29 +133,9 @@ fn reasoning_text(text: &str, styled: bool) -> String {
 /// Returns the text shown when a tool finishes, which is nothing if it succeeded.
 fn tool_finished(name: &str, is_error: bool) -> String {
     if is_error {
-        format!("[{name}] failed\n")
+        format!("{}\n", describe::tool_failed(name))
     } else {
         String::new()
-    }
-}
-
-/// Cuts long text to [`MAX_TOOL_INPUT_CHARS`], marking that it was cut.
-fn shorten(text: &str) -> String {
-    let short: String = text.chars().take(MAX_TOOL_INPUT_CHARS).collect();
-    if short.len() < text.len() {
-        format!("{short}...")
-    } else {
-        short
-    }
-}
-
-/// Describes how a Turn ended, if that needs saying.
-pub fn turn_end_text(end: TurnEnd) -> Option<&'static str> {
-    match end {
-        TurnEnd::Finished => None,
-        TurnEnd::Truncated => Some("[stopped: the response hit the output limit]"),
-        TurnEnd::Refused => Some("[stopped: the model declined this request]"),
-        TurnEnd::Cancelled => Some("[cancelled]"),
     }
 }
 
@@ -168,31 +144,11 @@ mod tests {
     use super::*;
     use sstack_core::agent::ToolCallSummary;
 
-    #[tokio::test]
-    async fn only_an_explicit_yes_approves() {
-        for (answer, expected) in [("y", true), (" YES ", true), ("n", false), ("", false)] {
-            let (sender, receiver) = mpsc::channel(1);
-            sender.send(answer.to_owned()).await.unwrap();
-            let approver = TerminalApprover::new(Arc::new(Mutex::new(receiver)), Vec::<u8>::new());
-            assert_eq!(approver.approve("ls").await, expected, "{answer}");
-            let prompt = approver.prompt.lock().unwrap().clone();
-            assert!(String::from_utf8(prompt).unwrap().contains("`ls`"));
-        }
-    }
-
-    #[tokio::test]
-    async fn closed_input_denies() {
-        let (sender, receiver) = mpsc::channel(1);
-        drop(sender);
-        let approver = TerminalApprover::new(Arc::new(Mutex::new(receiver)), Vec::<u8>::new());
-        assert!(!approver.approve("ls").await);
-    }
-
     #[test]
     fn events_render_as_readable_text() {
         let started = AgentEvent::ToolStarted(ToolCallSummary {
             name: "read".into(),
-            input: "x".repeat(MAX_TOOL_INPUT_CHARS + 1),
+            input: "x".repeat(300),
         });
         let failed = AgentEvent::ToolFinished {
             name: "bash".into(),
@@ -271,15 +227,16 @@ mod tests {
     }
 
     #[test]
-    fn short_tool_input_is_shown_whole() {
-        assert_eq!(shorten("short"), "short");
-    }
-
-    #[test]
-    fn unusual_turn_ends_are_described() {
-        assert_eq!(turn_end_text(TurnEnd::Finished), None);
-        for end in [TurnEnd::Truncated, TurnEnd::Refused, TurnEnd::Cancelled] {
-            assert!(turn_end_text(end).is_some());
-        }
+    fn only_a_finished_turn_is_a_success() {
+        let code = |end| format!("{:?}", exit_code(end));
+        assert_eq!(
+            code(Some(TurnEnd::Finished)),
+            format!("{:?}", ExitCode::SUCCESS)
+        );
+        assert_eq!(
+            code(Some(TurnEnd::Refused)),
+            format!("{:?}", ExitCode::FAILURE)
+        );
+        assert_eq!(code(None), format!("{:?}", ExitCode::FAILURE));
     }
 }

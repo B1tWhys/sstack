@@ -50,9 +50,67 @@ pub fn relaunch(binary: &Path, args: &[String]) -> io::Error {
     Command::new(binary).args(args).exec()
 }
 
+/// Rebuilds the Harness Source and relaunches into it, passing the new binary `relaunch_args`.
+///
+/// Only returns if that could not be done, saying why. Build output goes straight to the
+/// terminal, so the caller should hand the terminal back first.
+pub fn rebuild(relaunch_args: &[String]) -> String {
+    Rebuilder { build, relaunch }.run(relaunch_args)
+}
+
+/// The two steps of a Rebuild, kept apart so that the decision between them can be tested.
+struct Rebuilder<B, R> {
+    /// Builds the Harness Source, returning the new binary if that worked.
+    build: B,
+    /// Replaces this process with a binary, returning only if that fails.
+    relaunch: R,
+}
+
+impl<B, R> Rebuilder<B, R>
+where
+    B: FnOnce() -> Option<PathBuf>,
+    R: FnOnce(&Path, &[String]) -> io::Error,
+{
+    /// Replaces the Running Harness with a fresh build, passing it `relaunch_args`.
+    ///
+    /// Only returns if that could not be done, saying why.
+    fn run(self, relaunch_args: &[String]) -> String {
+        match (self.build)() {
+            Some(binary) => (self.relaunch)(&binary, relaunch_args).to_string(),
+            None => "the build did not succeed".to_owned(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_failed_build_does_not_relaunch_and_says_so() {
+        let rebuilder = Rebuilder {
+            build: || None,
+            relaunch: |_: &Path, _: &[String]| panic!("a failed build must not relaunch"),
+        };
+        assert_eq!(rebuilder.run(&[]), "the build did not succeed");
+    }
+
+    #[test]
+    fn a_successful_build_relaunches_with_the_given_arguments() {
+        let mut launched = None;
+        let rebuilder = Rebuilder {
+            build: || Some(PathBuf::from("/bin/sstack")),
+            relaunch: |binary: &Path, arguments: &[String]| {
+                launched = Some((binary.to_owned(), arguments.to_vec()));
+                io::Error::other("exec failed")
+            },
+        };
+        let failure = rebuilder.run(&["--resume".to_owned()]);
+        let (binary, arguments) = launched.unwrap();
+        assert_eq!(binary, Path::new("/bin/sstack"));
+        assert_eq!(arguments, ["--resume"]);
+        assert_eq!(failure, "exec failed");
+    }
 
     #[test]
     fn the_build_targets_the_harness_binary() {

@@ -284,19 +284,14 @@ fn a_headless_run_denies_shell_commands() {
 }
 
 #[test]
-fn an_approved_command_runs_without_the_secret() {
-    let command = format!("touch ran; echo \"secret=[${SECRET_NAME}]\"");
-    let api = FakeApi::start(vec![bash_call(&command), text_reply("all done")]);
-    let sandbox = Sandbox::new(&api.url);
+fn interactive_mode_without_a_terminal_fails_clearly() {
+    let sandbox = Sandbox::new("http://127.0.0.1:1/v1/");
 
-    let output = sandbox.run_with_input("go\ny\n/quit\n");
+    let output = sandbox.run_with_input("hi\n/quit\n");
 
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert!(stderr(&output).contains("Run `touch ran"));
-    assert!(sandbox.project.join("ran").exists());
-    assert!(stdout(&output).contains("all done"));
-    assert!(api.request(1).contains("secret=[]"));
-    assert!(!api.request(1).contains(SECRET));
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("interactive mode needs a terminal"));
+    assert!(stderr(&output).contains("--prompt"));
 }
 
 #[test]
