@@ -71,7 +71,7 @@ impl Component for Status {
 mod tests {
     use super::*;
     use crate::tui::test_support::screen;
-    use sstack_core::agent::TurnEnd;
+    use sstack::agent::TurnEnd;
 
     #[test]
     fn shows_the_session_and_whether_a_turn_is_running() {

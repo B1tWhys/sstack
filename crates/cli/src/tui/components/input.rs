@@ -4,7 +4,7 @@ use crossterm::cursor::SetCursorStyle;
 use crossterm::event::KeyEvent;
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use sstack_core::vim::{Draft, VimEvent};
+use sstack::vim::{Draft, VimEvent};
 
 use super::prompt::Prompt;
 use super::vim_prompt::VimPrompt;

@@ -14,8 +14,8 @@ use crossterm::execute;
 use ratatui::backend::Backend;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::{Frame, Terminal};
-use sstack_core::vim::{VimEvent, VimFailure};
-use sstack_core::workspace::SessionSummary;
+use sstack::vim::{VimEvent, VimFailure};
+use sstack::workspace::SessionSummary;
 
 use super::component::{Component, KeyOutcome};
 use super::components::{Activity, Row, SIDEBAR_WIDTH, Sidebar};
@@ -593,10 +593,10 @@ mod tests {
     use async_trait::async_trait;
     use ratatui::backend::TestBackend;
     use ratatui::style::Color;
-    use sstack_core::provider::scripted::{Scripted, ScriptedProvider};
-    use sstack_core::provider::{ModelRequest, Provider, ProviderError, StreamEvent};
-    use sstack_core::session::{AssistantEntry, Entry, SessionLog};
-    use sstack_core::vim::Draft;
+    use sstack::provider::scripted::{Scripted, ScriptedProvider};
+    use sstack::provider::{ModelRequest, Provider, ProviderError, StreamEvent};
+    use sstack::session::{AssistantEntry, Entry, SessionLog};
+    use sstack::vim::Draft;
     use std::cell::RefCell;
     use std::fs;
     use std::path::PathBuf;

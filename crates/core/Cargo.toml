@@ -1,5 +1,5 @@
 [package]
-name = "sstack-core"
+name = "sstack"
 version.workspace = true
 edition.workspace = true
 

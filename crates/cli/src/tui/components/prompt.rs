@@ -5,7 +5,7 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
-use sstack_core::vim::Draft;
+use sstack::vim::Draft;
 
 use super::wrap::{BORDER, GUTTER, gutter, normalize_newlines, to_u16, wrap};
 use crate::tui::component::{Component, KeyOutcome};

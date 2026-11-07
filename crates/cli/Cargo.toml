@@ -1,7 +1,14 @@
 [package]
-name = "sstack"
+name = "sstack-cli"
 version.workspace = true
 edition.workspace = true
+
+# The library has the docs, as a binary named like the sstack library would
+# overwrite its docs.
+[[bin]]
+name = "sstack"
+path = "src/main.rs"
+doc = false
 
 [features]
 default = ["nvim-tests"]
@@ -19,7 +26,7 @@ crossterm = { version = "0.29", features = ["event-stream"] }
 dirs = "7"
 futures = "0.3"
 ratatui = { version = "0.30", features = ["unstable-rendered-line-info"] }
-sstack-core = { path = "../core", default-features = false }
+sstack = { path = "../core", default-features = false }
 tokio = { version = "1", features = ["macros", "process", "rt-multi-thread", "sync"] }
 tokio-util = "0.7"
 unicode-width = "0.2"

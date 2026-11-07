@@ -2,7 +2,7 @@
 
 The person types into an `nvim --embed --headless` running behind the Harness, so their own mappings, options and text-editing plugins work, and the Harness implements no vim behavior. We rejected simulating vim, because a simulation is never finished and could not run a person's config.
 
-The engine lives in `sstack_core::vim`, free of any UI type, so that a future GUI can reuse it: a front end sends keys in nvim's key notation and draws the `VimState` that comes back.
+The engine lives in `sstack::vim`, free of any UI type, so that a future GUI can reuse it: a front end sends keys in nvim's key notation and draws the `VimState` that comes back.
 
 Only msgpack-RPC notifications are sent to nvim, and a script running inside it pushes state from autocmds. We rejected reading state back with requests, because nvim answers no ordinary request while it waits on a key, such as the one after `f`, and the Harness has to stay free to send that key. It also needs no sleeps to let input settle, which reading state back relies on.
 

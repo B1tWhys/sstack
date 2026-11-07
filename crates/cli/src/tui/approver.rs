@@ -1,7 +1,7 @@
 //! Asking the person about shell commands from inside a running Turn.
 
 use async_trait::async_trait;
-use sstack_core::tools::Approver;
+use sstack::tools::Approver;
 
 use super::event::{ApprovalRequest, Event, Reply, SessionSender};
 

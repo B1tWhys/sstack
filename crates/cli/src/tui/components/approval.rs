@@ -75,7 +75,7 @@ mod tests {
     use super::*;
     use crate::tui::event::Reply;
     use crate::tui::test_support::{key, screen};
-    use sstack_core::agent::TurnEnd;
+    use sstack::agent::TurnEnd;
     use tokio::sync::oneshot;
 
     fn ask(approval: &mut Approval, command: &str) -> oneshot::Receiver<bool> {

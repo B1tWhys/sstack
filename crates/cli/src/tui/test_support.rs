@@ -6,12 +6,12 @@ use std::sync::Arc;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::backend::TestBackend;
 use ratatui::{Frame, Terminal};
-use sstack_core::agent::{Agent, AgentConfig};
-use sstack_core::provider::Provider;
-use sstack_core::session::{AssistantEntry, SessionLog, StopReason, ToolCall, Usage};
-use sstack_core::tools::project::Project;
-use sstack_core::tools::{Approver, ToolBox};
-use sstack_core::workspace;
+use sstack::agent::{Agent, AgentConfig};
+use sstack::provider::Provider;
+use sstack::session::{AssistantEntry, SessionLog, StopReason, ToolCall, Usage};
+use sstack::tools::project::Project;
+use sstack::tools::{Approver, ToolBox};
+use sstack::workspace;
 
 use super::approver::EventApprover;
 use super::component::{Component, KeyOutcome};

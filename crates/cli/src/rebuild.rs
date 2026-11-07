@@ -17,7 +17,7 @@ fn source_dir() -> PathBuf {
 fn build_command(source: &Path, profile: &str) -> Command {
     let mut command = Command::new("cargo");
     command
-        .args(["build", "--package", "sstack", "--profile", profile])
+        .args(["build", "--package", "sstack-cli", "--profile", profile])
         .current_dir(source);
     command
 }
@@ -80,7 +80,10 @@ mod tests {
     fn the_build_targets_the_harness_binary() {
         let command = build_command(Path::new("/src"), "dev");
         let args: Vec<_> = command.get_args().collect();
-        assert_eq!(args, ["build", "--package", "sstack", "--profile", "dev"]);
+        assert_eq!(
+            args,
+            ["build", "--package", "sstack-cli", "--profile", "dev"]
+        );
         assert_eq!(command.get_current_dir(), Some(Path::new("/src")));
     }
 

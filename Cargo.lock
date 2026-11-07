@@ -3406,28 +3406,6 @@ dependencies = [
 name = "sstack"
 version = "0.1.0"
 dependencies = [
- "anstyle",
- "anstyle-lossy",
- "anyhow",
- "async-trait",
- "bon",
- "clap",
- "crossterm",
- "dirs",
- "futures",
- "ratatui",
- "serde_json",
- "sstack-core",
- "tempfile",
- "tokio",
- "tokio-util",
- "unicode-width",
-]
-
-[[package]]
-name = "sstack-core"
-version = "0.1.0"
-dependencies = [
  "apple-native-keyring-store",
  "async-trait",
  "bon",
@@ -3447,6 +3425,28 @@ dependencies = [
  "toml",
  "yaml-rust2",
  "zbus-secret-service-keyring-store",
+]
+
+[[package]]
+name = "sstack-cli"
+version = "0.1.0"
+dependencies = [
+ "anstyle",
+ "anstyle-lossy",
+ "anyhow",
+ "async-trait",
+ "bon",
+ "clap",
+ "crossterm",
+ "dirs",
+ "futures",
+ "ratatui",
+ "serde_json",
+ "sstack",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "unicode-width",
 ]
 
 [[package]]

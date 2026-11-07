@@ -4,9 +4,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use crossterm::event::KeyEvent;
-use sstack_core::agent::{AgentEvent, TurnEnd};
-use sstack_core::session::Entry;
-use sstack_core::vim::VimEvent;
+use sstack::agent::{AgentEvent, TurnEnd};
+use sstack::session::Entry;
+use sstack::vim::VimEvent;
 use tokio::sync::{mpsc, oneshot};
 
 /// Lets any task tell the [`App`](crate::tui::app::App) that something happened. Sending never

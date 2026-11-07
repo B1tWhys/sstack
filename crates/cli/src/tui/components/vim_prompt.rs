@@ -9,7 +9,7 @@ use ratatui::Frame;
 use ratatui::layout::{Alignment, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
-use sstack_core::vim::{Draft, Vim, VimEvent, VimMode, VimState};
+use sstack::vim::{Draft, Vim, VimEvent, VimMode, VimState};
 use unicode_width::UnicodeWidthStr;
 
 use super::wrap::{BORDER, GUTTER, Wrapped, gutter, normalize_newlines, to_u16, wrap_to};
@@ -306,7 +306,7 @@ impl Component for VimPrompt {
 mod tests {
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
-    use sstack_core::vim::{VimCmdline, VimFailure};
+    use sstack::vim::{VimCmdline, VimFailure};
     use tokio::sync::mpsc;
 
     use super::*;

@@ -7,9 +7,9 @@ use crossterm::cursor::SetCursorStyle;
 use crossterm::event::KeyEvent;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
-use sstack_core::agent::TurnEnd;
-use sstack_core::session::Entry;
-use sstack_core::workspace::{self, SessionSummary};
+use sstack::agent::TurnEnd;
+use sstack::session::Entry;
+use sstack::workspace::{self, SessionSummary};
 
 use super::component::{Component, KeyOutcome};
 use super::components::{Activity, Approval, Input, Row, Status, Transcript};

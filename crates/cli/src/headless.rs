@@ -7,9 +7,9 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use anyhow::Result;
-use sstack_core::agent::{AgentEvent, TurnContext, TurnEnd};
-use sstack_core::tools::DenyAll;
-use sstack_core::workspace;
+use sstack::agent::{AgentEvent, TurnContext, TurnEnd};
+use sstack::tools::DenyAll;
+use sstack::workspace;
 use tokio_util::sync::CancellationToken;
 
 use crate::Args;
@@ -152,7 +152,7 @@ fn tool_finished(name: &str, is_error: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sstack_core::agent::ToolCallSummary;
+    use sstack::agent::ToolCallSummary;
 
     #[test]
     fn events_render_as_readable_text() {

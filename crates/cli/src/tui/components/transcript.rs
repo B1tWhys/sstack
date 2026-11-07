@@ -8,8 +8,8 @@ use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::{Line, Text};
 use ratatui::widgets::{Paragraph, Wrap};
-use sstack_core::agent::{AgentEvent, TurnEnd};
-use sstack_core::session::{AssistantEntry, Entry};
+use sstack::agent::{AgentEvent, TurnEnd};
+use sstack::session::{AssistantEntry, Entry};
 
 use crate::describe;
 use crate::tui::component::{Component, KeyOutcome};
@@ -223,8 +223,8 @@ mod tests {
     use super::*;
     use crate::tui::test_support::{bash_call, reply};
     use crate::tui::test_support::{key, screen};
-    use sstack_core::agent::ToolCallSummary;
-    use sstack_core::session::StopReason;
+    use sstack::agent::ToolCallSummary;
+    use sstack::session::StopReason;
 
     fn transcript(events: Vec<Event>) -> Transcript {
         let mut transcript = Transcript::default();

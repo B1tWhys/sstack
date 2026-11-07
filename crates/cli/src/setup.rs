@@ -5,13 +5,13 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use bon::builder;
-use sstack_core::agent::{Agent, AgentConfig};
-use sstack_core::config::{Config, Connection};
-use sstack_core::credentials::{SystemKeyring, resolve_secret};
-use sstack_core::session::{Entry, SessionLog};
-use sstack_core::tools::project::Project;
-use sstack_core::tools::{Approver, Land, ToolBox};
-use sstack_core::{workspace, worktree};
+use sstack::agent::{Agent, AgentConfig};
+use sstack::config::{Config, Connection};
+use sstack::credentials::{SystemKeyring, resolve_secret};
+use sstack::session::{Entry, SessionLog};
+use sstack::tools::project::Project;
+use sstack::tools::{Approver, Land, ToolBox};
+use sstack::{workspace, worktree};
 
 use crate::{Args, LATEST};
 

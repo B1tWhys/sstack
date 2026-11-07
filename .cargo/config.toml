@@ -3,5 +3,8 @@ rustdocflags = [
     "-Zunstable-options",
     "--enable-index-page",
     "--document-private-items",
-    "--extern-html-root-url=sstack_core=..",
+    # cargo doc --no-deps can document a crate before its dependencies, and
+    # rustdoc then renders links to them as plain text without a warning. Each
+    # workspace crate that others depend on needs an entry here.
+    "--extern-html-root-url=sstack=..",
 ]
