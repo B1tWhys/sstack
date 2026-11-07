@@ -13,8 +13,8 @@ use anstyle_lossy::palette;
 use ratatui::buffer::Buffer;
 use ratatui::style::{Color, Modifier, Style};
 
-/// A pale, grayish blue, easy to read at length.
-const MIST_BLUE: Color = Color::Rgb(184, 200, 218);
+/// A pale, soft clay, warm and easy to read at length. Leans pinker than sand.
+const CLAY: Color = Color::Rgb(216, 192, 178);
 
 /// A warm off-white, set apart from the blues without drawing the eye.
 const SAND: Color = Color::Rgb(222, 212, 192);
@@ -35,7 +35,7 @@ const AMBER: Color = Color::Rgb(206, 176, 124);
 const RAISED: Color = Color::Rgb(40, 46, 56);
 
 /// The model's replies, and other text meant to be read in full.
-pub const TEXT: Style = Style::new().fg(MIST_BLUE);
+pub const TEXT: Style = Style::new().fg(CLAY);
 
 /// What the person sent, as shown in the transcript. Bold, so each Turn is easy to find.
 pub const PROMPT: Style = Style::new().fg(SAND).add_modifier(Modifier::BOLD);
