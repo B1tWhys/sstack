@@ -64,7 +64,12 @@ pub async fn run(args: &Args) -> Result<ExitCode, AnyError> {
     };
     let stored = sessions.stored()?;
     let first = sessions.open(starting_session(args, &stored))?;
-    let mut app = App::new((first, stored), Box::new(sessions), ColorDepth::detect());
+    let mut app = App::builder()
+        .first(first)
+        .stored(stored)
+        .sessions(Box::new(sessions))
+        .colors(ColorDepth::detect())
+        .build();
     app.notice(describe::skills_loaded(&load_skills()?));
     input::spawn(sender);
     while on_screen(&mut app, &mut events).await? == Exit::Rebuild {

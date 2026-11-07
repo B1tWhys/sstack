@@ -4,6 +4,7 @@
 use std::path::Path;
 use std::time::SystemTime;
 
+use bon::bon;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::backend::Backend;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -84,12 +85,18 @@ pub struct App<'a> {
     colors: ColorDepth,
 }
 
+#[bon]
 impl<'a> App<'a> {
-    /// Creates the harness showing `first`, with every Session in `stored` a key press away, using
-    /// `sessions` to start the ones the person turns to, and drawing in the colors of `colors`.
+    /// Creates the harness.
+    #[builder]
     pub fn new(
-        (first, stored): (Opened, Vec<SessionSummary>),
+        /// The Session to show, which may also be one of `stored`.
+        first: Opened,
+        /// The Sessions a key press away.
+        stored: Vec<SessionSummary>,
+        /// Starts the Sessions the person turns to.
         sessions: Box<dyn Sessions + 'a>,
+        /// How many colors the terminal can show.
         colors: ColorDepth,
     ) -> Self {
         let mut panes: Vec<Pane> = stored.into_iter().map(Pane::stored).collect();
@@ -107,7 +114,9 @@ impl<'a> App<'a> {
             colors,
         }
     }
+}
 
+impl App<'_> {
     /// Returns where the Session on screen is stored.
     pub fn session(&self) -> &Path {
         self.panes[self.shown].path()
@@ -538,13 +547,25 @@ mod tests {
 
     /// Starts an App in `dir` showing a new Session, with `stored` a key press away.
     fn start(dir: TempDir, provider: Arc<dyn Provider>, stored: Vec<SessionSummary>) -> Harness {
-        start_with(dir, (provider, stored), |_| {})
+        start_with()
+            .dir(dir)
+            .provider(provider)
+            .stored(stored)
+            .adjust(|_| {})
+            .call()
     }
 
     /// Starts an App like [`start`], with `adjust` applied to its Sessions first.
+    #[bon::builder]
     fn start_with(
+        /// Where the Sessions are stored.
         dir: TempDir,
-        (provider, stored): (Arc<dyn Provider>, Vec<SessionSummary>),
+        /// Answers every Session.
+        provider: Arc<dyn Provider>,
+        /// The Sessions a key press away.
+        #[builder(default)]
+        stored: Vec<SessionSummary>,
+        /// Sets up how the Sessions misbehave.
         adjust: impl FnOnce(&mut TestSessions),
     ) -> Harness {
         let (sender, events) = mpsc::unbounded_channel();
@@ -563,7 +584,12 @@ mod tests {
             archive_failure: None,
         };
         adjust(&mut sessions);
-        let app = App::new((first, stored), Box::new(sessions), ColorDepth::Ansi256);
+        let app = App::builder()
+            .first(first)
+            .stored(stored)
+            .sessions(Box::new(sessions))
+            .colors(ColorDepth::Ansi256)
+            .build();
         Harness {
             dir,
             app,
@@ -898,9 +924,12 @@ mod tests {
     async fn a_session_that_cannot_open_leaves_the_person_where_they_were() {
         let dir = tempfile::tempdir().unwrap();
         let stored = vec![summary(&dir, "older", 100)];
-        let mut h = start_with(dir, (Arc::new(NeverResponds), stored), |sessions| {
-            sessions.open_failure = Some("no keychain");
-        });
+        let mut h = start_with()
+            .dir(dir)
+            .provider(Arc::new(NeverResponds))
+            .stored(stored)
+            .adjust(|sessions| sessions.open_failure = Some("no keychain"))
+            .call();
 
         h.press('n');
         assert_eq!(h.shown(), "first");
@@ -1099,10 +1128,11 @@ mod tests {
     #[tokio::test]
     async fn work_that_would_be_lost_stops_archiving_unless_forced() {
         let dir = tempfile::tempdir().unwrap();
-        let provider = Arc::new(NeverResponds);
-        let mut h = start_with(dir, (provider, vec![]), |sessions| {
-            sessions.refusal = Some("it has 2 unlanded commits");
-        });
+        let mut h = start_with()
+            .dir(dir)
+            .provider(Arc::new(NeverResponds))
+            .adjust(|sessions| sessions.refusal = Some("it has 2 unlanded commits"))
+            .call();
 
         h.enter("/archive");
         assert_eq!(*h.archived.borrow(), Vec::<String>::new());
@@ -1117,10 +1147,12 @@ mod tests {
     async fn a_failed_archive_keeps_the_session() {
         let dir = tempfile::tempdir().unwrap();
         let stored = vec![summary(&dir, "older", 100)];
-        let provider = Arc::new(NeverResponds);
-        let mut h = start_with(dir, (provider, stored), |sessions| {
-            sessions.archive_failure = Some("git said no");
-        });
+        let mut h = start_with()
+            .dir(dir)
+            .provider(Arc::new(NeverResponds))
+            .stored(stored)
+            .adjust(|sessions| sessions.archive_failure = Some("git said no"))
+            .call();
 
         h.press('x');
 
@@ -1143,10 +1175,11 @@ mod tests {
     #[tokio::test]
     async fn being_unable_to_move_on_keeps_the_session_on_screen() {
         let dir = tempfile::tempdir().unwrap();
-        let provider = Arc::new(NeverResponds);
-        let mut h = start_with(dir, (provider, vec![]), |sessions| {
-            sessions.open_failure = Some("no keychain");
-        });
+        let mut h = start_with()
+            .dir(dir)
+            .provider(Arc::new(NeverResponds))
+            .adjust(|sessions| sessions.open_failure = Some("no keychain"))
+            .call();
         h.press('x');
         assert_eq!(h.shown(), "first");
         assert_eq!(*h.archived.borrow(), Vec::<String>::new());

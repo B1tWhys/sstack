@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use bon::builder;
 use sstack_core::agent::{Agent, AgentConfig};
 use sstack_core::config::{Config, Connection};
 use sstack_core::credentials::{SystemKeyring, resolve_secret};
@@ -148,7 +149,12 @@ pub fn prepare(
     let session = open_session(&project_sessions(&main)?, start)?;
     let id = workspace::session_id(&session.path);
     let place = workplace(&main, &id, session.wants_worktree);
-    let agent_config = agent_config(&backend, &id, (&place, approver(&id)))?;
+    let agent_config = agent_config()
+        .backend(&backend)
+        .id(&id)
+        .place(&place)
+        .approver(approver(&id))
+        .call()?;
     Ok(Run {
         agent: Agent::new(agent_config, session.log, session.entries)?,
         session: session.path,
@@ -187,12 +193,17 @@ struct Backend<'a> {
     main: &'a Path,
 }
 
-/// Decides what the agent for the Session with id `id` runs on, given where it works and what
-/// decides on its shell commands.
+/// Decides what the agent for a Session runs on.
+#[builder]
 fn agent_config(
+    /// The model the run has chosen.
     backend: &Backend<'_>,
+    /// The id of the Session.
     id: &str,
-    (place, approver): (&Workplace, Arc<dyn Approver>),
+    /// Where the Session works.
+    place: &Workplace,
+    /// Decides on the Session's shell commands.
+    approver: Arc<dyn Approver>,
 ) -> Result<AgentConfig, AnyError> {
     let connection = backend.connection;
     SystemKeyring::connect();
