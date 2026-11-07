@@ -7,7 +7,7 @@ Skills in this project run on Claude Code and on sstack, so write for what both 
 ## What sstack does with a Skill
 
 - It reads `name`, `description` and `disable-model-invocation` from the header and ignores every other field.
-- It lists every Skill the model may load in the system prompt of every Session, so each of those descriptions is permanent context load. A Skill that sets `disable-model-invocation: true` stays out of the listing.
+- It lists every Skill the model may load in the system prompt of every Session, so each of those descriptions is permanent context load. A Skill that sets `disable-model-invocation: true` stays out of the listing. The listing is capped at about 1% of the context window, and past the cap the person's Skills lose their descriptions first, which makes the model less likely to reach for them.
 - The `skill` tool returns the body of `SKILL.md` without its header, along with the Skill's directory and the paths of the files in it. The `read` tool can open those files, so a pointer to a sibling file can name it relative to the Skill's directory.
 - A person cannot invoke a Skill by name, because a Human Command never reaches the model.
 

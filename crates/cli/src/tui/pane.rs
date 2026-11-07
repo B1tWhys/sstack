@@ -26,8 +26,9 @@ pub struct Opened {
     pub agent: AgentHandle,
     /// Where the Session is stored.
     pub path: PathBuf,
-    /// Something the person should know about how the Session was set up.
-    pub notice: Option<String>,
+    /// Things the person should know about how the Session was set up, in the order they
+    /// happened.
+    pub notices: Vec<String>,
     /// Where the Session's input reports.
     pub events: SessionSender,
     /// Whether the person wants to type into a real nvim.
@@ -141,7 +142,7 @@ impl Pane {
             self.input.start_vim(&opened.events);
         }
         self.events = Some(opened.events);
-        if let Some(notice) = opened.notice {
+        for notice in opened.notices {
             self.update(&Event::Notice(notice));
         }
     }

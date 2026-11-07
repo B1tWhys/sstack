@@ -136,7 +136,7 @@ impl Sessions for LiveSessions<'_> {
         Ok(Opened {
             agent: AgentHandle::spawn(run.agent, report_to(&id)),
             path: run.session,
-            notice: run.notice,
+            notices: run.notices,
             events: report_to(&id),
             vim: run.vim,
         })

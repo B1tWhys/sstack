@@ -12,9 +12,10 @@ use sstack::session::{Entry, SessionLog};
 use sstack::skills::{self, Skill};
 use sstack::tools::project::Project;
 use sstack::tools::{Approver, Land, ToolBox};
-use sstack::{workspace, worktree};
+use sstack::workspace::{self, SkillListing};
+use sstack::worktree;
 
-use crate::{Args, LATEST};
+use crate::{Args, LATEST, describe};
 
 /// Keeps the harness's files apart from others in the user's shared directories.
 const DIRECTORY_NAME: &str = "sstack";
@@ -101,8 +102,9 @@ pub struct Run {
     pub agent: Agent,
     /// Where the Session is stored, which identifies it across a relaunch.
     pub session: PathBuf,
-    /// Something the person should know about how the Session was set up.
-    pub notice: Option<String>,
+    /// Things the person should know about how the Session was set up, in the order they
+    /// happened.
+    pub notices: Vec<String>,
     /// Whether the person wants to type into a real nvim.
     pub vim: bool,
 }
@@ -153,16 +155,21 @@ pub fn prepare(
     let session = open_session(&project_sessions(&main)?, start)?;
     let id = workspace::session_id(&session.path);
     let place = workplace(&main, &id, session.wants_worktree);
+    let offered = offered_skills(place.worktree.as_deref().unwrap_or(&main));
+    let listing = SkillListing::new(&offered, connection.context_limit);
     let agent_config = agent_config()
         .backend(&backend)
         .id(&id)
         .place(&place)
         .approver(approver(&id))
+        .skills(offered)
+        .listing(&listing)
         .call()?;
+    let shortened = describe::listing_shortened(listing.without_descriptions);
     Ok(Run {
         agent: Agent::new(agent_config, session.log, session.entries)?,
         session: session.path,
-        notice: place.notice,
+        notices: place.notice.into_iter().chain(shortened).collect(),
         vim: config.vim,
     })
 }
@@ -207,6 +214,15 @@ pub fn installed_skills(root: &Path) -> Vec<Skill> {
     skills::discover(&skills::locations(root, &start, home.as_deref()))
 }
 
+/// Returns the [`Skill`]s the model may load on its own in a Session working in the project at
+/// `root`.
+fn offered_skills(root: &Path) -> Vec<Skill> {
+    installed_skills(root)
+        .into_iter()
+        .filter(|skill| skill.model_invocable)
+        .collect()
+}
+
 /// Decides what the agent for a Session runs on.
 #[builder]
 fn agent_config(
@@ -218,26 +234,26 @@ fn agent_config(
     place: &Workplace,
     /// Decides on the Session's shell commands.
     approver: Arc<dyn Approver>,
+    /// The Skills the model may load.
+    skills: Vec<Skill>,
+    /// How the system prompt lists those Skills.
+    listing: &SkillListing,
 ) -> Result<AgentConfig> {
     let connection = backend.connection;
     SystemKeyring::connect();
     let secret = resolve_secret(&connection.secret, &SystemKeyring, backend.main)?;
     let root = place.worktree.as_deref().unwrap_or(backend.main);
-    let offered: Vec<Skill> = installed_skills(root)
-        .into_iter()
-        .filter(|skill| skill.model_invocable)
-        .collect();
-    let skill_directories = offered
+    let skill_directories = skills
         .iter()
         .filter_map(|s| s.path.parent().map(Path::to_owned));
     let project = Arc::new(Project::new(root)?.with_readable(skill_directories));
     let secret_env = vec![connection.secret.clone()];
     let tools = ToolBox::standard(project.clone(), approver.clone(), secret_env.clone())
-        .with_skills(offered.clone());
+        .with_skills(skills);
     let home = dirs::home_dir();
     let claude = skills::claude_directory(home.as_deref(), |name| std::env::var_os(name));
     let system = workspace::system_prompt(root, claude.as_deref());
-    let system = workspace::skills_prompt(&system, &offered);
+    let system = workspace::skills_prompt(&system, listing);
     let (tools, system) = if place.worktree.is_some() {
         let land = Land {
             worktree: project,

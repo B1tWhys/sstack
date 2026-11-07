@@ -33,6 +33,18 @@ pub fn skills_loaded(skills: &[Skill]) -> String {
     format!("loaded {} skills: {}", skills.len(), names.join(", "))
 }
 
+/// Warns that `count` Skills are listed for the model by name alone, if any are, because their
+/// descriptions did not fit the listing's share of the context window. The model is then less
+/// likely to load those Skills when they would help.
+pub fn listing_shortened(count: usize) -> Option<String> {
+    (count > 0).then(|| {
+        format!(
+            "[warning] {count} Skill descriptions were left out to keep the listing within 1% \
+             of the context window"
+        )
+    })
+}
+
 /// Describes how a Turn ended, if that needs saying.
 pub fn turn_end_text(end: TurnEnd) -> Option<&'static str> {
     match end {
@@ -99,6 +111,16 @@ mod tests {
         };
         let loaded = skills_loaded(&[skill("learn"), skill("quiz")]);
         assert_eq!(loaded, "loaded 2 skills: learn, quiz");
+    }
+
+    #[test]
+    fn a_shortened_listing_is_warned_about_only_when_it_happened() {
+        assert_eq!(listing_shortened(0), None);
+        assert!(
+            listing_shortened(2)
+                .unwrap()
+                .contains("2 Skill descriptions")
+        );
     }
 
     #[test]

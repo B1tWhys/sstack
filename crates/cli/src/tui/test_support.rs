@@ -99,7 +99,7 @@ pub fn opened(path: &Path, provider: Arc<dyn Provider>, events: &EventSender) ->
     Opened {
         agent: AgentHandle::spawn(agent, SessionSender::new(&id, events.clone())),
         path: path.to_owned(),
-        notice: None,
+        notices: Vec::new(),
         events: SessionSender::new(&id, events.clone()),
         vim: false,
     }
