@@ -1,7 +1,7 @@
 //! The durable record of a Session.
 
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read, Write};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -157,6 +157,25 @@ impl SessionLog {
     }
 }
 
+/// Returns the first thing the person said in the Session stored at `path`, which tells the
+/// Session apart from others. Does not disturb the log, so it is safe on a Session in use.
+///
+/// Returns nothing for a Session the person has not spoken in yet, or whose log is unreadable
+/// past the point reached.
+///
+/// # Errors
+/// Returns an error if the file cannot be opened.
+pub fn first_prompt(path: &Path) -> io::Result<Option<String>> {
+    let lines = BufReader::new(File::open(path)?).lines();
+    Ok(lines
+        .map_while(Result::ok)
+        .map_while(|line| serde_json::from_str(&line).ok())
+        .find_map(|entry| match entry {
+            Entry::User { text } => Some(text),
+            _ => None,
+        }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -262,5 +281,32 @@ mod tests {
             SessionLog::open(&path),
             Err(SessionError::Malformed(_))
         ));
+    }
+
+    #[test]
+    fn the_first_prompt_comes_from_the_log_without_changing_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.jsonl");
+        let mut log = SessionLog::create(&path).unwrap();
+        assert_eq!(first_prompt(&path).unwrap(), None);
+
+        log.append(&Entry::TurnCancelled).unwrap();
+        for text in ["first", "second"] {
+            let text = text.to_owned();
+            log.append(&Entry::User { text }).unwrap();
+        }
+        let before = fs::read(&path).unwrap();
+
+        assert_eq!(first_prompt(&path).unwrap().as_deref(), Some("first"));
+        assert_eq!(fs::read(&path).unwrap(), before);
+    }
+
+    #[test]
+    fn a_log_that_cannot_be_understood_has_no_first_prompt() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.jsonl");
+        assert!(first_prompt(&path).is_err());
+        fs::write(&path, "not json\n").unwrap();
+        assert_eq!(first_prompt(&path).unwrap(), None);
     }
 }

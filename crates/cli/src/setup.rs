@@ -62,11 +62,12 @@ pub struct Run {
 /// arguments ask for.
 ///
 /// `resume` names the Session to resume, as `--resume` does, and a new one is started without
-/// it. `approver` decides whether each shell command the model asks for may run.
+/// it. `approver` is given the Session's id and returns what decides whether each shell command
+/// the model asks for may run.
 pub fn prepare(
     args: &Args,
     resume: Option<&str>,
-    approver: Arc<dyn Approver>,
+    approver: impl FnOnce(&str) -> Arc<dyn Approver>,
 ) -> Result<Run, AnyError> {
     let config = load_settings()?;
     let connection = config.connection(args.connection.as_deref())?;
@@ -75,8 +76,21 @@ pub fn prepare(
         connection,
         model: args.model.as_ref().unwrap_or(&config.default_model).clone(),
     };
-    let agent_config = agent_config(&backend, project.clone(), approver)?;
-    start_session(agent_config, &project, resume)
+    let (session, log, entries) = open_session(&project_sessions(project.root())?, resume)?;
+    let approver = approver(&workspace::session_id(&session));
+    let agent = Agent::new(agent_config(&backend, project, approver)?, log, entries)?;
+    Ok(Run { agent, session })
+}
+
+/// Returns where the Sessions of the current directory are stored.
+pub fn sessions_directory() -> Result<PathBuf, AnyError> {
+    let project = Project::new(&std::env::current_dir()?)?;
+    project_sessions(project.root())
+}
+
+/// Returns where the Sessions of the project at `root` are stored.
+fn project_sessions(root: &Path) -> Result<PathBuf, AnyError> {
+    Ok(workspace::sessions_dir(&app_dir(dirs::data_dir())?, root))
 }
 
 /// Returns the user's settings.
@@ -109,18 +123,6 @@ fn agent_config(
         tools: ToolBox::standard(project, approver, vec![connection.secret.clone()]),
         context_limit: connection.context_limit,
     })
-}
-
-/// Opens the Session for this run and starts an agent on it.
-fn start_session(
-    config: AgentConfig,
-    project: &Project,
-    resume: Option<&str>,
-) -> Result<Run, AnyError> {
-    let sessions = workspace::sessions_dir(&app_dir(dirs::data_dir())?, project.root());
-    let (session, log, entries) = open_session(&sessions, resume)?;
-    let agent = Agent::new(config, log, entries)?;
-    Ok(Run { agent, session })
 }
 
 /// Returns the arguments that bring a rebuilt harness back to the same Session.

@@ -2,7 +2,9 @@
 
 use std::io;
 
-use crossterm::event::{Event as TerminalEvent, EventStream, KeyEventKind, MouseEventKind};
+use crossterm::event::{
+    Event as TerminalEvent, EventStream, KeyEventKind, MouseButton, MouseEvent, MouseEventKind,
+};
 use futures::{Stream, StreamExt};
 
 use super::event::{Event, EventSender, Scroll};
@@ -30,22 +32,26 @@ async fn forward(
 /// for it.
 ///
 /// Only key presses count, because some terminals also report releases and repeats. Of the
-/// mouse, only vertical scrolling counts.
+/// mouse, only vertical scrolling and left clicks count.
 fn from_terminal(event: TerminalEvent) -> Option<Event> {
     match event {
         TerminalEvent::Key(key) if key.kind == KeyEventKind::Press => Some(Event::Key(key)),
         TerminalEvent::Paste(text) => Some(Event::Paste(text)),
         TerminalEvent::Resize(..) => Some(Event::Resize),
-        TerminalEvent::Mouse(mouse) => scroll(mouse.kind).map(Event::Scroll),
+        TerminalEvent::Mouse(mouse) => from_mouse(mouse),
         _ => None,
     }
 }
 
-/// Returns which way a mouse action scrolls, or nothing if it is not a vertical scroll.
-fn scroll(kind: MouseEventKind) -> Option<Scroll> {
-    match kind {
-        MouseEventKind::ScrollUp => Some(Scroll::Up),
-        MouseEventKind::ScrollDown => Some(Scroll::Down),
+/// Returns the event for a mouse action, or nothing if the harness has no use for it.
+fn from_mouse(mouse: MouseEvent) -> Option<Event> {
+    match mouse.kind {
+        MouseEventKind::ScrollUp => Some(Event::Scroll(Scroll::Up)),
+        MouseEventKind::ScrollDown => Some(Event::Scroll(Scroll::Down)),
+        MouseEventKind::Down(MouseButton::Left) => Some(Event::Click {
+            column: mouse.column,
+            row: mouse.row,
+        }),
         _ => None,
     }
 }

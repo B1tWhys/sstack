@@ -8,7 +8,7 @@ use ratatui::layout::{Constraint, Rect};
 use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
 
 use crate::tui::component::{Component, KeyOutcome};
-use crate::tui::event::{ApprovalRequest, Event};
+use crate::tui::event::{Action, ApprovalRequest, Event};
 use crate::tui::theme;
 
 /// Asks the person about each shell command the model wants to run, holding the keyboard until
@@ -34,11 +34,12 @@ impl Component for Approval {
         let Some(request) = self.waiting.front() else {
             return KeyOutcome::Ignored;
         };
-        if let Some(approved) = answer(key.code) {
-            request.reply.send(approved);
-            self.waiting.pop_front();
-        }
-        KeyOutcome::Handled
+        let Some(approved) = answer(key.code) else {
+            return KeyOutcome::Handled;
+        };
+        request.reply.send(approved);
+        self.waiting.pop_front();
+        KeyOutcome::Act(Action::ApprovalAnswered)
     }
 
     fn render(&self, frame: &mut Frame, area: Rect) {
@@ -98,8 +99,9 @@ mod tests {
 
         assert_eq!(approval.key(key(KeyCode::Char('x'))), KeyOutcome::Handled);
         assert!(first.try_recv().is_err());
-        approval.key(key(KeyCode::Char('Y')));
-        approval.key(key(KeyCode::Enter));
+        let answered = KeyOutcome::Act(Action::ApprovalAnswered);
+        assert_eq!(approval.key(key(KeyCode::Char('Y'))), answered);
+        assert_eq!(approval.key(key(KeyCode::Enter)), answered);
 
         assert_eq!(first.try_recv(), Ok(true));
         assert_eq!(second.try_recv(), Ok(false));

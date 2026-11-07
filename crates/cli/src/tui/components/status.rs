@@ -15,6 +15,8 @@ pub struct Status {
     session: String,
     /// Whether a Turn is running.
     working: bool,
+    /// What other Sessions are doing, when the sidebar is not there to say.
+    others: Option<String>,
 }
 
 impl Status {
@@ -23,7 +25,13 @@ impl Status {
         Self {
             session,
             working: false,
+            others: None,
         }
+    }
+
+    /// Sets what to say about other Sessions, replacing whatever was said before.
+    pub fn set_others(&mut self, others: Option<String>) {
+        self.others = others;
     }
 
     /// Returns what the status line says.
@@ -33,8 +41,13 @@ impl Status {
         } else {
             ("ready", "Ctrl-C quit")
         };
+        let others = self
+            .others
+            .as_ref()
+            .map_or_else(String::new, |others| format!(" · {others}"));
         format!(
-            "session {} · {state} · {stop} · PgUp/PgDn scroll · /new /rebuild /quit",
+            "session {} · {state}{others} · {stop} · Ctrl-N/P switch · Ctrl-G next · \
+             PgUp/PgDn scroll · /new /rebuild /quit",
             self.session
         )
     }
@@ -71,6 +84,10 @@ mod tests {
 
         status.update(&Event::TurnStarted("go".into()));
         assert!(status.text().contains("working · Ctrl-C cancel"));
+
+        status.set_others(Some("1 blocked".into()));
+        assert!(status.text().contains("working · 1 blocked · Ctrl-C"));
+        status.set_others(None);
 
         status.update(&Event::Resize);
         status.update(&Event::TurnEnded(Ok(TurnEnd::Finished)));

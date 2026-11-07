@@ -4,7 +4,7 @@ use sstack_core::agent::{Agent, TurnContext, TurnEnd};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use super::event::{Event, EventSender};
+use super::event::{Event, SessionSender};
 
 /// Lets the App start and cancel Turns on an agent that runs on its own task.
 ///
@@ -30,8 +30,8 @@ impl AgentHandle {
     /// Moves `agent` onto its own task, which reports what its Turns do to `events`.
     ///
     /// The task ends once this handle is dropped and any queued Turns have finished.
-    pub fn spawn(agent: Agent, events: EventSender) -> Self {
-        let _ = events.send(Event::Resumed(agent.entries().to_vec()));
+    pub fn spawn(agent: Agent, events: SessionSender) -> Self {
+        events.send(Event::Resumed(agent.entries().to_vec()));
         let (prompts, queued) = mpsc::unbounded_channel();
         tokio::spawn(serve(agent, queued, events));
         Self {
@@ -58,12 +58,12 @@ impl AgentHandle {
 async fn serve(
     mut agent: Agent,
     mut prompts: mpsc::UnboundedReceiver<Prompt>,
-    events: EventSender,
+    events: SessionSender,
 ) {
     while let Some(prompt) = prompts.recv().await {
-        let _ = events.send(Event::TurnStarted(prompt.text.clone()));
+        events.send(Event::TurnStarted(prompt.text.clone()));
         let ended = run_turn(&mut agent, &prompt, &events).await;
-        let _ = events.send(Event::TurnEnded(ended));
+        events.send(Event::TurnEnded(ended));
     }
 }
 
@@ -71,11 +71,9 @@ async fn serve(
 async fn run_turn(
     agent: &mut Agent,
     prompt: &Prompt,
-    events: &EventSender,
+    events: &SessionSender,
 ) -> Result<TurnEnd, String> {
-    let mut forward = |event| {
-        let _ = events.send(Event::Agent(event));
-    };
+    let mut forward = |event| events.send(Event::Agent(event));
     let mut context = TurnContext {
         cancel: &prompt.cancel,
         on_event: &mut forward,

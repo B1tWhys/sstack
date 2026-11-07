@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use sstack_core::tools::Approver;
 
-use super::event::{ApprovalRequest, Event, EventSender, Reply};
+use super::event::{ApprovalRequest, Event, Reply, SessionSender};
 
 /// Lets the person decide on screen whether each shell command runs, while the Turn waits.
 ///
@@ -11,12 +11,12 @@ use super::event::{ApprovalRequest, Event, EventSender, Reply};
 /// such as when the Turn is cancelled.
 pub struct EventApprover {
     /// Where questions are sent for the App to show.
-    events: EventSender,
+    events: SessionSender,
 }
 
 impl EventApprover {
     /// Creates an approver that asks through the App listening on `events`.
-    pub fn new(events: EventSender) -> Self {
+    pub fn new(events: SessionSender) -> Self {
         Self { events }
     }
 }
@@ -29,7 +29,7 @@ impl Approver for EventApprover {
             command: command.to_owned(),
             reply,
         };
-        let _ = self.events.send(Event::Approval(request));
+        self.events.send(Event::Approval(request));
         answer.await.unwrap_or(false)
     }
 }
@@ -42,10 +42,14 @@ mod tests {
     #[tokio::test]
     async fn the_answer_given_on_screen_decides() {
         let (sender, mut events) = mpsc::unbounded_channel();
-        let approver = EventApprover::new(sender);
+        let approver = EventApprover::new(SessionSender::new("7", sender));
         let asking = tokio::spawn(async move { approver.approve("ls").await });
 
-        let Some(Event::Approval(request)) = events.recv().await else {
+        let Some(Event::Session(session, inner)) = events.recv().await else {
+            panic!("expected an event from a Session");
+        };
+        assert_eq!(session, "7");
+        let Event::Approval(request) = *inner else {
             panic!("expected an approval request");
         };
         assert_eq!(request.command, "ls");
@@ -58,6 +62,7 @@ mod tests {
     async fn nobody_to_ask_denies() {
         let (sender, events) = mpsc::unbounded_channel();
         drop(events);
-        assert!(!EventApprover::new(sender).approve("ls").await);
+        let approver = EventApprover::new(SessionSender::new("7", sender));
+        assert!(!approver.approve("ls").await);
     }
 }

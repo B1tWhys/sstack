@@ -1,6 +1,6 @@
 //! Helpers for testing components and the App without a real terminal.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -11,8 +11,13 @@ use sstack_core::provider::Provider;
 use sstack_core::session::{AssistantEntry, SessionLog, StopReason, ToolCall, Usage};
 use sstack_core::tools::project::Project;
 use sstack_core::tools::{Approver, ToolBox};
+use sstack_core::workspace;
 
+use super::approver::EventApprover;
 use super::component::{Component, KeyOutcome};
+use super::event::{EventSender, SessionSender};
+use super::pane::Opened;
+use super::worker::AgentHandle;
 
 /// Returns a press of `code` with no modifiers.
 pub fn key(code: KeyCode) -> KeyEvent {
@@ -74,25 +79,22 @@ pub fn bash_call(command: &str) -> AssistantEntry {
     }
 }
 
-/// Returns where agents from [`agent`] and [`resumed_agent`] record their Session in `directory`.
-pub fn session_path(directory: &Path) -> PathBuf {
-    directory.join("session.jsonl")
-}
-
-/// Returns an agent working in `directory` on a new Session, stored at [`session_path`].
-pub fn agent(directory: &Path, provider: Arc<dyn Provider>, approver: Arc<dyn Approver>) -> Agent {
-    let log = SessionLog::create(&session_path(directory)).unwrap();
-    Agent::new(agent_config(directory, provider, approver), log, vec![]).unwrap()
-}
-
-/// Returns an agent working in `directory` that picks up the Session an earlier [`agent`] left.
-pub fn resumed_agent(
-    directory: &Path,
-    provider: Arc<dyn Provider>,
-    approver: Arc<dyn Approver>,
-) -> Agent {
-    let (log, entries) = SessionLog::open(&session_path(directory)).unwrap();
-    Agent::new(agent_config(directory, provider, approver), log, entries).unwrap()
+/// Opens the Session stored at `path`, new or existing, with an agent working in its directory
+/// and reporting to `events`.
+pub fn opened(path: &Path, provider: Arc<dyn Provider>, events: &EventSender) -> Opened {
+    let id = workspace::session_id(path);
+    let approver = Arc::new(EventApprover::new(SessionSender::new(&id, events.clone())));
+    let (log, entries) = if path.exists() {
+        SessionLog::open(path).unwrap()
+    } else {
+        (SessionLog::create(path).unwrap(), vec![])
+    };
+    let config = agent_config(path.parent().unwrap(), provider, approver);
+    let agent = Agent::new(config, log, entries).unwrap();
+    Opened {
+        agent: AgentHandle::spawn(agent, SessionSender::new(&id, events.clone())),
+        path: path.to_owned(),
+    }
 }
 
 /// Returns what a test agent working in `directory` runs on, with no system prompt.

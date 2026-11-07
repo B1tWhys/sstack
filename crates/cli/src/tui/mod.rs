@@ -1,11 +1,12 @@
 //! The interactive harness: a full-screen terminal UI built from components that react to events.
 //!
 //! Everything that happens arrives as an [`event::Event`] on one channel. Terminal input, the
-//! agent's Turns, and its questions about shell commands all arrive that way. The [`app::App`]
-//! hands each event to its [`component::Component`]s, which keep their own state and ask for
-//! anything beyond themselves by returning an [`event::Action`]. To add a part of the screen,
-//! write a component and give it a place in the App. To add a source of events, give it a clone
-//! of the [`event::EventSender`].
+//! Turns of every Session, and their questions about shell commands all arrive that way. The
+//! [`app::App`] keeps a [`pane::Pane`] per Session and hands each event to the right one, whose
+//! [`component::Component`]s keep their own state and ask for anything beyond themselves by
+//! returning an [`event::Action`]. To add a part of the screen, write a component and give it a
+//! place in the Pane or the App. To add a source of events, give it a clone of the
+//! [`event::EventSender`].
 
 mod app;
 mod approver;
@@ -14,7 +15,8 @@ mod components;
 mod editor;
 mod event;
 mod input;
-mod screen;
+mod lifecycle;
+mod pane;
 #[cfg(test)]
 mod test_support;
 mod theme;
@@ -30,9 +32,10 @@ use crossterm::event::{
     DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
 };
 use crossterm::execute;
-use event::{EventReceiver, EventSender};
-use screen::{Screen, Shown};
+use event::{EventReceiver, EventSender, SessionSender};
+use pane::Opened;
 use sstack_core::skills::{self, Skill};
+use sstack_core::tools::Approver;
 use sstack_core::workspace;
 use theme::ColorDepth;
 use tokio::sync::mpsc;
@@ -40,7 +43,7 @@ use worker::AgentHandle;
 
 use crate::describe;
 use crate::rebuild::rebuild;
-use crate::setup::{Run, prepare, relaunch_args};
+use crate::setup::{Run, prepare, relaunch_args, sessions_directory};
 use crate::{AnyError, Args};
 
 /// Runs the interactive harness until the person quits, rebuilding when asked.
@@ -51,30 +54,30 @@ use crate::{AnyError, Args};
 pub async fn run(args: &Args) -> Result<ExitCode, AnyError> {
     require_terminal(io::stdin().is_terminal() && io::stdout().is_terminal())?;
     let (sender, mut events) = mpsc::unbounded_channel();
-    let mut screen = Screen {
-        shown: open(args, args.resume.as_deref(), &sender)?,
-        open_new: || open(args, None, &sender),
-    };
+    let first = open(args, args.resume.as_deref(), &sender)?;
+    let stored = workspace::list_sessions(&sessions_directory()?)?;
+    let opener = Box::new(|resume: Option<&str>| open(args, resume, &sender));
+    let mut app = App::new((first, stored), opener, ColorDepth::detect());
+    app.notice(describe::skills_loaded(&load_skills()?));
     input::spawn(sender.clone());
-    while on_screen(&mut screen, &mut events).await? == Exit::Rebuild {
-        let failure = rebuild(&relaunch_args(args, &screen.shown.session));
-        screen
-            .shown
-            .app
-            .notice(format!("rebuild failed: {failure}"));
+    while on_screen(&mut app, &mut events).await? == Exit::Rebuild {
+        let failure = rebuild(&relaunch_args(args, app.session()));
+        app.notice(format!("rebuild failed: {failure}"));
     }
     Ok(ExitCode::SUCCESS)
 }
 
-/// Opens a Session, resuming the one `resume` names or starting a new one, and an App to show it
-/// whose events go to `events`.
-fn open(args: &Args, resume: Option<&str>, events: &EventSender) -> Result<Shown, AnyError> {
-    let approver = Arc::new(EventApprover::new(events.clone()));
+/// Opens a Session, resuming the one `resume` names or starting a new one, with an agent that
+/// reports to `events`.
+fn open(args: &Args, resume: Option<&str>, events: &EventSender) -> Result<Opened, AnyError> {
+    let report_to = |id: &str| SessionSender::new(id, events.clone());
+    let approver = |id: &str| -> Arc<dyn Approver> { Arc::new(EventApprover::new(report_to(id))) };
     let Run { agent, session } = prepare(args, resume, approver)?;
-    let agent = AgentHandle::spawn(agent, events.clone());
-    let mut app = App::new(agent, workspace::session_id(&session), ColorDepth::detect());
-    app.notice(describe::skills_loaded(&load_skills()?));
-    Ok(Shown { app, session })
+    let agent = AgentHandle::spawn(agent, report_to(&workspace::session_id(&session)));
+    Ok(Opened {
+        agent,
+        path: session,
+    })
 }
 
 /// Finds the Skills installed for Claude Code or Codex, for this project and for the person.
@@ -98,13 +101,10 @@ fn require_terminal(attached: bool) -> Result<(), AnyError> {
 }
 
 /// Runs the screen full screen, handing the terminal back however it stops.
-async fn on_screen<F: FnMut() -> Result<Shown, AnyError>>(
-    screen: &mut Screen<F>,
-    events: &mut EventReceiver,
-) -> Result<Exit, AnyError> {
+async fn on_screen(app: &mut App<'_>, events: &mut EventReceiver) -> Result<Exit, AnyError> {
     let mut terminal = ratatui::try_init()?;
     let modes = InputModes::enable();
-    let exit = screen.run(&mut terminal, events).await;
+    let exit = app.run(&mut terminal, events).await;
     drop(modes);
     ratatui::restore();
     Ok(exit?)

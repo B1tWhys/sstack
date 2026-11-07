@@ -5,6 +5,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::session;
+
 /// The instructions every Session starts with.
 const BASE_PROMPT: &str = "You are sstack, a coding agent working in the user's project. \
 Use the tools to inspect and change the project, and verify your changes before finishing. \
@@ -49,13 +51,50 @@ pub fn session_id(path: &Path) -> String {
 /// # Errors
 /// Returns an error if the directory exists but cannot be read.
 pub fn latest_session(sessions_dir: &Path) -> io::Result<Option<PathBuf>> {
+    Ok(session_paths(sessions_dir)?.into_iter().max())
+}
+
+/// A stored Session, described well enough to choose it from a list without opening it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionSummary {
+    /// Where the Session is stored.
+    pub path: PathBuf,
+    /// The first thing the person said in it.
+    pub first_prompt: String,
+    /// The last time anything was recorded in it.
+    pub modified: SystemTime,
+}
+
+/// Describes every Session in `sessions_dir` in which the person has said something. The rest
+/// hold nothing to come back to.
+///
+/// # Errors
+/// Returns an error if the directory exists but cannot be read.
+pub fn list_sessions(sessions_dir: &Path) -> io::Result<Vec<SessionSummary>> {
+    let paths = session_paths(sessions_dir)?;
+    Ok(paths.into_iter().filter_map(summarize).collect())
+}
+
+/// Describes the Session at `path`, or returns nothing if there is nothing to describe.
+fn summarize(path: PathBuf) -> Option<SessionSummary> {
+    let first_prompt = session::first_prompt(&path).ok()??;
+    let modified = fs::metadata(&path).and_then(|file| file.modified()).ok()?;
+    Some(SessionSummary {
+        path,
+        first_prompt,
+        modified,
+    })
+}
+
+/// Returns the path of everything in `sessions_dir`, which need not exist.
+fn session_paths(sessions_dir: &Path) -> io::Result<Vec<PathBuf>> {
     let entries = match fs::read_dir(sessions_dir) {
         Ok(entries) => entries,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(error) => return Err(error),
     };
     let paths = entries.collect::<io::Result<Vec<_>>>()?;
-    Ok(paths.into_iter().map(|entry| entry.path()).max())
+    Ok(paths.into_iter().map(|entry| entry.path()).collect())
 }
 
 /// Builds the system prompt from the base instructions and the project's own, if any.
@@ -100,11 +139,31 @@ mod tests {
     }
 
     #[test]
+    fn only_sessions_the_person_spoke_in_are_listed() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(list_sessions(&dir.path().join("none")).unwrap(), vec![]);
+        fs::write(session_path(dir.path(), "empty"), "").unwrap();
+        let spoken = session_path(dir.path(), "spoken");
+        fs::write(&spoken, "{\"type\":\"user\",\"text\":\"hello\"}\n").unwrap();
+
+        let listed = list_sessions(dir.path()).unwrap();
+
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].path, spoken);
+        assert_eq!(listed[0].first_prompt, "hello");
+        assert_eq!(
+            listed[0].modified,
+            fs::metadata(&spoken).unwrap().modified().unwrap()
+        );
+    }
+
+    #[test]
     fn a_file_in_place_of_the_directory_is_an_error() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("file");
         fs::write(&file, "").unwrap();
         assert!(latest_session(&file).is_err());
+        assert!(list_sessions(&file).is_err());
     }
 
     #[test]

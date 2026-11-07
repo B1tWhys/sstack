@@ -18,7 +18,7 @@ use crate::{AnyError, Args};
 ///
 /// Succeeds only if the Turn finished normally, so scripts can tell when it did not.
 pub async fn run(args: &Args, prompt: &str) -> Result<ExitCode, AnyError> {
-    let Run { mut agent, session } = prepare(args, args.resume.as_deref(), Arc::new(DenyAll))?;
+    let Run { mut agent, session } = prepare(args, args.resume.as_deref(), |_| Arc::new(DenyAll))?;
     let cancel = CancellationToken::new();
     let out = stdout();
     let mut view = EventView::new(&out, wants_style(&out));

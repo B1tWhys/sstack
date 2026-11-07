@@ -17,7 +17,8 @@ pub type EventReceiver = mpsc::UnboundedReceiver<Event>;
 /// Something that happened, which the App passes on to its components.
 ///
 /// Key presses go to the first component that wants them. Every other event goes to every
-/// component.
+/// component of one Session: the one it came from if it is an [`Event::Session`], or the one on
+/// screen.
 #[derive(Debug, Clone)]
 pub enum Event {
     /// The person pressed a key.
@@ -29,6 +30,16 @@ pub enum Event {
     /// The person turned the mouse wheel or swiped on a trackpad, wherever the pointer was.
     /// Each notch or swipe step arrives as its own event.
     Scroll(Scroll),
+    /// The person clicked the main mouse button at this screen position.
+    Click {
+        /// Columns from the left edge of the screen.
+        column: u16,
+        /// Rows from the top edge of the screen.
+        row: u16,
+    },
+    /// The Session with this id did what the inner event says. The App unwraps these, so
+    /// components never see one.
+    Session(String, Box<Event>),
     /// The agent picked up a Session that already has these entries, oldest first, such as after
     /// a Rebuild. Comes before any Turn, and holds nothing for a new Session.
     Resumed(Vec<Entry>),
@@ -42,6 +53,33 @@ pub enum Event {
     Approval(ApprovalRequest),
     /// The harness has something to tell the person, such as a mistyped Human Command.
     Notice(String),
+}
+
+/// Lets a Session's agent report to the App, which keeps it apart from other Sessions' reports.
+#[derive(Debug, Clone)]
+pub struct SessionSender {
+    /// The id of the Session being reported on.
+    session: String,
+    /// Where reports go.
+    events: EventSender,
+}
+
+impl SessionSender {
+    /// Creates a sender that reports on the Session with id `session` to `events`.
+    pub fn new(session: &str, events: EventSender) -> Self {
+        Self {
+            session: session.to_owned(),
+            events,
+        }
+    }
+
+    /// Reports `event`, which goes nowhere if the App has gone. Never blocks, so it is safe from
+    /// inside a Turn's event callback.
+    pub fn send(&self, event: Event) {
+        let _ = self
+            .events
+            .send(Event::Session(self.session.clone(), Box::new(event)));
+    }
 }
 
 /// Which way the person scrolled.
@@ -60,6 +98,14 @@ pub enum Action {
     Submit(String),
     /// The person asked to stop: cancels the running Turn, or quits if there is none.
     Interrupt,
+    /// The person answered a question about a shell command.
+    ApprovalAnswered,
+    /// The person asked to see the Session below this one in the sidebar.
+    NextSession,
+    /// The person asked to see the Session above this one in the sidebar.
+    PreviousSession,
+    /// The person asked to see the Session that has been waiting for them the longest.
+    LongestWaiting,
 }
 
 /// Asks the person whether a shell command may run.
