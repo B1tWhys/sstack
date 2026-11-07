@@ -84,11 +84,12 @@ impl ToolBox {
         approver: Arc<dyn Approver>,
         secret_env: Vec<String>,
     ) -> Self {
+        let seen = Arc::new(files::Seen::default());
         Self {
             tools: vec![
-                Box::new(files::Read::new(project.clone())),
-                Box::new(files::Write::new(project.clone())),
-                Box::new(files::Edit::new(project.clone())),
+                Box::new(files::Read::new(project.clone(), seen.clone())),
+                Box::new(files::Write::new(project.clone(), seen.clone())),
+                Box::new(files::Edit::new(project.clone(), seen)),
                 Box::new(search::Search::new(project.clone())),
                 Box::new(bash::Bash::new(project, approver, secret_env)),
             ],

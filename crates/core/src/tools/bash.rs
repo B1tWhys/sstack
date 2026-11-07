@@ -106,7 +106,9 @@ impl Tool for Bash {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "bash".into(),
-            description: "Run a shell command in the project root. The user approves each one."
+            description: "Run a shell command in the project root. The user approves each one. \
+                For files, use the read, search, edit and write tools, not cat, grep, sed, \
+                heredocs or scripts."
                 .into(),
             input_schema: json!({
                 "type": "object",
