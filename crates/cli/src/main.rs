@@ -1,4 +1,6 @@
 //! Runs sstack from a terminal, interactively or for a single prompt.
+//!
+//! Sessions, Providers, tools and the agent loop are in [`sstack_core`].
 
 mod command;
 mod describe;

@@ -1,0 +1,7 @@
+[build]
+rustdocflags = [
+    "-Zunstable-options",
+    "--enable-index-page",
+    "--document-private-items",
+    "--extern-html-root-url=sstack_core=..",
+]

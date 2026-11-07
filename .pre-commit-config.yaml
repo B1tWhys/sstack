@@ -21,7 +21,7 @@ repos:
 
       - id: rustdoc
         name: rustdoc
-        entry: env RUSTDOCFLAGS=-Dwarnings cargo doc --workspace --all-features --no-deps --locked
+        entry: cargo doc --workspace --all-features --no-deps --locked --config 'build.rustdocflags=["-Dwarnings"]'
         language: system
         pass_filenames: false
         always_run: true
