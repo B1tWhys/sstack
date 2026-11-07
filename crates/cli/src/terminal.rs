@@ -14,7 +14,7 @@ const MAX_TOOL_INPUT_CHARS: usize = 200;
 /// Lines typed at the terminal, shared because approvals interrupt the prompt loop.
 pub type InputLines = Arc<Mutex<mpsc::Receiver<String>>>;
 
-/// Asks at the terminal before each shell command.
+/// Lets the person decide at the terminal whether each shell command runs.
 pub struct TerminalApprover<W> {
     /// The lines typed at the terminal, shared with the prompt loop.
     input: InputLines,
@@ -46,7 +46,7 @@ fn is_yes(line: &str) -> bool {
     matches!(line.trim().to_lowercase().as_str(), "y" | "yes")
 }
 
-/// Writes one agent event. Output failures must not abort the Turn, so they are ignored.
+/// Shows one agent event to the person. Failures are ignored, because they must not stop a Turn.
 pub fn render_event(event: &AgentEvent, out: &mut impl Write) {
     let _ = out.write_all(event_text(event).as_bytes());
     let _ = out.flush();

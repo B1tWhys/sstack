@@ -1,4 +1,4 @@
-//! The prompt loop.
+//! The conversation with the person at the prompt, from typed line to Turn.
 
 use std::fmt::Display;
 use std::io::Write;
@@ -24,6 +24,8 @@ pub enum Command<'a> {
     Empty,
 }
 
+/// Works out what a typed line asks for.
+///
 /// Slash-prefixed lines never reach the model, even if the command is mistyped.
 #[must_use]
 pub fn parse_command(line: &str) -> Command<'_> {
@@ -45,7 +47,7 @@ pub enum Exit {
     Rebuild,
 }
 
-/// Input channels and output for one run of the prompt loop.
+/// Carries on a conversation with the person at the terminal.
 pub struct Repl<W> {
     /// Lines typed at the terminal.
     pub input: InputLines,
@@ -118,14 +120,16 @@ impl<W: Write + Send> Repl<W> {
         self.show(outcome);
     }
 
-    /// Writes `text` and flushes it. Output failures are ignored, as they must not stop a Turn.
+    /// Shows `text` to the person. Failures are ignored, because they must not stop a Turn.
     fn show(&mut self, text: impl Display) {
         let _ = write!(self.out, "{text}");
         let _ = self.out.flush();
     }
 }
 
-/// Provider failures end the Turn, not the Session: the person can simply try again.
+/// Describes how a Turn ended, for the person.
+///
+/// Provider failures end the Turn rather than the Session, so the person can simply try again.
 pub fn outcome_text(result: Result<TurnEnd, impl Display>) -> String {
     match result {
         Ok(end) => turn_end_text(end).map_or_else(String::new, |text| format!("\n{text}\n")),

@@ -52,7 +52,7 @@ pub enum StopReason {
     Refused,
 }
 
-/// One model response.
+/// One response from the model, in a form any Provider can read.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AssistantEntry {
     /// The visible text of the response.
@@ -102,15 +102,15 @@ pub enum SessionError {
     Malformed(#[from] serde_json::Error),
 }
 
-/// An open, append-only Session log.
+/// Records a Session durably, so that it survives crashes and can be resumed.
 #[derive(Debug)]
 pub struct SessionLog {
-    /// The log file, opened for appending.
+    /// Where entries are stored.
     file: File,
 }
 
 impl SessionLog {
-    /// Creates a new log at `path`, including any missing parent directories.
+    /// Starts a new log at `path`, creating any missing directories.
     ///
     /// # Errors
     /// Returns an error if the file already exists or cannot be created.
@@ -127,8 +127,7 @@ impl SessionLog {
 
     /// Opens an existing log and returns it with its entries.
     ///
-    /// Bytes after the last newline are discarded: a crash mid-append leaves a partial line
-    /// that was never a recorded entry, and appending after it would corrupt the next one.
+    /// A partial entry left by a crash is discarded, because it was never recorded.
     ///
     /// # Errors
     /// Returns an error if the file cannot be read or a complete entry is malformed.
@@ -148,7 +147,7 @@ impl SessionLog {
     /// Durably appends one entry.
     ///
     /// # Errors
-    /// Returns an error if the entry cannot be serialized or written.
+    /// Returns an error if the entry cannot be stored.
     pub fn append(&mut self, entry: &Entry) -> Result<(), SessionError> {
         let mut line = serde_json::to_string(entry)?;
         line.push('\n');

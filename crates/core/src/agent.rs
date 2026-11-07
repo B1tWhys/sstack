@@ -1,4 +1,4 @@
-//! The loop that drives a Session: model requests, tool runs and durable recording.
+//! Carries a Session forward, one Turn at a time.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -9,9 +9,9 @@ use crate::provider::{ModelRequest, Provider, ProviderError, StreamEvent, ToolSp
 use crate::session::{AssistantEntry, Entry, SessionError, SessionLog, StopReason, ToolCall};
 use crate::tools::ToolBox;
 
-/// Result text for a tool call abandoned because its Turn stopped or crashed.
+/// Tells the model that a tool call was abandoned because its Turn was cut short.
 const INTERRUPTED: &str = "not run: the turn was interrupted";
-/// Result text for a tool call in a response that ended without asking for tools to run.
+/// Tells the model that a tool call was ignored because its response ended abnormally.
 const NOT_RUN: &str = "not run: the response ended before this call could be used";
 
 /// Something that happened during a Turn, reported as it happens.
@@ -39,7 +39,7 @@ pub enum AgentEvent {
     },
 }
 
-/// A readable description of a tool call.
+/// Describes a tool call to the person watching it run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolCallSummary {
     /// The name of the tool being called.
@@ -86,15 +86,15 @@ pub struct AgentConfig {
     pub context_limit: u64,
 }
 
-/// Runs Turns for one Session, recording everything to its log.
+/// Carries one Session forward, keeping every Turn durable and resumable.
 pub struct Agent {
     /// What this agent runs on.
     config: AgentConfig,
-    /// The tool definitions sent with every request.
+    /// What the model is told about its tools.
     specs: Vec<ToolSpec>,
-    /// The open log that entries are appended to.
+    /// Where the Session is made durable.
     log: SessionLog,
-    /// Every entry in the Session so far, matching the log.
+    /// The Session so far, which every request carries.
     entries: Vec<Entry>,
 }
 
@@ -102,11 +102,10 @@ pub struct Agent {
 type EventSink<'a> = &'a mut (dyn FnMut(AgentEvent) + Send);
 
 impl Agent {
-    /// Starts from an open log and its existing entries. A crash can leave tool calls without
-    /// results, which Providers reject, so those are settled here first.
+    /// Picks up a Session from its log and entries, repairing anything a crash left unfinished.
     ///
     /// # Errors
-    /// Returns an error if settling an interrupted turn cannot be recorded.
+    /// Returns an error if the repair cannot be recorded.
     pub fn new(
         config: AgentConfig,
         log: SessionLog,
@@ -171,7 +170,7 @@ impl Agent {
         self.run_tools(&calls, cancel, on_event).await
     }
 
-    /// Sends the Session to the Provider and streams back one response.
+    /// Asks the Provider for the next response, reporting it as it arrives.
     async fn request(&self, on_event: EventSink<'_>) -> Result<AssistantEntry, ProviderError> {
         let request = ModelRequest {
             model: &self.config.model,
@@ -183,7 +182,7 @@ impl Agent {
         self.config.provider.respond(request, &mut forward).await
     }
 
-    /// Runs the calls in one response in order, stopping early if the Turn is cancelled.
+    /// Runs the tools a response asked for, stopping early if the Turn is cancelled.
     async fn run_tools(
         &mut self,
         calls: &[ToolCall],
@@ -229,7 +228,7 @@ impl Agent {
         Ok(TurnEnd::Cancelled)
     }
 
-    /// Records an error result for every tool call that has no result yet.
+    /// Keeps the Session valid, because Providers reject tool calls left without a result.
     fn settle_unanswered_calls(&mut self, reason: &str) -> Result<(), SessionError> {
         for call_id in unanswered_calls(&self.entries) {
             self.record(Entry::ToolResult {
@@ -241,7 +240,7 @@ impl Agent {
         Ok(())
     }
 
-    /// Appends an entry to the log and to the in-memory copy, keeping the two identical.
+    /// Adds an entry to the Session.
     fn record(&mut self, entry: Entry) -> Result<(), SessionError> {
         self.log.append(&entry)?;
         self.entries.push(entry);

@@ -15,12 +15,12 @@ use crate::session::{AssistantEntry, Entry};
 pub enum Effort {
     /// The least effort, for simple work.
     Low,
-    /// Moderate effort.
+    /// Balances thoroughness against cost.
     Medium,
     /// Thorough effort, and the default.
     #[default]
     High,
-    /// More thorough than high.
+    /// Extra thoroughness, for hard work.
     Xhigh,
     /// As much effort as the model can spend.
     Max,

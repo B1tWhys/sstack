@@ -14,19 +14,19 @@ const KEYRING_SERVICE: &str = "sstack";
 #[error("no value for {0}: add it to the system keychain, the environment, or a .env file")]
 pub struct MissingSecret(pub String);
 
-/// Where a secret can be stored besides the environment and `.env` files.
+/// A secure place to keep secrets, as an alternative to the environment and `.env` files.
 pub trait SecretStore {
     /// Returns the secret called `name`, if this store has it.
     fn get(&self, name: &str) -> Option<String>;
 }
 
-/// The operating system's credential store, under the service name `sstack`.
+/// Keeps secrets in the operating system's credential store.
 #[derive(Debug, Default)]
 pub struct SystemKeyring;
 
 impl SystemKeyring {
-    /// Connects to the platform store. Failure is not an error, because a machine without one
-    /// can still use the other sources.
+    /// Makes the store available to this process. Failure is not an error, because a machine
+    /// without one can still use the other sources.
     pub fn connect() {
         if let Ok(store) = platform_store() {
             set_default_store(store);

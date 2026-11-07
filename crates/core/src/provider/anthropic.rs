@@ -1,4 +1,4 @@
-//! Claude, reached through `genai`.
+//! Lets Sessions run on Claude models.
 
 use async_trait::async_trait;
 use futures::{Stream, StreamExt};
@@ -18,10 +18,10 @@ use crate::session::{AssistantEntry, Entry, ProviderPayload, StopReason, ToolCal
 const PROVIDER: &str = "anthropic";
 /// The most output tokens to allow in one response.
 const MAX_OUTPUT_TOKENS: u32 = 64_000;
-/// The header that turns on server-side fallback after a refusal.
+/// Asks the API to retry a refused request on another model.
 const FALLBACK_BETA: (&str, &str) = ("anthropic-beta", "server-side-fallback-2026-07-01");
 
-/// Talks to the Claude API with one API key.
+/// Lets a Session be run by Claude models.
 pub struct AnthropicProvider {
     /// The underlying API client.
     client: Client,
@@ -30,10 +30,11 @@ pub struct AnthropicProvider {
 }
 
 impl AnthropicProvider {
-    /// `base_url` replaces the default API endpoint, and must end with a slash.
+    /// Connects with `api_key`. `base_url` replaces the default API address, and must end with a
+    /// slash.
     ///
     /// # Errors
-    /// Returns an error if the underlying client cannot be built.
+    /// Returns an error if the connection cannot be set up.
     pub fn new(
         api_key: String,
         base_url: Option<String>,
@@ -62,12 +63,12 @@ impl AnthropicProvider {
     }
 }
 
-/// Wraps any displayable failure as a Provider error.
+/// Reports any failure as a Provider error.
 fn provider_error(error: impl std::fmt::Display) -> ProviderError {
     ProviderError(error.to_string())
 }
 
-/// Builds the options used for every request.
+/// Returns the options sent with every request.
 fn chat_options(effort: Effort) -> ChatOptions {
     ChatOptions::default()
         .with_max_tokens(MAX_OUTPUT_TOKENS)
@@ -120,6 +121,8 @@ fn is_tool_result(entry: &Entry) -> bool {
     matches!(entry, Entry::ToolResult { .. })
 }
 
+/// Translates a Session into messages.
+///
 /// Results of one response share a message, which keeps the model making parallel calls.
 fn to_messages(entries: &[Entry]) -> Vec<ChatMessage> {
     entries
@@ -169,6 +172,8 @@ fn assistant_message(assistant: &AssistantEntry) -> Option<ChatMessage> {
     (!content.is_empty()).then(|| ChatMessage::assistant(content))
 }
 
+/// Returns the original response to send back, if this Provider produced it.
+///
 /// Claude needs its thinking blocks back unchanged, and ignores any another model wrote.
 fn replayed_content(assistant: &AssistantEntry) -> Option<MessageContent> {
     let payload = assistant.payload.as_ref()?;
@@ -178,7 +183,7 @@ fn replayed_content(assistant: &AssistantEntry) -> Option<MessageContent> {
     serde_json::from_value(payload.data.clone()).ok()
 }
 
-/// Builds message content from an entry's neutral fields alone.
+/// Returns the content for a response with no usable Provider Payload.
 fn neutral_content(assistant: &AssistantEntry) -> MessageContent {
     let text = (!assistant.text.is_empty()).then(|| ContentPart::Text(assistant.text.clone()));
     let calls = assistant.tool_calls.iter().map(|call| {

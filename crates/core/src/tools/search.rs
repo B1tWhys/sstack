@@ -16,7 +16,7 @@ use crate::provider::ToolSpec;
 /// The most results returned from one search.
 const MAX_RESULTS: usize = 500;
 
-/// The `search` tool.
+/// Lets the model find files and text in the project.
 pub(super) struct Search {
     /// The project to search.
     project: Arc<Project>,
@@ -60,7 +60,9 @@ fn file_filter(root: &Path, glob: Option<&str>) -> Result<Override, ToolError> {
     filter.build().map_err(invalid)
 }
 
-/// Unreadable and binary files are skipped rather than failing the whole search.
+/// Returns the lines of `file` matching `pattern`, formatted for the model.
+///
+/// Unreadable and binary files give no lines, rather than failing the whole search.
 fn matching_lines(root: &Path, file: &str, pattern: &Regex) -> Vec<String> {
     let contents = fs::read_to_string(root.join(file)).unwrap_or_default();
     contents

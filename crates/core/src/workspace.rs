@@ -21,7 +21,7 @@ pub fn sessions_dir(data_dir: &Path, project: &Path) -> PathBuf {
     data_dir.join("sessions").join(key)
 }
 
-/// Returns a path for a new Session. Ids are timestamps, so they sort by age.
+/// Returns a path for a new Session. Session ids sort by age.
 #[must_use]
 pub fn new_session_path(sessions_dir: &Path) -> PathBuf {
     let millis = SystemTime::now()

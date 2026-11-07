@@ -20,7 +20,7 @@ const DEFAULT_SECRET: &str = "ANTHROPIC_API_KEY";
 /// The context window assumed for a Connection that does not set one, in tokens.
 const DEFAULT_CONTEXT_LIMIT: u64 = 1_000_000;
 
-/// The API a Provider speaks, which decides the code that talks to it.
+/// Identifies the kind of Provider a Connection talks to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ProviderKind {
@@ -33,13 +33,13 @@ fn default_context_limit() -> u64 {
     DEFAULT_CONTEXT_LIMIT
 }
 
-/// A Provider paired with the name of the secret that authenticates it.
+/// Encapsulates everything you need to open a connection to a given Provider.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Connection {
-    /// Which API this Connection talks to.
+    /// The kind of Provider to connect to.
     pub provider: ProviderKind,
-    /// The name of the secret that authenticates this Connection, not the secret itself.
+    /// The name of the secret to look up, not the secret itself.
     pub secret: String,
     /// Replaces the Provider's default API address.
     pub base_url: Option<String>,
@@ -52,8 +52,10 @@ pub struct Connection {
 }
 
 impl Connection {
+    /// Opens this Connection with `secret`, ready to serve requests.
+    ///
     /// # Errors
-    /// Returns an error if the Provider's client cannot be built.
+    /// Returns an error if the Provider cannot be set up.
     pub fn provider(&self, secret: String) -> Result<Arc<dyn Provider>, ProviderError> {
         match self.provider {
             ProviderKind::Anthropic => Ok(Arc::new(AnthropicProvider::new(
@@ -65,7 +67,7 @@ impl Connection {
     }
 }
 
-/// The user's settings.
+/// What the user has chosen, which applies to every run unless it says otherwise.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {

@@ -66,7 +66,7 @@ fn bash_call(command: &str) -> String {
     stream(&blocks, "tool_use")
 }
 
-/// Serves `replies` in order and keeps each request body.
+/// Stands in for the Claude API, so tests can script replies and inspect requests.
 struct FakeApi {
     url: String,
     requests: Arc<Mutex<Vec<String>>>,

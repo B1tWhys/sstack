@@ -5,7 +5,7 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// The workspace this binary was built from.
+/// Returns the Harness Source this binary was built from.
 fn source_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
@@ -24,7 +24,7 @@ fn binary_path(source: &Path, profile_dir: &str) -> PathBuf {
     source.join("target").join(profile_dir).join("sstack")
 }
 
-/// A failed build must leave the Session running, so this reports it rather than exiting.
+/// Returns whether `command` ran and succeeded. Failing to start counts as not succeeding.
 fn succeeded(command: &mut Command) -> bool {
     command.status().is_ok_and(|status| status.success())
 }
@@ -38,7 +38,7 @@ fn profile() -> (&'static str, &'static str) {
     }
 }
 
-/// Builds the source, returning the new binary if that worked.
+/// Builds the Harness Source, returning the new binary if that worked.
 pub fn build() -> Option<PathBuf> {
     let (profile, directory) = profile();
     let source = source_dir();

@@ -18,7 +18,7 @@ fn io_error(path: &str, error: &std::io::Error) -> ToolError {
     ToolError(format!("{path}: {error}"))
 }
 
-/// The `read` tool.
+/// Lets the model read text files in the project.
 pub(super) struct Read {
     /// The project files are read from.
     project: Arc<Project>,
@@ -76,7 +76,7 @@ impl Tool for Read {
     }
 }
 
-/// The `write` tool.
+/// Lets the model create files and replace their whole contents.
 pub(super) struct Write {
     /// The project files are written to.
     project: Arc<Project>,
@@ -129,7 +129,7 @@ impl Tool for Write {
     }
 }
 
-/// The `edit` tool.
+/// Lets the model change part of a file without rewriting it.
 pub(super) struct Edit {
     /// The project files are edited in.
     project: Arc<Project>,

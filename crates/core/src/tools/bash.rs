@@ -17,7 +17,7 @@ const TIMEOUT: Duration = Duration::from_mins(10);
 /// The most output to return to the model from one command.
 const MAX_OUTPUT_CHARS: usize = 30_000;
 
-/// The `bash` tool.
+/// Lets the model run shell commands in the project, once the person approves each one.
 pub(super) struct Bash {
     /// The project commands run in.
     project: Arc<Project>,

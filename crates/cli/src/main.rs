@@ -1,4 +1,4 @@
-//! The sstack command line.
+//! Runs sstack from a terminal, interactively or for a single prompt.
 
 mod rebuild;
 mod repl;
@@ -43,19 +43,19 @@ struct Args {
 
 /// The `--resume` value that means the newest Session.
 const LATEST: &str = "latest";
-/// The directory name used inside the user's configuration and data directories.
+/// Keeps the harness's files apart from others in the user's shared directories.
 const DIRECTORY_NAME: &str = "sstack";
 
 /// Any failure that ends a run, shown to the person as text.
 type AnyError = Box<dyn Error + Send + Sync>;
 
-/// Returns the harness's own directory inside `base`, if `base` is known.
+/// Returns where the harness keeps its files within `base`, failing if `base` is unknown.
 fn app_dir(base: Option<PathBuf>) -> Result<PathBuf, AnyError> {
     let base = base.ok_or("cannot find the user data directory")?;
     Ok(base.join(DIRECTORY_NAME))
 }
 
-/// Finds or creates the Session log for this run.
+/// Gives this run its Session, resuming one if `resume` asks for it.
 fn open_session(
     directory: &Path,
     resume: Option<&str>,
@@ -87,11 +87,11 @@ fn resume_path(directory: &Path, resume: Option<&str>) -> Result<Option<PathBuf>
 struct Run {
     /// The agent running the Session.
     agent: Agent,
-    /// The path of the Session's log.
+    /// Where the Session is stored, which identifies it across a relaunch.
     session: PathBuf,
 }
 
-/// Assembles an agent from settings, credentials and the current directory.
+/// Readies a harness for the current directory, as the run's arguments ask.
 fn prepare(args: &Args, approver: Arc<dyn Approver>) -> Result<Run, AnyError> {
     let config = load_settings()?;
     let connection = config.connection(args.connection.as_deref())?;
@@ -101,13 +101,13 @@ fn prepare(args: &Args, approver: Arc<dyn Approver>) -> Result<Run, AnyError> {
     start_session(agent_config, &project, args.resume.as_deref())
 }
 
-/// Reads the user's settings file.
+/// Returns the user's settings.
 fn load_settings() -> Result<Config, AnyError> {
     let path = app_dir(dirs::config_dir())?.join("config.toml");
     Ok(Config::load(&path)?)
 }
 
-/// Resolves a Connection's secret and builds the agent's configuration.
+/// Decides what the agent runs on for a given Connection and project.
 fn agent_config(
     connection: &Connection,
     model: String,
@@ -173,7 +173,7 @@ fn exit_code(end: Option<TurnEnd>) -> ExitCode {
     }
 }
 
-/// Starts reading the terminal in the background, delivering one line at a time.
+/// Makes typed lines available without blocking the rest of the harness.
 fn spawn_input() -> InputLines {
     let (sender, receiver) = mpsc::channel(16);
     tokio::spawn(async move {
@@ -187,7 +187,7 @@ fn spawn_input() -> InputLines {
     Arc::new(Mutex::new(receiver))
 }
 
-/// Starts listening for Ctrl-C in the background, delivering one message for each press.
+/// Makes Ctrl-C presses available as messages, one for each press.
 fn spawn_interrupts() -> mpsc::Receiver<()> {
     let (sender, receiver) = mpsc::channel(4);
     tokio::spawn(async move {
@@ -218,7 +218,9 @@ async fn run_interactive(args: &Args) -> Result<ExitCode, AnyError> {
     Ok(ExitCode::SUCCESS)
 }
 
-/// Only returns if the running harness could not be replaced.
+/// Replaces the running harness with a fresh build, keeping the Session.
+///
+/// Only returns if that could not be done.
 fn rebuild_and_relaunch<W: Write + Send>(
     args: &Args,
     session: &Path,

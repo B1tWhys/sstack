@@ -63,7 +63,7 @@ fn parse_input<T: DeserializeOwned>(input: Value) -> Result<T, ToolError> {
     serde_json::from_value(input).map_err(|error| ToolError(format!("invalid input: {error}")))
 }
 
-/// The tools available to one Session.
+/// Everything the model can do to the project during a Session.
 pub struct ToolBox {
     /// The tools, in the order they are offered to the model.
     tools: Vec<Box<dyn Tool>>,

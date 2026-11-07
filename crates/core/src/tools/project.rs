@@ -7,7 +7,7 @@ use std::process::Command;
 
 use super::ToolError;
 
-/// The directory a Session works in.
+/// The directory a Session works in, which limits what the model can touch.
 #[derive(Debug)]
 pub struct Project {
     /// The project's root directory, with symlinks resolved.
@@ -15,6 +15,8 @@ pub struct Project {
 }
 
 impl Project {
+    /// Creates a project rooted at `root`.
+    ///
     /// # Errors
     /// Returns an error if `root` does not exist.
     pub fn new(root: &Path) -> io::Result<Self> {
@@ -57,8 +59,10 @@ impl Project {
         Some(canonical)
     }
 
-    /// `check-ignore` reports nothing for tracked files, which stay visible as they do in git.
-    /// Failing to ask counts as ignored, so a broken git never exposes a file.
+    /// Returns whether git ignores `path`.
+    ///
+    /// Tracked files stay visible, as they do in git. Failing to ask counts as ignored, so a
+    /// broken git never exposes a file.
     fn is_git_ignored(&self, path: &Path) -> bool {
         Command::new("git")
             .arg("-C")
