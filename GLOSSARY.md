@@ -63,8 +63,12 @@ A slash-prefixed instruction a person gives the Harness directly, which never re
 _Avoid_: Skill, slash command
 
 **Skill**:
-A directory of instructions, described by its `SKILL.md`, that a person installed for Claude Code or Codex and that sstack loads from those tools' locations.
+A directory of instructions for the model, described by its `SKILL.md`, that a project or a person keeps in an `.agents/skills` directory shared with other agent tools. A person can run one by typing `/` and its name.
 _Avoid_: Plugin, Human Command
+
+**Skill Scope**:
+Where a Skill was found: the project, a directory nested inside it, or the person's own Skills. A Skill's name shows its Scope, as in `personal:writing-prose`, only when another Skill shares the name.
+_Avoid_: Source, level, workspace
 
 **Rebuild**:
 The Human Command that builds the Harness Source and, only if that succeeds, relaunches into the same Session.
