@@ -1,7 +1,7 @@
 //! Finding the [`Skill`]s that a project and a person keep in the `.agents/skills` directories
 //! sstack shares with other agent tools, such as Codex.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -25,6 +25,19 @@ pub enum Scope {
     Personal,
 }
 
+impl Scope {
+    /// Returns how the Scope is written in front of a Skill's name when the name clashes:
+    /// `project`, `personal`, or a nested directory's path from the project's root.
+    #[must_use]
+    pub fn label(&self) -> String {
+        match self {
+            Self::Project => "project".to_owned(),
+            Self::Nested(directory) => directory.to_string_lossy().into_owned(),
+            Self::Personal => "personal".to_owned(),
+        }
+    }
+}
+
 /// A directory whose subdirectories may be Skills, all of one [`Scope`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Location {
@@ -38,6 +51,8 @@ pub struct Location {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Skill {
     /// What the Skill is called: its declared name, or its directory's name if it declares none.
+    /// When another Skill shares that name, it is written after the Skill's [`Scope::label`] and
+    /// a colon, as in `personal:review`.
     pub name: String,
     /// When to use the Skill, as its author wrote it. Empty if it has none.
     pub description: String,
@@ -48,7 +63,7 @@ pub struct Skill {
 }
 
 /// Returns where the Skills of a Session working in the project at `root` may be, most specific
-/// first, so that the project's Skills win over the person's own when names clash.
+/// first.
 ///
 /// The project's locations run from `start` up to `root`, so a person working in a directory
 /// inside the project also gets that directory's Skills. A `start` outside `root` counts as
@@ -98,8 +113,11 @@ pub fn claude_directory(
 ///
 /// Each directory directly inside a location that holds a `SKILL.md` is a Skill, and nothing
 /// deeper is searched. Symlinks are followed, and a Skill reached through more than one link is
-/// found once. Missing locations, broken links and unreadable files are skipped. When two Skills
-/// share a name, only the first found is kept.
+/// found once. Missing locations, broken links and unreadable files are skipped.
+///
+/// Skills of different Scopes that share a name are all kept, each named with its Scope, so that
+/// no bare name quietly means one of them. Of two Skills with one name in the same Scope, only the
+/// first found is kept.
 #[must_use]
 pub fn discover(locations: &[Location]) -> Vec<Skill> {
     let mut search = Search::default();
@@ -108,7 +126,21 @@ pub fn discover(locations: &[Location]) -> Vec<Skill> {
             search.consider(&location.directory.join(child), &location.scope);
         }
     }
-    search.skills
+    name_clashes_by_scope(search.skills)
+}
+
+/// Writes the Scope in front of the name of every Skill whose name another Skill shares.
+fn name_clashes_by_scope(mut skills: Vec<Skill>) -> Vec<Skill> {
+    let mut uses: HashMap<String, usize> = HashMap::new();
+    for skill in &skills {
+        *uses.entry(skill.name.clone()).or_default() += 1;
+    }
+    for skill in &mut skills {
+        if uses[&skill.name] > 1 {
+            skill.name = format!("{}:{}", skill.scope.label(), skill.name);
+        }
+    }
+    skills
 }
 
 /// Remembers what a search has seen, so that nothing is kept twice.
@@ -116,8 +148,8 @@ pub fn discover(locations: &[Location]) -> Vec<Skill> {
 struct Search {
     /// Every Skill directory kept so far, with symlinks resolved.
     seen: HashSet<PathBuf>,
-    /// The names of the Skills kept so far.
-    names: HashSet<String>,
+    /// The Scope label and name of each Skill kept so far.
+    names: HashSet<(String, String)>,
     /// The [`Skill`]s kept so far, in the order they were found.
     skills: Vec<Skill>,
 }
@@ -132,7 +164,8 @@ impl Search {
             return;
         }
         let skill = read_skill(directory.join(SKILL_FILE), directory, scope);
-        if let Some(skill) = skill.filter(|skill| self.names.insert(skill.name.clone())) {
+        let new = |skill: &Skill| self.names.insert((skill.scope.label(), skill.name.clone()));
+        if let Some(skill) = skill.filter(new) {
             self.skills.push(skill);
         }
     }
@@ -302,24 +335,47 @@ mod tests {
     }
 
     #[test]
-    fn the_first_skill_found_with_a_name_wins() {
+    fn skills_that_share_a_name_are_each_named_with_their_scope() {
         let dir = tempfile::tempdir().unwrap();
-        let (mine, theirs) = (dir.path().join("project"), dir.path().join("user"));
+        let (mine, inner, theirs) = (
+            dir.path().join("project"),
+            dir.path().join("nested"),
+            dir.path().join("user"),
+        );
+        skill_at(&inner.join("review"), &described("review", "nested"));
         skill_at(&mine.join("review"), &described("review", "project"));
-        skill_at(&theirs.join("review"), &described("review", "user"));
         skill_at(&theirs.join("other"), &described("other", "user"));
+        skill_at(&theirs.join("review"), &described("review", "user"));
+        let nested = Location {
+            directory: inner,
+            scope: Scope::Nested("crates/cli".into()),
+        };
         let personal = Location {
             directory: theirs,
             scope: Scope::Personal,
         };
 
-        let found = discover(&[project(&mine), personal]);
+        let found = names(&[nested, project(&mine), personal]);
 
-        let found: Vec<_> = found.iter().map(|s| (&*s.name, &s.scope)).collect();
-        assert_eq!(
-            found,
-            [("review", &Scope::Project), ("other", &Scope::Personal)]
-        );
+        let expected = [
+            "crates/cli:review",
+            "project:review",
+            "other",
+            "personal:review",
+        ];
+        assert_eq!(found, expected);
+    }
+
+    #[test]
+    fn of_two_skills_with_one_name_in_a_scope_the_first_is_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        skill_at(&dir.path().join("a"), &described("review", "first"));
+        skill_at(&dir.path().join("b"), &described("review", "second"));
+
+        let found = discover(&[project(dir.path())]);
+
+        let found: Vec<_> = found.iter().map(|s| (&*s.name, &*s.description)).collect();
+        assert_eq!(found, [("review", "first")]);
     }
 
     #[test]
