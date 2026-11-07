@@ -28,8 +28,8 @@ const ASH: Color = Color::Rgb(122, 114, 106);
 /// A warm gray just lighter than a dark background, for frames that should barely show.
 const SHADOW: Color = Color::Rgb(86, 78, 72);
 
-/// A soft amber that asks for attention without alarm.
-const AMBER: Color = Color::Rgb(206, 176, 124);
+/// A muted brick red that marks what needs a decision, without the glare of pure red.
+const BRICK: Color = Color::Rgb(204, 100, 96);
 
 /// A warm background a shade lighter than a dark terminal, for a bar that stands out quietly.
 const RAISED: Color = Color::Rgb(50, 44, 40);
@@ -59,7 +59,7 @@ pub const BORDER: Style = Style::new().fg(SHADOW);
 pub const STATUS: Style = Style::new().fg(TAUPE).bg(RAISED);
 
 /// The frame and title of a question the person must answer before anything else happens.
-pub const ATTENTION: Style = Style::new().fg(AMBER);
+pub const ATTENTION: Style = Style::new().fg(BRICK);
 
 /// The 16 basic terminal colors in their standard order, so that a color's number picks its name.
 /// Named colors are drawn with codes that even the most limited terminals understand.
