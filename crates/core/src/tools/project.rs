@@ -6,6 +6,7 @@ use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
 use super::ToolError;
+use crate::worktree::REPOSITORY_ENV;
 
 /// The directory a Session works in, which limits what the model can touch.
 #[derive(Debug)]
@@ -64,11 +65,16 @@ impl Project {
     /// Tracked files stay visible, as they do in git. Failing to ask counts as ignored, so a
     /// broken git never exposes a file.
     fn is_git_ignored(&self, path: &Path) -> bool {
-        Command::new("git")
+        let mut command = Command::new("git");
+        command
             .arg("-C")
             .arg(&self.root)
             .args(["check-ignore", "-q", "--"])
-            .arg(path)
+            .arg(path);
+        for name in REPOSITORY_ENV {
+            command.env_remove(name);
+        }
+        command
             .output()
             .map_or(true, |output| output.status.success())
     }

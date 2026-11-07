@@ -4,6 +4,8 @@
 mod bash;
 /// The tools that read and change files.
 mod files;
+/// The tool that moves a worktree Session's commits onto the main branch.
+mod land;
 pub mod project;
 /// The tool that finds files and text.
 mod search;
@@ -16,6 +18,7 @@ use serde_json::Value;
 
 use crate::provider::ToolSpec;
 use crate::session::ToolCall;
+pub use land::Land;
 use project::Project;
 
 /// Decides whether the model may run a shell command.
@@ -89,6 +92,13 @@ impl ToolBox {
         }
     }
 
+    /// Adds the ability to land commits, for a Session that works in a worktree.
+    #[must_use]
+    pub fn with_land(mut self, land: Land) -> Self {
+        self.tools.push(Box::new(land));
+        self
+    }
+
     /// Returns the definitions offered to the model.
     #[must_use]
     pub fn specs(&self) -> Vec<ToolSpec> {
@@ -145,13 +155,12 @@ pub(crate) mod test_support {
     }
 
     pub fn git(root: &Path, args: &[&str]) {
-        let status = Command::new("git")
-            .arg("-C")
-            .arg(root)
-            .args(args)
-            .status()
-            .unwrap();
-        assert!(status.success());
+        let mut command = Command::new("git");
+        command.arg("-C").arg(root).args(args);
+        for name in crate::worktree::REPOSITORY_ENV {
+            command.env_remove(name);
+        }
+        assert!(command.status().unwrap().success());
     }
 }
 

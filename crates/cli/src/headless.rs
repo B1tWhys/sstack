@@ -11,14 +11,20 @@ use sstack_core::workspace;
 use tokio_util::sync::CancellationToken;
 
 use crate::describe;
-use crate::setup::{Run, prepare};
+use crate::setup::{Place, Run, Start, prepare};
 use crate::{AnyError, Args};
 
 /// Runs one prompt with no interaction, denying all shell commands.
 ///
 /// Succeeds only if the Turn finished normally, so scripts can tell when it did not.
 pub async fn run(args: &Args, prompt: &str) -> Result<ExitCode, AnyError> {
-    let Run { mut agent, session } = prepare(args, args.resume.as_deref(), |_| Arc::new(DenyAll))?;
+    let start = args
+        .resume
+        .as_deref()
+        .map_or(Start::New(Place::MainCheckout), Start::Resume);
+    let Run {
+        mut agent, session, ..
+    } = prepare(args, start, |_| Arc::new(DenyAll))?;
     let cancel = CancellationToken::new();
     let out = stdout();
     let mut view = EventView::new(&out, wants_style(&out));

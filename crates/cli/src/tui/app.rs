@@ -18,6 +18,7 @@ use super::pane::{Opened, Pane};
 use super::theme::ColorDepth;
 use crate::AnyError;
 use crate::command::{Command, parse_command};
+use crate::setup::{Place, Start};
 
 /// Tells the person why their input was not acted on.
 const BUSY: &str = "a Turn is running: wait for it to end, or press Ctrl-C to cancel it";
@@ -30,15 +31,34 @@ const SIDEBAR_MIN_SCREEN_WIDTH: u16 = 80;
 
 /// The keys that work whatever the Session on screen is doing, even with a question open, so the
 /// person can always get away to something more urgent.
-const GLOBAL_KEYS: [(char, Action); 4] = [
+const GLOBAL_KEYS: [(char, Action); 5] = [
     ('c', Action::Interrupt),
+    ('x', Action::Archive),
     ('n', Action::NextSession),
     ('p', Action::PreviousSession),
     ('g', Action::LongestWaiting),
 ];
 
-/// Opens a Session for the App: the one with the given id, or a new one if there is no id.
-pub type Opener<'a> = Box<dyn FnMut(Option<&str>) -> Result<Opened, AnyError> + 'a>;
+/// Everything the App needs done to Sessions beyond the screen.
+pub trait Sessions {
+    /// Starts an agent on the Session `start` asks for.
+    ///
+    /// # Errors
+    /// Returns an error if the Session cannot be readied.
+    fn open(&mut self, start: Start<'_>) -> Result<Opened, AnyError>;
+
+    /// Refuses, saying why, if archiving the Session with id `id` would lose work.
+    ///
+    /// # Errors
+    /// Returns an error if there is work to lose, or if that cannot be told.
+    fn check_archive(&self, id: &str) -> Result<(), AnyError>;
+
+    /// Puts the Session with id `id` away, deleting its worktree and any work there.
+    ///
+    /// # Errors
+    /// Returns an error if the Session could not be put away.
+    fn archive(&mut self, id: &str) -> Result<(), AnyError>;
+}
 
 /// Why the interactive harness stopped.
 #[derive(Debug, PartialEq, Eq)]
@@ -58,32 +78,32 @@ pub struct App<'a> {
     shown: usize,
     /// Lists the Sessions.
     sidebar: Sidebar,
-    /// Opens Sessions as the person asks for them.
-    opener: Opener<'a>,
+    /// Opens and archives Sessions as the person asks.
+    sessions: Box<dyn Sessions + 'a>,
     /// How many colors the terminal can show, which the theme's colors are fitted to.
     colors: ColorDepth,
 }
 
 impl<'a> App<'a> {
     /// Creates the harness showing `first`, with every Session in `stored` a key press away, using
-    /// `opener` to start the ones the person turns to, and drawing in the colors of `colors`.
+    /// `sessions` to start the ones the person turns to, and drawing in the colors of `colors`.
     pub fn new(
         (first, stored): (Opened, Vec<SessionSummary>),
-        opener: Opener<'a>,
+        sessions: Box<dyn Sessions + 'a>,
         colors: ColorDepth,
     ) -> Self {
         let mut panes: Vec<Pane> = stored.into_iter().map(Pane::stored).collect();
         let found = panes.iter().position(|pane| pane.path() == first.path);
         let shown = found.unwrap_or(panes.len());
         match panes.get_mut(shown) {
-            Some(pane) => pane.attach(first.agent),
+            Some(pane) => pane.attach(first),
             None => panes.push(Pane::opened(first)),
         }
         Self {
             panes,
             shown,
             sidebar: Sidebar::default(),
-            opener,
+            sessions,
             colors,
         }
     }
@@ -180,6 +200,7 @@ impl<'a> App<'a> {
             Action::NextSession => self.step(1),
             Action::PreviousSession => self.step(-1),
             Action::LongestWaiting => self.show_longest_waiting(),
+            Action::Archive => self.archive(false),
         }
         None
     }
@@ -246,8 +267,8 @@ impl<'a> App<'a> {
     /// Starts an agent for the Session at position `index`, unless it already has one.
     fn ensure_agent(&mut self, index: usize) -> Result<(), AnyError> {
         if !self.panes[index].has_agent() {
-            let opened = (self.opener)(Some(self.panes[index].id()))?;
-            self.panes[index].attach(opened.agent);
+            let opened = self.sessions.open(Start::Resume(self.panes[index].id()))?;
+            self.panes[index].attach(opened);
         }
         Ok(())
     }
@@ -257,7 +278,9 @@ impl<'a> App<'a> {
         match parse_command(line) {
             Command::Prompt(text) => self.prompt(text),
             Command::Rebuild => return self.rebuild(),
-            Command::New => self.open_new(),
+            Command::New => self.open_new(Place::Worktree),
+            Command::NewMain => self.open_new(Place::MainCheckout),
+            Command::Archive { force } => self.archive(force),
             Command::Quit => return Some(Exit::Quit),
             Command::Unknown(name) => self.notice(format!("unknown command: {name}")),
             Command::Empty => {}
@@ -287,14 +310,60 @@ impl<'a> App<'a> {
         }
     }
 
-    /// Starts a new Session and puts it on screen, leaving the others running.
-    fn open_new(&mut self) {
-        match (self.opener)(None) {
+    /// Starts a new Session working in `place` and puts it on screen, leaving the others running.
+    fn open_new(&mut self, place: Place) {
+        match self.sessions.open(Start::New(place)) {
             Ok(opened) => {
                 self.panes.push(Pane::opened(opened));
                 self.shown = self.panes.len() - 1;
             }
             Err(error) => self.notice(format!("could not start a new Session: {error}")),
+        }
+    }
+
+    /// Puts the Session on screen away and moves on to the next one, unless `force` is false and
+    /// that would lose work.
+    fn archive(&mut self, force: bool) {
+        if self.panes[self.shown].state().in_turn() {
+            self.notice(BUSY.to_owned());
+            return;
+        }
+        let leaving = self.shown;
+        let id = self.panes[leaving].id().to_owned();
+        let allowed = if force {
+            Ok(())
+        } else {
+            self.sessions.check_archive(&id)
+        };
+        if let Err(error) = allowed {
+            self.notice(format!("not archived: {error}"));
+            return;
+        }
+        self.move_on();
+        if self.shown != leaving {
+            self.finish_archiving(leaving, &id);
+        }
+    }
+
+    /// Shows the next Session in the queue, or a new one if there are no others. If that fails,
+    /// the Session on screen stays.
+    fn move_on(&mut self) {
+        let shown = self.shown;
+        match self.queue().into_iter().find(|index| *index != shown) {
+            Some(next) => self.show(next),
+            None => self.open_new(Place::Worktree),
+        }
+    }
+
+    /// Puts away the Session at position `leaving`, whose id is `id`, now that it is off screen.
+    fn finish_archiving(&mut self, leaving: usize, id: &str) {
+        if let Err(error) = self.sessions.archive(id) {
+            self.notice(format!("not archived: {error}"));
+            return;
+        }
+        self.panes.remove(leaving);
+        if self.shown > leaving {
+            self.shown -= 1;
         }
     }
 
@@ -380,8 +449,10 @@ mod tests {
     use sstack_core::provider::scripted::{Scripted, ScriptedProvider};
     use sstack_core::provider::{ModelRequest, Provider, ProviderError, StreamEvent};
     use sstack_core::session::{AssistantEntry, Entry, SessionLog};
+    use std::cell::RefCell;
     use std::fs;
     use std::path::PathBuf;
+    use std::rc::Rc;
     use std::sync::Arc;
     use std::time::Duration;
     use tempfile::TempDir;
@@ -398,6 +469,10 @@ mod tests {
         app: App<'static>,
         sender: EventSender,
         events: EventReceiver,
+        /// Where each new Session was asked to work.
+        places: Rc<RefCell<Vec<Place>>>,
+        /// The ids of the Sessions archived so far.
+        archived: Rc<RefCell<Vec<String>>>,
     }
 
     /// Returns where the Session with id `id` is stored in `dir`.
@@ -405,21 +480,56 @@ mod tests {
         dir.path().join(id).with_extension("jsonl")
     }
 
-    /// Returns an opener whose Sessions all run on `provider`, numbering new ones from one.
-    fn opener(dir: &TempDir, provider: Arc<dyn Provider>, sender: EventSender) -> Opener<'static> {
-        let root = dir.path().to_owned();
-        let mut created = 0;
-        Box::new(move |resume| {
-            let id = resume.map_or_else(
-                || {
-                    created += 1;
-                    format!("new{created}")
-                },
-                str::to_owned,
-            );
-            let path = root.join(id).with_extension("jsonl");
-            Ok(opened(&path, provider.clone(), &sender))
-        })
+    /// Sessions that all run on one Provider, numbering new ones from one.
+    struct TestSessions {
+        /// Where Sessions are stored.
+        root: PathBuf,
+        /// Runs every Session's Turns.
+        provider: Arc<dyn Provider>,
+        /// Where every Session reports.
+        sender: EventSender,
+        /// How many new Sessions have been started.
+        created: usize,
+        /// Where each new Session was asked to work.
+        places: Rc<RefCell<Vec<Place>>>,
+        /// The ids of the Sessions archived so far.
+        archived: Rc<RefCell<Vec<String>>>,
+        /// Why opening fails, if it does.
+        open_failure: Option<&'static str>,
+        /// Why archiving is refused, if it is.
+        refusal: Option<&'static str>,
+        /// Why archiving fails, if it does.
+        archive_failure: Option<&'static str>,
+    }
+
+    impl Sessions for TestSessions {
+        fn open(&mut self, start: Start<'_>) -> Result<Opened, AnyError> {
+            if let Some(failure) = self.open_failure {
+                return Err(failure.into());
+            }
+            let id = match start {
+                Start::Resume(id) => id.to_owned(),
+                Start::New(place) => {
+                    self.places.borrow_mut().push(place);
+                    self.created += 1;
+                    format!("new{}", self.created)
+                }
+            };
+            let path = self.root.join(id).with_extension("jsonl");
+            Ok(opened(&path, self.provider.clone(), &self.sender))
+        }
+
+        fn check_archive(&self, _id: &str) -> Result<(), AnyError> {
+            self.refusal.map_or(Ok(()), |refusal| Err(refusal.into()))
+        }
+
+        fn archive(&mut self, id: &str) -> Result<(), AnyError> {
+            if let Some(failure) = self.archive_failure {
+                return Err(failure.into());
+            }
+            self.archived.borrow_mut().push(id.to_owned());
+            Ok(())
+        }
     }
 
     fn harness(provider: Arc<dyn Provider>) -> Harness {
@@ -428,15 +538,39 @@ mod tests {
 
     /// Starts an App in `dir` showing a new Session, with `stored` a key press away.
     fn start(dir: TempDir, provider: Arc<dyn Provider>, stored: Vec<SessionSummary>) -> Harness {
+        start_with(dir, (provider, stored), |_| {})
+    }
+
+    /// Starts an App like [`start`], with `adjust` applied to its Sessions first.
+    fn start_with(
+        dir: TempDir,
+        (provider, stored): (Arc<dyn Provider>, Vec<SessionSummary>),
+        adjust: impl FnOnce(&mut TestSessions),
+    ) -> Harness {
         let (sender, events) = mpsc::unbounded_channel();
         let first = opened(&path_of(&dir, "first"), provider.clone(), &sender);
-        let open = opener(&dir, provider, sender.clone());
-        let app = App::new((first, stored), open, ColorDepth::Ansi256);
+        let places = Rc::default();
+        let archived = Rc::default();
+        let mut sessions = TestSessions {
+            root: dir.path().to_owned(),
+            provider,
+            sender: sender.clone(),
+            created: 0,
+            places: Rc::clone(&places),
+            archived: Rc::clone(&archived),
+            open_failure: None,
+            refusal: None,
+            archive_failure: None,
+        };
+        adjust(&mut sessions);
+        let app = App::new((first, stored), Box::new(sessions), ColorDepth::Ansi256);
         Harness {
             dir,
             app,
             sender,
             events,
+            places,
+            archived,
         }
     }
 
@@ -674,7 +808,7 @@ mod tests {
         log.append(&Entry::User { text: text.clone() }).unwrap();
         SessionSummary {
             path,
-            first_prompt: text,
+            first_prompt: Some(text),
             modified: SystemTime::now() - Duration::from_secs(age),
         }
     }
@@ -764,17 +898,9 @@ mod tests {
     async fn a_session_that_cannot_open_leaves_the_person_where_they_were() {
         let dir = tempfile::tempdir().unwrap();
         let stored = vec![summary(&dir, "older", 100)];
-        let (sender, events) = mpsc::unbounded_channel();
-        let provider = Arc::new(NeverResponds);
-        let first = opened(&path_of(&dir, "first"), provider, &sender);
-        let open: Opener = Box::new(|_| Err("no keychain".into()));
-        let app = App::new((first, stored), open, ColorDepth::Ansi256);
-        let mut h = Harness {
-            dir,
-            app,
-            sender,
-            events,
-        };
+        let mut h = start_with(dir, (Arc::new(NeverResponds), stored), |sessions| {
+            sessions.open_failure = Some("no keychain");
+        });
 
         h.press('n');
         assert_eq!(h.shown(), "first");
@@ -912,7 +1038,7 @@ mod tests {
     fn only_control_keys_are_global() {
         assert_eq!(global_action(ctrl('n')), Some(Action::NextSession));
         assert_eq!(global_action(key(KeyCode::Char('n'))), None);
-        assert_eq!(global_action(ctrl('x')), None);
+        assert_eq!(global_action(ctrl('z')), None);
         assert_eq!(global_action(key(KeyCode::Enter)), None);
     }
 
@@ -924,5 +1050,105 @@ mod tests {
         let mut h = start(dir, Arc::new(NeverResponds), stored);
         h.screen_of(WIDE);
         assert_eq!(fs::read(path_of(&h.dir, "older")).unwrap(), before);
+    }
+
+    #[tokio::test]
+    async fn new_sessions_get_a_worktree_unless_the_main_checkout_is_asked_for() {
+        let mut h = harness(Arc::new(NeverResponds));
+        h.enter_new();
+        h.enter("/new-main");
+        assert_eq!(*h.places.borrow(), [Place::Worktree, Place::MainCheckout]);
+    }
+
+    #[tokio::test]
+    async fn archiving_puts_the_session_away_and_moves_on_to_the_queue() {
+        let mut h = with_stored(Arc::new(NeverResponds));
+        h.enter("/archive");
+        assert_eq!(*h.archived.borrow(), ["first"]);
+        assert_eq!(h.shown(), "older");
+        assert_eq!(sidebar_order(&mut h), ["older", "younger"]);
+    }
+
+    #[tokio::test]
+    async fn ctrl_x_archives_too() {
+        let mut h = with_stored(Arc::new(NeverResponds));
+        h.press('x');
+        h.press('x');
+        assert_eq!(*h.archived.borrow(), ["first", "older"]);
+        assert_eq!(h.shown(), "younger");
+    }
+
+    #[tokio::test]
+    async fn archiving_the_last_session_starts_a_new_one() {
+        let mut h = harness(Arc::new(NeverResponds));
+        h.press('x');
+        assert_eq!(*h.archived.borrow(), ["first"]);
+        assert_eq!(h.shown(), "new1");
+        assert_eq!(h.app.panes.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_session_with_a_turn_running_cannot_be_archived() {
+        let mut h = harness(Arc::new(NeverResponds));
+        h.enter("go");
+        h.press('x');
+        assert_eq!(*h.archived.borrow(), Vec::<String>::new());
+        assert!(h.screen().contains("a Turn is running"));
+    }
+
+    #[tokio::test]
+    async fn work_that_would_be_lost_stops_archiving_unless_forced() {
+        let dir = tempfile::tempdir().unwrap();
+        let provider = Arc::new(NeverResponds);
+        let mut h = start_with(dir, (provider, vec![]), |sessions| {
+            sessions.refusal = Some("it has 2 unlanded commits");
+        });
+
+        h.enter("/archive");
+        assert_eq!(*h.archived.borrow(), Vec::<String>::new());
+        assert_eq!(h.shown(), "first");
+        assert!(h.screen().contains("2 unlanded commits"));
+
+        h.enter("/archive --force");
+        assert_eq!(*h.archived.borrow(), ["first"]);
+    }
+
+    #[tokio::test]
+    async fn a_failed_archive_keeps_the_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let stored = vec![summary(&dir, "older", 100)];
+        let provider = Arc::new(NeverResponds);
+        let mut h = start_with(dir, (provider, stored), |sessions| {
+            sessions.archive_failure = Some("git said no");
+        });
+
+        h.press('x');
+
+        assert_eq!(h.app.panes.len(), 2);
+        assert_eq!(h.shown(), "older");
+        assert!(h.screen().contains("not archived: git said no"));
+    }
+
+    #[tokio::test]
+    async fn the_session_on_screen_survives_removing_one_stored_before_it() {
+        let mut h = with_stored(Arc::new(NeverResponds));
+        h.press('p');
+        assert_eq!(h.shown(), "younger");
+        h.press('x');
+        assert_eq!(h.shown(), "older");
+        assert_eq!(*h.archived.borrow(), ["younger"]);
+        assert_eq!(sidebar_order(&mut h), ["older", "new session"]);
+    }
+
+    #[tokio::test]
+    async fn being_unable_to_move_on_keeps_the_session_on_screen() {
+        let dir = tempfile::tempdir().unwrap();
+        let provider = Arc::new(NeverResponds);
+        let mut h = start_with(dir, (provider, vec![]), |sessions| {
+            sessions.open_failure = Some("no keychain");
+        });
+        h.press('x');
+        assert_eq!(h.shown(), "first");
+        assert_eq!(*h.archived.borrow(), Vec::<String>::new());
     }
 }

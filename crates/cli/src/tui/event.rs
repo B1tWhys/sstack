@@ -106,6 +106,8 @@ pub enum Action {
     PreviousSession,
     /// The person asked to see the Session that has been waiting for them the longest.
     LongestWaiting,
+    /// The person asked to put the Session on screen away.
+    Archive,
 }
 
 /// Asks the person whether a shell command may run.

@@ -132,7 +132,10 @@ impl Tool for Search {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tools::test_support::git_project;
+    use crate::tools::project::Project;
+    use crate::tools::test_support::{git, git_project};
+    use crate::worktree;
+    use crate::worktree::test_support::repository;
 
     fn populated() -> (tempfile::TempDir, Search) {
         let (dir, project) = git_project();
@@ -169,6 +172,23 @@ mod tests {
         assert_eq!(none, "no matches");
         assert!(search.run(json!({"pattern": "("})).await.is_err());
         assert!(search.run(json!({"glob": "{"})).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn a_worktree_sees_its_own_files_and_the_main_checkout_does_not_see_them() {
+        let dir = tempfile::tempdir().unwrap();
+        repository(dir.path());
+        fs::write(dir.path().join("a.txt"), "alpha\n").unwrap();
+        git(dir.path(), &["add", "."]);
+        git(dir.path(), &["commit", "-q", "-m", "a"]);
+        let worktree = worktree::create(dir.path(), "1").unwrap();
+
+        let from_main = Search::new(Arc::new(Project::new(dir.path()).unwrap()));
+        let from_worktree = Search::new(Arc::new(Project::new(&worktree).unwrap()));
+        let pattern = || json!({"pattern": "alpha"});
+
+        assert_eq!(from_main.run(pattern()).await.unwrap(), "a.txt:1:alpha");
+        assert_eq!(from_worktree.run(pattern()).await.unwrap(), "a.txt:1:alpha");
     }
 
     #[test]

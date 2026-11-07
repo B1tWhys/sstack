@@ -24,6 +24,8 @@ pub struct Opened {
     pub agent: AgentHandle,
     /// Where the Session is stored.
     pub path: PathBuf,
+    /// Something the person should know about how the Session was set up.
+    pub notice: Option<String>,
 }
 
 /// Something that ended while the person was looking at another Session.
@@ -69,14 +71,14 @@ impl Pane {
     /// Creates the pane for a Session on disk, with no agent yet.
     pub fn stored(summary: SessionSummary) -> Self {
         let mut pane = Self::blank(summary.path, summary.modified);
-        pane.title = Some(summary.first_prompt);
+        pane.title = summary.first_prompt;
         pane
     }
 
     /// Creates the pane for a Session that has only just opened.
     pub fn opened(opened: Opened) -> Self {
-        let mut pane = Self::blank(opened.path, SystemTime::now());
-        pane.agent = Some(opened.agent);
+        let mut pane = Self::blank(opened.path.clone(), SystemTime::now());
+        pane.attach(opened);
         pane
     }
 
@@ -120,8 +122,11 @@ impl Pane {
     }
 
     /// Gives the Session the agent it was missing.
-    pub fn attach(&mut self, agent: AgentHandle) {
-        self.agent = Some(agent);
+    pub fn attach(&mut self, opened: Opened) {
+        self.agent = Some(opened.agent);
+        if let Some(notice) = opened.notice {
+            self.update(&Event::Notice(notice));
+        }
     }
 
     /// Returns a value that sorts this Session into its place in the sidebar: waiting Sessions

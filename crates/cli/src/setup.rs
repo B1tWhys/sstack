@@ -8,8 +8,8 @@ use sstack_core::config::{Config, Connection};
 use sstack_core::credentials::{SystemKeyring, resolve_secret};
 use sstack_core::session::{Entry, SessionLog};
 use sstack_core::tools::project::Project;
-use sstack_core::tools::{Approver, ToolBox};
-use sstack_core::workspace;
+use sstack_core::tools::{Approver, Land, ToolBox};
+use sstack_core::{workspace, worktree};
 
 use crate::{AnyError, Args, LATEST};
 
@@ -22,31 +22,73 @@ fn app_dir(base: Option<PathBuf>) -> Result<PathBuf, AnyError> {
     Ok(base.join(DIRECTORY_NAME))
 }
 
-/// Gives this run its Session, resuming one if `resume` asks for it.
-fn open_session(
-    directory: &Path,
-    resume: Option<&str>,
-) -> Result<(PathBuf, SessionLog, Vec<Entry>), AnyError> {
-    let Some(path) = resume_path(directory, resume)? else {
-        let path = workspace::new_session_path(directory);
-        let log = SessionLog::create(&path)?;
-        return Ok((path, log, Vec::new()));
-    };
-    let (log, entries) = SessionLog::open(&path)?;
-    Ok((path, log, entries))
+/// Where a new Session works.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Place {
+    /// In a worktree of its own, away from other Sessions.
+    Worktree,
+    /// In the main checkout, shared with anything else working there.
+    MainCheckout,
 }
 
-/// Finds the Session to resume, returning nothing if this run starts a new one.
-fn resume_path(directory: &Path, resume: Option<&str>) -> Result<Option<PathBuf>, AnyError> {
-    match resume {
-        None => Ok(None),
-        Some(LATEST) => {
-            let latest = workspace::latest_session(directory)?;
-            latest
-                .map(Some)
-                .ok_or_else(|| "no session to resume".into())
+/// Which Session a run works on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Start<'a> {
+    /// The Session with this id, or the newest one for [`LATEST`], archived or not.
+    Resume(&'a str),
+    /// A new Session in this place.
+    New(Place),
+}
+
+/// A Session log that is open and ready for an agent.
+struct OpenedLog {
+    /// Where the Session is stored.
+    path: PathBuf,
+    /// Records the Session.
+    log: SessionLog,
+    /// The Session so far.
+    entries: Vec<Entry>,
+    /// Whether the Session should get a worktree if it has none.
+    wants_worktree: bool,
+}
+
+/// Opens the log of the Session that `start` asks for.
+fn open_session(directory: &Path, start: Start<'_>) -> Result<OpenedLog, AnyError> {
+    match start {
+        Start::New(place) => {
+            let path = workspace::new_session_path(directory);
+            let log = SessionLog::create(&path)?;
+            Ok(OpenedLog {
+                path,
+                log,
+                entries: Vec::new(),
+                wants_worktree: place == Place::Worktree,
+            })
         }
-        Some(id) => Ok(Some(workspace::session_path(directory, id))),
+        Start::Resume(wanted) => resume_session(directory, wanted),
+    }
+}
+
+/// Opens the log of an existing Session, bringing it back first if it was archived.
+fn resume_session(directory: &Path, wanted: &str) -> Result<OpenedLog, AnyError> {
+    let wants_worktree = workspace::restore_session(directory, wanted)?;
+    let path = resume_path(directory, wanted)?;
+    let (log, entries) = SessionLog::open(&path)?;
+    Ok(OpenedLog {
+        path,
+        log,
+        entries,
+        wants_worktree,
+    })
+}
+
+/// Finds the Session to resume.
+fn resume_path(directory: &Path, wanted: &str) -> Result<PathBuf, AnyError> {
+    if wanted == LATEST {
+        let latest = workspace::latest_session(directory)?;
+        latest.ok_or_else(|| "no session to resume".into())
+    } else {
+        Ok(workspace::session_path(directory, wanted))
     }
 }
 
@@ -56,36 +98,72 @@ pub struct Run {
     pub agent: Agent,
     /// Where the Session is stored, which identifies it across a relaunch.
     pub session: PathBuf,
+    /// Something the person should know about how the Session was set up.
+    pub notice: Option<String>,
+}
+
+/// Where a Session turned out to work.
+struct Workplace {
+    /// The Session's worktree. Missing for a Session in the main checkout.
+    worktree: Option<PathBuf>,
+    /// Something the person should know about how that was decided.
+    notice: Option<String>,
+}
+
+/// Finds or makes the place for the Session with id `id` to work. A project that cannot have
+/// worktrees still works, in the main checkout.
+fn workplace(main: &Path, id: &str, wants_worktree: bool) -> Workplace {
+    let existing = worktree::path(main, id);
+    let (worktree, notice) = if existing.exists() {
+        (Some(existing), None)
+    } else if !wants_worktree {
+        (None, None)
+    } else {
+        match worktree::create(main, id) {
+            Ok(path) => (Some(path), None),
+            Err(error) => (None, Some(format!("working in the main checkout: {error}"))),
+        }
+    };
+    Workplace { worktree, notice }
 }
 
 /// Readies a harness for the current directory, with the Connection and model the run's
 /// arguments ask for.
 ///
-/// `resume` names the Session to resume, as `--resume` does, and a new one is started without
-/// it. `approver` is given the Session's id and returns what decides whether each shell command
-/// the model asks for may run.
+/// `start` says which Session to work on. `approver` is given the Session's id and returns what
+/// decides whether each shell command the model asks for may run.
 pub fn prepare(
     args: &Args,
-    resume: Option<&str>,
+    start: Start<'_>,
     approver: impl FnOnce(&str) -> Arc<dyn Approver>,
 ) -> Result<Run, AnyError> {
     let config = load_settings()?;
     let connection = config.connection(args.connection.as_deref())?;
-    let project = Arc::new(Project::new(&std::env::current_dir()?)?);
+    let main = main_checkout()?;
     let backend = Backend {
         connection,
         model: args.model.as_ref().unwrap_or(&config.default_model).clone(),
+        main: &main,
     };
-    let (session, log, entries) = open_session(&project_sessions(project.root())?, resume)?;
-    let approver = approver(&workspace::session_id(&session));
-    let agent = Agent::new(agent_config(&backend, project, approver)?, log, entries)?;
-    Ok(Run { agent, session })
+    let session = open_session(&project_sessions(&main)?, start)?;
+    let id = workspace::session_id(&session.path);
+    let place = workplace(&main, &id, session.wants_worktree);
+    let agent_config = agent_config(&backend, &id, (&place, approver(&id)))?;
+    Ok(Run {
+        agent: Agent::new(agent_config, session.log, session.entries)?,
+        session: session.path,
+        notice: place.notice,
+    })
+}
+
+/// Returns the directory the harness was started in, with symlinks resolved.
+pub fn main_checkout() -> Result<PathBuf, AnyError> {
+    Ok(Project::new(&std::env::current_dir()?)?.root().to_owned())
 }
 
 /// Returns where the Sessions of the current directory are stored.
 pub fn sessions_directory() -> Result<PathBuf, AnyError> {
-    let project = Project::new(&std::env::current_dir()?)?;
-    project_sessions(project.root())
+    project_sessions(&main_checkout()?)
 }
 
 /// Returns where the Sessions of the project at `root` are stored.
@@ -105,22 +183,42 @@ struct Backend<'a> {
     connection: &'a Connection,
     /// The identifier of the model to request.
     model: String,
+    /// The main checkout, where a `.env` file would be, since git leaves it out of worktrees.
+    main: &'a Path,
 }
 
-/// Decides what the agent runs on for a given model and project.
+/// Decides what the agent for the Session with id `id` runs on, given where it works and what
+/// decides on its shell commands.
 fn agent_config(
     backend: &Backend<'_>,
-    project: Arc<Project>,
-    approver: Arc<dyn Approver>,
+    id: &str,
+    (place, approver): (&Workplace, Arc<dyn Approver>),
 ) -> Result<AgentConfig, AnyError> {
     let connection = backend.connection;
     SystemKeyring::connect();
-    let secret = resolve_secret(&connection.secret, &SystemKeyring, project.root())?;
+    let secret = resolve_secret(&connection.secret, &SystemKeyring, backend.main)?;
+    let root = place.worktree.as_deref().unwrap_or(backend.main);
+    let project = Arc::new(Project::new(root)?);
+    let secret_env = vec![connection.secret.clone()];
+    let tools = ToolBox::standard(project.clone(), approver.clone(), secret_env.clone());
+    let system = workspace::system_prompt(root);
+    let (tools, system) = if place.worktree.is_some() {
+        let land = Land {
+            worktree: project,
+            main: backend.main.to_owned(),
+            branch: worktree::branch(id),
+            approver,
+            secret_env,
+        };
+        (tools.with_land(land), workspace::worktree_prompt(&system))
+    } else {
+        (tools, system)
+    };
     Ok(AgentConfig {
         provider: connection.provider(secret)?,
         model: backend.model.clone(),
-        system: workspace::system_prompt(project.root()),
-        tools: ToolBox::standard(project, approver, vec![connection.secret.clone()]),
+        system,
+        tools,
         context_limit: connection.context_limit,
     })
 }
@@ -145,24 +243,64 @@ mod tests {
     #[test]
     fn a_new_session_is_created_and_can_be_resumed() {
         let dir = tempfile::tempdir().unwrap();
-        let (path, mut log, entries) = open_session(dir.path(), None).unwrap();
-        assert_eq!(entries, Vec::new());
-        log.append(&Entry::TurnCancelled).unwrap();
+        let mut new = open_session(dir.path(), Start::New(Place::Worktree)).unwrap();
+        assert_eq!(new.entries, Vec::new());
+        assert!(new.wants_worktree);
+        new.log.append(&Entry::TurnCancelled).unwrap();
 
-        let id = workspace::session_id(&path);
-        let (by_id, _, entries) = open_session(dir.path(), Some(&id)).unwrap();
-        let (newest, _, _) = open_session(dir.path(), Some(LATEST)).unwrap();
+        let id = workspace::session_id(&new.path);
+        let by_id = open_session(dir.path(), Start::Resume(&id)).unwrap();
+        let newest = open_session(dir.path(), Start::Resume(LATEST)).unwrap();
 
-        assert_eq!(by_id, path);
-        assert_eq!(newest, path);
-        assert_eq!(entries, [Entry::TurnCancelled]);
+        assert_eq!(by_id.path, new.path);
+        assert_eq!(newest.path, new.path);
+        assert_eq!(by_id.entries, [Entry::TurnCancelled]);
+        assert!(!by_id.wants_worktree);
     }
 
     #[test]
     fn resuming_with_nothing_to_resume_is_an_error() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(open_session(dir.path(), Some(LATEST)).is_err());
-        assert!(open_session(dir.path(), Some("missing")).is_err());
+        assert!(open_session(dir.path(), Start::Resume(LATEST)).is_err());
+        assert!(open_session(dir.path(), Start::Resume("missing")).is_err());
+    }
+
+    #[test]
+    fn a_main_checkout_session_wants_no_worktree() {
+        let dir = tempfile::tempdir().unwrap();
+        let new = open_session(dir.path(), Start::New(Place::MainCheckout)).unwrap();
+        assert!(!new.wants_worktree);
+    }
+
+    #[test]
+    fn resuming_an_archived_session_restores_it_and_asks_for_a_worktree() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = workspace::session_path(dir.path(), "1");
+        SessionLog::create(&path).unwrap();
+        workspace::archive_session(dir.path(), "1").unwrap();
+
+        let restored = open_session(dir.path(), Start::Resume("1")).unwrap();
+
+        assert_eq!(restored.path, path);
+        assert!(restored.wants_worktree);
+    }
+
+    #[test]
+    fn sessions_work_where_they_can() {
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path();
+
+        let plain = workplace(main, "1", false);
+        assert_eq!((plain.worktree, plain.notice), (None, None));
+
+        let fallback = workplace(main, "1", true);
+        assert_eq!(fallback.worktree, None);
+        assert!(fallback.notice.unwrap().contains("main checkout"));
+
+        let existing = worktree::path(main, "2");
+        std::fs::create_dir_all(&existing).unwrap();
+        let found = workplace(main, "2", false);
+        assert_eq!(found.worktree, Some(existing));
     }
 
     #[test]
