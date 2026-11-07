@@ -9,6 +9,8 @@ mod land;
 pub mod project;
 /// The tool that finds files and text.
 mod search;
+/// The tool that hands the model a Skill's instructions.
+mod skill;
 
 use std::sync::Arc;
 
@@ -18,6 +20,7 @@ use serde_json::Value;
 
 use crate::provider::ToolSpec;
 use crate::session::ToolCall;
+use crate::skills::Skill;
 pub use land::Land;
 use project::Project;
 
@@ -96,6 +99,15 @@ impl ToolBox {
     #[must_use]
     pub fn with_land(mut self, land: Land) -> Self {
         self.tools.push(Box::new(land));
+        self
+    }
+
+    /// Adds the ability to read the instructions of `skills`. With none, offers nothing new.
+    #[must_use]
+    pub fn with_skills(mut self, skills: Vec<Skill>) -> Self {
+        if !skills.is_empty() {
+            self.tools.push(Box::new(skill::UseSkill::new(skills)));
+        }
         self
     }
 
@@ -203,5 +215,20 @@ mod tests {
         let tools = ToolBox::standard(project, Arc::new(DenyAll), vec![]);
         let names: Vec<_> = tools.specs().into_iter().map(|spec| spec.name).collect();
         assert_eq!(names, ["read", "write", "edit", "search", "bash"]);
+    }
+
+    #[test]
+    fn offers_the_skill_tool_only_when_there_are_skills() {
+        let (_dir, project) = git_project();
+        let tools = ToolBox::standard(project, Arc::new(DenyAll), vec![]).with_skills(vec![]);
+        assert!(!tools.specs().iter().any(|spec| spec.name == "skill"));
+
+        let skill = Skill {
+            name: "review".into(),
+            description: String::new(),
+            path: "SKILL.md".into(),
+        };
+        let tools = tools.with_skills(vec![skill]);
+        assert!(tools.specs().iter().any(|spec| spec.name == "skill"));
     }
 }

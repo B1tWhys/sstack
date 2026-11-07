@@ -66,16 +66,24 @@ fn thinking_then_text(thinking: &str, text: &str) -> String {
 }
 
 fn bash_call(command: &str) -> String {
-    let start = r#"{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"c1","name":"bash","input":{}}}"#;
-    let input = serde_json::json!({"command": command}).to_string();
+    tool_call("bash", &serde_json::json!({"command": command}))
+}
+
+/// Returns a reply in which the model calls the tool `name` with `input`.
+fn tool_call(name: &str, input: &serde_json::Value) -> String {
+    let start = serde_json::json!({
+        "type": "content_block_start",
+        "index": 0,
+        "content_block": {"type": "tool_use", "id": "c1", "name": name, "input": {}},
+    });
     let delta = serde_json::json!({
         "type": "content_block_delta",
         "index": 0,
-        "delta": {"type": "input_json_delta", "partial_json": input},
+        "delta": {"type": "input_json_delta", "partial_json": input.to_string()},
     });
     let blocks = format!(
         "{}{}{}",
-        event("content_block_start", start),
+        event("content_block_start", &start.to_string()),
         event("content_block_delta", &delta.to_string()),
         event(
             "content_block_stop",
@@ -269,6 +277,22 @@ fn project_instructions_reach_the_model() {
     sandbox.run(&["--prompt", "hi"]);
 
     assert!(api.request(0).contains("Prefer tabs."));
+}
+
+#[test]
+fn installed_skills_reach_the_model() {
+    let call = tool_call("skill", &serde_json::json!({"name": "commits"}));
+    let api = FakeApi::start(vec![call, text_reply("ok")]);
+    let sandbox = Sandbox::new(&api.url);
+    let directory = sandbox.home.join(".claude/skills/commits");
+    fs::create_dir_all(&directory).unwrap();
+    let skill = "---\nname: commits\ndescription: Use when committing.\n---\nKeep titles short.\n";
+    fs::write(directory.join("SKILL.md"), skill).unwrap();
+
+    sandbox.run(&["--prompt", "commit this"]);
+
+    assert!(api.request(0).contains("- commits: Use when committing."));
+    assert!(api.request(1).contains("Keep titles short."));
 }
 
 #[test]

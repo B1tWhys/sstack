@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::session;
+use crate::skills::Skill;
 
 /// The instructions every Session starts with.
 const BASE_PROMPT: &str = "You are sstack, a coding agent working in the user's project. \
@@ -21,6 +22,10 @@ const ARCHIVE_DIR: &str = "archived";
 const WORKTREE_PROMPT: &str = "This Session has its own git worktree on its own branch. Other \
 Sessions work in parallel in their own worktrees. Commit here, then call the `land` tool to move \
 each working change onto the main branch. Do not change the main branch any other way.";
+/// Tells the model what the listed Skills are and when to use them.
+const SKILLS_PROMPT: &str = "These Skills hold instructions for particular kinds of work. When \
+one fits what you are about to do, call the `skill` tool with its name first and follow what it \
+says.";
 
 /// The directory holding Sessions for `project`, kept outside it so they are never committed.
 #[must_use]
@@ -153,6 +158,19 @@ pub fn worktree_prompt(prompt: &str) -> String {
     format!("{prompt}\n\n{WORKTREE_PROMPT}")
 }
 
+/// Extends `prompt` so the model knows which `skills` it can use. With none, leaves it as it is.
+#[must_use]
+pub fn skills_prompt(prompt: &str, skills: &[Skill]) -> String {
+    if skills.is_empty() {
+        return prompt.to_owned();
+    }
+    let listed: Vec<String> = skills
+        .iter()
+        .map(|skill| format!("- {}: {}", skill.name, skill.description))
+        .collect();
+    format!("{prompt}\n\n{SKILLS_PROMPT}\n\n{}", listed.join("\n"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -245,5 +263,23 @@ mod tests {
         assert_eq!(system_prompt(dir.path()), BASE_PROMPT);
         fs::write(dir.path().join(INSTRUCTIONS_FILE), "Use tabs.").unwrap();
         assert!(system_prompt(dir.path()).ends_with("\n\nUse tabs."));
+    }
+
+    #[test]
+    fn skills_are_listed_for_the_model() {
+        let skill = Skill {
+            name: "review".into(),
+            description: "Use when reviewing.".into(),
+            path: "SKILL.md".into(),
+        };
+        let prompt = skills_prompt("base", &[skill]);
+        assert!(prompt.starts_with("base\n\n"));
+        assert!(prompt.contains("`skill` tool"));
+        assert!(prompt.ends_with("\n\n- review: Use when reviewing."));
+    }
+
+    #[test]
+    fn no_skills_leave_the_prompt_alone() {
+        assert_eq!(skills_prompt("base", &[]), "base");
     }
 }

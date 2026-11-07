@@ -38,7 +38,6 @@ use crossterm::execute;
 use event::{Event, EventReceiver, EventSender, SessionSender};
 use lifecycle::Exit;
 use pane::Opened;
-use sstack::skills::{self, Skill};
 use sstack::tools::Approver;
 use sstack::workspace::SessionSummary;
 use sstack::{workspace, worktree};
@@ -50,7 +49,9 @@ use worker::AgentHandle;
 use crate::Args;
 use crate::describe;
 use crate::rebuild;
-use crate::setup::{Place, Start, main_checkout, prepare, relaunch_args, sessions_directory};
+use crate::setup::{
+    Place, Start, installed_skills, main_checkout, prepare, relaunch_args, sessions_directory,
+};
 
 /// Runs the interactive harness until the person quits, rebuilding when asked.
 ///
@@ -75,7 +76,8 @@ pub async fn run(args: &Args) -> Result<ExitCode> {
         .sessions(Box::new(sessions))
         .colors(ColorDepth::detect())
         .build();
-    app.notice(describe::skills_loaded(&load_skills()?));
+    let found = installed_skills(&std::env::current_dir()?);
+    app.notice(describe::skills_loaded(&found));
     app.continue_parked();
     input::spawn(sender);
     while let Exit::Rebuild(binary) = on_screen(&mut app, &mut events).await? {
@@ -165,17 +167,6 @@ impl Sessions for LiveSessions<'_> {
             build.abort();
         }
     }
-}
-
-/// Finds the [`Skill`]s installed for Claude Code or Codex, for this project and for the person.
-///
-/// # Errors
-/// Fails only if the current directory cannot be found. Finding no Skills is not an error.
-fn load_skills() -> Result<Vec<Skill>> {
-    let project = std::env::current_dir()?;
-    let home = dirs::home_dir();
-    let places = skills::locations(&project, home.as_deref(), |name| std::env::var_os(name));
-    Ok(skills::discover(&places))
 }
 
 /// Refuses to start without a terminal, rather than take over one the harness was not given.

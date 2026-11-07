@@ -9,6 +9,7 @@ use sstack::agent::{Agent, AgentConfig};
 use sstack::config::{Config, Connection};
 use sstack::credentials::{SystemKeyring, resolve_secret};
 use sstack::session::{Entry, SessionLog};
+use sstack::skills::{self, Skill};
 use sstack::tools::project::Project;
 use sstack::tools::{Approver, Land, ToolBox};
 use sstack::{workspace, worktree};
@@ -197,6 +198,13 @@ struct Backend<'a> {
     main: &'a Path,
 }
 
+/// Finds the [`Skill`]s installed for Claude Code or Codex, for `project` and for the person.
+pub fn installed_skills(project: &Path) -> Vec<Skill> {
+    let home = dirs::home_dir();
+    let places = skills::locations(project, home.as_deref(), |name| std::env::var_os(name));
+    skills::discover(&places)
+}
+
 /// Decides what the agent for a Session runs on.
 #[builder]
 fn agent_config(
@@ -215,8 +223,10 @@ fn agent_config(
     let root = place.worktree.as_deref().unwrap_or(backend.main);
     let project = Arc::new(Project::new(root)?);
     let secret_env = vec![connection.secret.clone()];
-    let tools = ToolBox::standard(project.clone(), approver.clone(), secret_env.clone());
-    let system = workspace::system_prompt(root);
+    let found = installed_skills(root);
+    let tools = ToolBox::standard(project.clone(), approver.clone(), secret_env.clone())
+        .with_skills(found.clone());
+    let system = workspace::skills_prompt(&workspace::system_prompt(root), &found);
     let (tools, system) = if place.worktree.is_some() {
         let land = Land {
             worktree: project,
