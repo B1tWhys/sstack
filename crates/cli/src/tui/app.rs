@@ -14,6 +14,7 @@ use crossterm::execute;
 use ratatui::backend::Backend;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::{Frame, Terminal};
+use sstack::skills::{self, Lookup};
 use sstack::vim::{VimEvent, VimFailure};
 use sstack::workspace::SessionSummary;
 
@@ -425,10 +426,43 @@ impl App<'_> {
             Command::Archive { force } => self.archive(force),
             Command::Vim => self.panes[self.shown].toggle_vim(),
             Command::Quit => return self.quit(),
-            Command::Unknown(name) => self.notice(format!("unknown command: {name}")),
+            Command::Unknown(line) => self.run_skill(line),
             Command::Empty => {}
         }
         None
+    }
+
+    /// Starts a Turn on the Skill that the slash-prefixed `line` names, with the rest of the line
+    /// added after its instructions, or tells the person why it cannot.
+    fn run_skill(&mut self, line: &str) {
+        match self.skill_prompt(line) {
+            Ok(_) if self.phase.is_draining() => self.notice(DRAINING.to_owned()),
+            Ok(text) => self.prompt(&text),
+            Err(notice) => self.notice(notice),
+        }
+    }
+
+    /// Returns the prompt that runs the Skill the slash-prefixed `line` names in the Session on
+    /// screen, or what to tell the person instead.
+    fn skill_prompt(&self, line: &str) -> Result<String, String> {
+        let request = line.trim_start_matches('/');
+        let (name, added) = request
+            .split_once(char::is_whitespace)
+            .unwrap_or((request, ""));
+        match skills::find(self.panes[self.shown].skills(), name) {
+            Lookup::Found(skill) => {
+                let loaded = skills::load(skill)
+                    .map_err(|error| format!("could not load the Skill {name}: {error}"))?;
+                Ok(format!("{loaded}\n\n{}", added.trim())
+                    .trim_end()
+                    .to_owned())
+            }
+            Lookup::Ambiguous(names) => Err(format!(
+                "/{name} could mean {}: type the full name",
+                names.join(" or ")
+            )),
+            Lookup::Missing => Err(format!("unknown command: {line}")),
+        }
     }
 
     /// Starts to quit, or stops waiting if already quitting. A Rebuild has to be backed out of
@@ -884,6 +918,49 @@ mod tests {
         assert!(screen.contains("> hello"), "{screen}");
         assert!(screen.contains("hello back"), "{screen}");
         assert!(screen.contains("session first | ready"), "{screen}");
+    }
+
+    /// Starts an [`App`] answered by `script`, whose first Session has a project Skill for each
+    /// directory name and `SKILL.md` text in `skills`.
+    fn with_skills(skills: &[(&str, &str)], script: Vec<Scripted>) -> Harness {
+        let dir = tempfile::tempdir().unwrap();
+        for (name, text) in skills {
+            let directory = dir.path().join(".agents/skills").join(name);
+            fs::create_dir_all(&directory).unwrap();
+            fs::write(directory.join("SKILL.md"), text).unwrap();
+        }
+        start(dir, Arc::new(ScriptedProvider::new(script)), vec![])
+    }
+
+    #[tokio::test]
+    async fn a_skill_runs_by_name_with_what_the_person_adds() {
+        let skill = ("commits", "---\nname: commits\n---\nKeep titles short.\n");
+        let mut h = with_skills(&[skill], vec![Ok(reply("done"))]);
+
+        assert_eq!(h.enter("/commits be brief"), None);
+        h.until_turn_ends().await;
+
+        let Entry::User { text } = &h.session()[0] else {
+            panic!("the Turn did not start with the person's message");
+        };
+        assert!(text.contains("Keep titles short."), "{text}");
+        assert!(!text.contains("name: commits"), "{text}");
+        assert!(text.ends_with("</skill>\n\nbe brief"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn a_bare_name_that_only_names_skills_with_their_scope_runs_none() {
+        let skill = ("review", "---\nname: project:review\n---\nReview.\n");
+        let mut h = with_skills(&[skill], vec![]);
+
+        assert_eq!(h.enter("/review"), None);
+
+        let screen = h.screen();
+        assert!(
+            screen.contains("/review could mean project:review"),
+            "{screen}"
+        );
+        assert_eq!(h.session(), Vec::new());
     }
 
     #[tokio::test]

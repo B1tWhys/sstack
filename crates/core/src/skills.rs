@@ -4,6 +4,7 @@
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
 use yaml_rust2::{Yaml, YamlLoader};
@@ -239,6 +240,91 @@ fn split_header(text: &str) -> (Option<&str>, &str) {
     (None, text)
 }
 
+/// The most files beside a `SKILL.md` that [`load`] names, so that a Skill with a large tree of
+/// resources does not flood the model.
+const MAX_LISTED_FILES: usize = 50;
+
+/// Returns what the model is given when `skill` is loaded: its instructions, the directory they
+/// live in, and the files beside them, which the model can then read.
+///
+/// # Errors
+/// Returns an error if the Skill's `SKILL.md` can no longer be read.
+pub fn load(skill: &Skill) -> io::Result<String> {
+    let text = fs::read_to_string(&skill.path)?;
+    let directory = skill.path.parent().unwrap_or(Path::new(""));
+    Ok(loaded(skill, directory, &text))
+}
+
+/// What a person's request for a Skill by name found.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Lookup<'a> {
+    /// The one Skill with that name.
+    Found(&'a Skill),
+    /// The full names of the Skills of different Scopes that share the bare name asked for.
+    Ambiguous(Vec<&'a str>),
+    /// No Skill has the name.
+    Missing,
+}
+
+/// Finds the Skill in `skills` that `name` asks for. A bare name that several Skills share, which
+/// [`discover`] then names with their Scopes, finds none of them.
+#[must_use]
+pub fn find<'a>(skills: &'a [Skill], name: &str) -> Lookup<'a> {
+    if let Some(skill) = skills.iter().find(|skill| skill.name == name) {
+        return Lookup::Found(skill);
+    }
+    let sharing: Vec<&str> = skills
+        .iter()
+        .filter(|skill| skill.name == format!("{}:{name}", skill.scope.label()))
+        .map(|skill| skill.name.as_str())
+        .collect();
+    if sharing.is_empty() {
+        Lookup::Missing
+    } else {
+        Lookup::Ambiguous(sharing)
+    }
+}
+
+/// Describes `skill` to the model once loaded: its instructions from `text`, then the files in
+/// its `directory` other than `SKILL.md`, if there are any.
+fn loaded(skill: &Skill, directory: &Path, text: &str) -> String {
+    let mut out = format!(
+        "<skill name=\"{}\" directory=\"{}\">\n{}\n</skill>",
+        skill.name,
+        directory.display(),
+        instructions(text).trim_end()
+    );
+    let files = files_beside(directory, &skill.path);
+    if files.is_empty() {
+        return out;
+    }
+    let mut lines: Vec<String> = files
+        .iter()
+        .take(MAX_LISTED_FILES)
+        .map(|file| format!("- {}", file.display()))
+        .collect();
+    if files.len() > MAX_LISTED_FILES {
+        lines.push(format!("- and {} more", files.len() - MAX_LISTED_FILES));
+    }
+    out.push_str("\n\nFiles beside the instructions:\n");
+    out.push_str(&lines.join("\n"));
+    out
+}
+
+/// Returns the files under `directory` other than `instructions`, in a stable order, leaving out
+/// hidden and ignored files.
+fn files_beside(directory: &Path, instructions: &Path) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = ignore::WalkBuilder::new(directory)
+        .build()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_some_and(|kind| kind.is_file()))
+        .map(ignore::DirEntry::into_path)
+        .filter(|path| path != instructions)
+        .collect();
+    files.sort();
+    files
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -419,6 +505,48 @@ mod tests {
 
         let found: Vec<_> = found.iter().map(|s| (&*s.name, &*s.description)).collect();
         assert_eq!(found, [("review", "first")]);
+    }
+
+    #[test]
+    fn a_long_list_of_files_is_cut_short() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("SKILL.md");
+        for index in 0..=MAX_LISTED_FILES {
+            fs::write(dir.path().join(format!("{index:03}.md")), "").unwrap();
+        }
+
+        let many = Skill {
+            name: "many".into(),
+            description: String::new(),
+            path,
+            scope: Scope::Project,
+            model_invocable: true,
+        };
+        let text = loaded(&many, dir.path(), "Many.");
+
+        assert!(text.ends_with("\n- and 1 more"), "{text}");
+    }
+
+    #[test]
+    fn a_name_finds_its_skill_and_a_shared_bare_name_finds_none() {
+        let skill = |name: &str, scope: Scope| Skill {
+            name: name.into(),
+            description: String::new(),
+            path: "SKILL.md".into(),
+            scope,
+            model_invocable: true,
+        };
+        let skills = [
+            skill("project:review", Scope::Project),
+            skill("personal:review", Scope::Personal),
+            skill("quiz", Scope::Personal),
+        ];
+
+        assert_eq!(find(&skills, "quiz"), Lookup::Found(&skills[2]));
+        assert_eq!(find(&skills, "personal:review"), Lookup::Found(&skills[1]));
+        let both = vec!["project:review", "personal:review"];
+        assert_eq!(find(&skills, "review"), Lookup::Ambiguous(both));
+        assert_eq!(find(&skills, "nope"), Lookup::Missing);
     }
 
     #[test]

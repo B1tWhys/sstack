@@ -9,6 +9,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use sstack::agent::TurnEnd;
 use sstack::session::Entry;
+use sstack::skills::Skill;
 use sstack::workspace::{self, SessionSummary};
 
 use super::component::{Component, KeyOutcome};
@@ -33,6 +34,8 @@ pub struct Opened {
     pub events: SessionSender,
     /// Whether the person wants to type into a real nvim.
     pub vim: bool,
+    /// Every Skill installed for the Session, which the person can run by name.
+    pub skills: Vec<Skill>,
 }
 
 /// Something that ended while the person was looking at another Session.
@@ -72,6 +75,8 @@ pub struct Pane {
     input: Input,
     /// The Session so far.
     transcript: Transcript,
+    /// The Skills the person can run by name in the Session. Empty until the agent starts.
+    skills: Vec<Skill>,
     /// The Session id and what the agent is doing.
     status: Status,
 }
@@ -111,6 +116,7 @@ impl Pane {
             approval: Approval::default(),
             input: Input::default(),
             transcript: Transcript::default(),
+            skills: Vec::new(),
         }
     }
 
@@ -122,6 +128,11 @@ impl Pane {
     /// Returns where the Session is stored.
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Returns the Skills the person can run by name in the Session.
+    pub fn skills(&self) -> &[Skill] {
+        &self.skills
     }
 
     /// Returns what the Session is doing.
@@ -142,6 +153,7 @@ impl Pane {
             self.input.start_vim(&opened.events);
         }
         self.events = Some(opened.events);
+        self.skills = opened.skills;
         for notice in opened.notices {
             self.update(&Event::Notice(notice));
         }

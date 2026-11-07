@@ -139,6 +139,7 @@ impl Sessions for LiveSessions<'_> {
             notices: run.notices,
             events: report_to(&id),
             vim: run.vim,
+            skills: run.skills,
         })
     }
 

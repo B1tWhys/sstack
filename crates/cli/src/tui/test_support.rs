@@ -9,6 +9,7 @@ use ratatui::{Frame, Terminal};
 use sstack::agent::{Agent, AgentConfig};
 use sstack::provider::Provider;
 use sstack::session::{AssistantEntry, SessionLog, StopReason, ToolCall, Usage};
+use sstack::skills::{self, Location, Scope};
 use sstack::tools::project::Project;
 use sstack::tools::{Approver, ToolBox};
 use sstack::workspace;
@@ -102,6 +103,10 @@ pub fn opened(path: &Path, provider: Arc<dyn Provider>, events: &EventSender) ->
         notices: Vec::new(),
         events: SessionSender::new(&id, events.clone()),
         vim: false,
+        skills: skills::discover(&[Location {
+            directory: path.parent().unwrap().join(".agents/skills"),
+            scope: Scope::Project,
+        }]),
     }
 }
 

@@ -107,6 +107,8 @@ pub struct Run {
     pub notices: Vec<String>,
     /// Whether the person wants to type into a real nvim.
     pub vim: bool,
+    /// Every Skill installed for the Session, which the person can run by name.
+    pub skills: Vec<Skill>,
 }
 
 /// Where a Session turned out to work.
@@ -155,14 +157,14 @@ pub fn prepare(
     let session = open_session(&project_sessions(&main)?, start)?;
     let id = workspace::session_id(&session.path);
     let place = workplace(&main, &id, session.wants_worktree);
-    let offered = offered_skills(place.worktree.as_deref().unwrap_or(&main));
-    let listing = SkillListing::new(&offered, connection.context_limit);
+    let installed = installed_skills(place.worktree.as_deref().unwrap_or(&main));
+    let listing = SkillListing::new(&offered_skills(&installed), connection.context_limit);
     let agent_config = agent_config()
         .backend(&backend)
         .id(&id)
         .place(&place)
         .approver(approver(&id))
-        .skills(offered)
+        .skills(&installed)
         .listing(&listing)
         .call()?;
     let shortened = describe::listing_shortened(listing.without_descriptions);
@@ -171,6 +173,7 @@ pub fn prepare(
         session: session.path,
         notices: place.notice.into_iter().chain(shortened).collect(),
         vim: config.vim,
+        skills: installed,
     })
 }
 
@@ -214,12 +217,12 @@ pub fn installed_skills(root: &Path) -> Vec<Skill> {
     skills::discover(&skills::locations(root, &start, home.as_deref()))
 }
 
-/// Returns the [`Skill`]s the model may load on its own in a Session working in the project at
-/// `root`.
-fn offered_skills(root: &Path) -> Vec<Skill> {
-    installed_skills(root)
-        .into_iter()
+/// Returns the ones among `installed` that the model may load on its own.
+fn offered_skills(installed: &[Skill]) -> Vec<Skill> {
+    installed
+        .iter()
         .filter(|skill| skill.model_invocable)
+        .cloned()
         .collect()
 }
 
@@ -234,8 +237,9 @@ fn agent_config(
     place: &Workplace,
     /// Decides on the Session's shell commands.
     approver: Arc<dyn Approver>,
-    /// The Skills the model may load.
-    skills: Vec<Skill>,
+    /// Every Skill installed for the Session. The model may read the files of all of them, since
+    /// a person may run any of them, but is offered only those it may load on its own.
+    skills: &[Skill],
     /// How the system prompt lists those Skills.
     listing: &SkillListing,
 ) -> Result<AgentConfig> {
@@ -249,7 +253,7 @@ fn agent_config(
     let project = Arc::new(Project::new(root)?.with_readable(skill_directories));
     let secret_env = vec![connection.secret.clone()];
     let tools = ToolBox::standard(project.clone(), approver.clone(), secret_env.clone())
-        .with_skills(skills);
+        .with_skills(offered_skills(skills));
     let home = dirs::home_dir();
     let claude = skills::claude_directory(home.as_deref(), |name| std::env::var_os(name));
     let system = workspace::system_prompt(root, claude.as_deref());
