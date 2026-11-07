@@ -1,25 +1,26 @@
 //! Tests of [`Vim`](super::Vim). Most drive a real nvim, because how nvim behaves is the main risk.
 
-use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
-use tokio::time::timeout;
 
 use super::*;
 
-/// The longest a test waits for nvim before failing.
-const PATIENCE: Duration = Duration::from_secs(10);
+/// How long nvim gets to start in tests about other failures. The failures take milliseconds, plus
+/// the first run of a script in a new checkout, which macOS scans first. This is shorter than
+/// nextest lets a test run, so a failure that never comes shows up as [`VimFailure::TimedOut`]
+/// rather than as the test being stopped.
+const READY_TIMEOUT: Duration = Duration::from_secs(2);
 
-/// Writes an executable shell script standing in for nvim, for failures a real one will not
-/// produce on demand.
-fn fake_nvim(directory: &Path, script: &str) -> PathBuf {
-    let path = directory.join("fake-nvim");
-    fs::write(&path, format!("#!/bin/sh\n{script}\n")).unwrap();
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
-    path
+/// Returns the checked-in script `name` in `fake-nvim/`, which stands in for nvim to produce a
+/// failure a real one will not produce on demand. The scripts are checked in rather than written
+/// by each test, because macOS scans every new executable on its first run, so a script written
+/// by the test would be scanned on every run.
+fn fake_nvim(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src/vim/fake-nvim")
+        .join(name)
 }
 
 /// Waits for the [`VimEvent::Lost`] from a [`Vim`] running `program`.
@@ -34,7 +35,7 @@ async fn lost_running(program: PathBuf, ready_timeout: Duration) -> (Draft, VimF
         .program(program)
         .ready_timeout(ready_timeout)
         .start();
-    match timeout(PATIENCE, events.recv()).await.unwrap() {
+    match events.recv().await {
         Some(VimEvent::Lost { draft, failure }) => (draft, failure),
         other => panic!("expected to lose nvim, got {other:?}"),
     }
@@ -43,7 +44,7 @@ async fn lost_running(program: PathBuf, ready_timeout: Duration) -> (Draft, VimF
 #[tokio::test]
 async fn a_missing_program_counts_as_not_installed() {
     let directory = tempfile::tempdir().unwrap();
-    let (draft, failure) = lost_running(directory.path().join("nope"), PATIENCE).await;
+    let (draft, failure) = lost_running(directory.path().join("nope"), READY_TIMEOUT).await;
     assert_eq!(failure, VimFailure::NotInstalled);
     assert_eq!(draft.text, "kept");
 }
@@ -51,33 +52,26 @@ async fn a_missing_program_counts_as_not_installed() {
 #[tokio::test]
 async fn a_program_that_cannot_run_is_reported() {
     let directory = tempfile::tempdir().unwrap();
-    let (_, failure) = lost_running(directory.path().to_owned(), PATIENCE).await;
+    let (_, failure) = lost_running(directory.path().to_owned(), READY_TIMEOUT).await;
     assert!(matches!(failure, VimFailure::Unreachable(_)), "{failure:?}");
 }
 
 #[tokio::test]
 async fn exiting_before_ready_fails_rather_than_respawning_forever() {
-    let directory = tempfile::tempdir().unwrap();
-    let program = fake_nvim(directory.path(), "exit 0");
-    let (_, failure) = lost_running(program, PATIENCE).await;
+    let (_, failure) = lost_running(fake_nvim("exits.sh"), READY_TIMEOUT).await;
     assert!(matches!(failure, VimFailure::Stopped(_)), "{failure:?}");
 }
 
 #[tokio::test]
 async fn hanging_while_starting_times_out() {
-    let directory = tempfile::tempdir().unwrap();
-    let program = fake_nvim(directory.path(), "sleep 60");
+    let program = fake_nvim("hangs.sh");
     let (_, failure) = lost_running(program, Duration::from_millis(50)).await;
     assert_eq!(failure, VimFailure::TimedOut);
 }
 
 #[tokio::test]
 async fn an_error_during_setup_is_reported() {
-    let directory = tempfile::tempdir().unwrap();
-    // An array of [2, "nvim_error_event", [0, "bad"]], which is what nvim sends when a script fails.
-    let bytes = r"\223\002\260nvim_error_event\222\000\243bad";
-    let program = fake_nvim(directory.path(), &format!("printf '{bytes}'; sleep 60"));
-    let (_, failure) = lost_running(program, PATIENCE).await;
+    let (_, failure) = lost_running(fake_nvim("fails-setup.sh"), READY_TIMEOUT).await;
     assert!(matches!(failure, VimFailure::Rejected(_)), "{failure:?}");
 }
 
@@ -121,8 +115,7 @@ mod real {
 
         /// Returns the next report.
         async fn next(&mut self) -> VimEvent {
-            let event = timeout(PATIENCE, self.events.recv()).await;
-            let event = event.expect("nvim went quiet").expect("nvim was dropped");
+            let event = self.events.recv().await.expect("nvim was dropped");
             if let VimEvent::State(state) = &event {
                 self.state = Some(state.clone());
             }

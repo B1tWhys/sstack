@@ -31,10 +31,15 @@ repos:
         pass_filenames: false
         always_run: true
 
-      # Writes the coverage report the crap hook reads.
+      # Writes the coverage report the crap hook reads. Runs through nextest so that a hanging test
+      # is stopped, which nextest cannot do for doctests, so they run separately.
       - id: tests
         name: tests with coverage
-        entry: cargo llvm-cov --workspace --all-features --locked --doctests --json --output-path target/coverage.json
+        entry: >-
+          sh -c 'cargo llvm-cov clean --workspace
+          && cargo llvm-cov --no-report nextest --workspace --all-features --locked
+          && cargo llvm-cov --no-report --doc --workspace --all-features --locked
+          && cargo llvm-cov report --doctests --json --output-path target/coverage.json'
         language: system
         pass_filenames: false
         always_run: true

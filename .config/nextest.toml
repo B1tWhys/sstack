@@ -1,0 +1,6 @@
+# Nextest stops any test still running after 3 seconds, so a test waiting on something that never
+# happens fails instead of hanging the run. A test that works takes milliseconds. The room above
+# that is for macOS, which scans a new executable on its first run, and for many tests starting
+# nvim at once.
+[profile.default]
+slow-timeout = { period = "3s", terminate-after = 1 }

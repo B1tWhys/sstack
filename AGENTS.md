@@ -5,12 +5,14 @@ Use the vocabulary in `GLOSSARY.md`. Design decisions are in `docs/adr/`.
 ## Setup
 
 ```sh
-cargo install --locked cargo-llvm-cov cargo-crap4rust committed
+cargo install --locked cargo-llvm-cov cargo-crap4rust cargo-nextest committed
 brew install prek neovim
 prek install
 ```
 
-Tests that need a real nvim sit behind the `nvim-tests` feature, on by default. `cargo test --workspace --no-default-features` skips them where nvim is not installed.
+Run tests with `cargo nextest run --workspace`. Nextest stops any test after 3 seconds, set in `.config/nextest.toml`, so a test waiting on something that never happens fails instead of hanging. Plain `cargo test` has no limit.
+
+Tests that need a real nvim sit behind the `nvim-tests` feature, on by default. `cargo nextest run --workspace --no-default-features` skips them where nvim is not installed.
 
 ## Rules
 

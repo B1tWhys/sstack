@@ -523,15 +523,8 @@ mod tests {
     /// Drives a real nvim through the prompt.
     #[cfg(feature = "nvim-tests")]
     mod real {
-        use std::time::Duration;
-
-        use tokio::time::timeout;
-
         use super::*;
         use crate::tui::test_support::type_into;
-
-        /// The longest a test waits for nvim before failing.
-        const PATIENCE: Duration = Duration::from_secs(10);
 
         /// Passes what nvim says to `prompt` until one of its reports passes `check`.
         async fn until(
@@ -540,7 +533,7 @@ mod tests {
             check: impl Fn(&Event) -> bool,
         ) {
             loop {
-                let event = timeout(PATIENCE, events.recv()).await.unwrap().unwrap();
+                let event = events.recv().await.unwrap();
                 let Event::Session(_, event) = event else {
                     continue;
                 };
