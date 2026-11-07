@@ -16,23 +16,23 @@ use ratatui::style::{Color, Modifier, Style};
 /// A pale, soft clay, warm and easy to read at length. Leans pinker than sand.
 const CLAY: Color = Color::Rgb(216, 192, 178);
 
-/// A warm off-white, set apart from the blues without drawing the eye.
+/// A warm off-white, yellower than clay, so it can be told apart from it without drawing the eye.
 const SAND: Color = Color::Rgb(222, 212, 192);
 
-/// A muted blue-gray, readable but clearly secondary.
-const SLATE: Color = Color::Rgb(128, 140, 156);
+/// A muted warm gray, readable but clearly secondary.
+const TAUPE: Color = Color::Rgb(146, 136, 126);
 
-/// A dark gray that recedes, for detail most people skim past.
-const ASH: Color = Color::Rgb(108, 116, 128);
+/// A dark warm gray that recedes, for detail most people skim past.
+const ASH: Color = Color::Rgb(122, 114, 106);
 
-/// A gray just lighter than a dark background, for frames that should barely show.
-const SHADOW: Color = Color::Rgb(72, 80, 94);
+/// A warm gray just lighter than a dark background, for frames that should barely show.
+const SHADOW: Color = Color::Rgb(86, 78, 72);
 
 /// A soft amber that asks for attention without alarm.
 const AMBER: Color = Color::Rgb(206, 176, 124);
 
-/// A background a shade lighter than a dark terminal, for a bar that stands out quietly.
-const RAISED: Color = Color::Rgb(40, 46, 56);
+/// A warm background a shade lighter than a dark terminal, for a bar that stands out quietly.
+const RAISED: Color = Color::Rgb(50, 44, 40);
 
 /// The model's replies, and other text meant to be read in full.
 pub const TEXT: Style = Style::new().fg(CLAY);
@@ -44,10 +44,10 @@ pub const PROMPT: Style = Style::new().fg(SAND).add_modifier(Modifier::BOLD);
 pub const INPUT: Style = Style::new().fg(SAND);
 
 /// The marker before what the person types.
-pub const MARKER: Style = Style::new().fg(SLATE);
+pub const MARKER: Style = Style::new().fg(TAUPE);
 
 /// The model's summarized thinking, which is there to skim.
-pub const REASONING: Style = Style::new().fg(SLATE).add_modifier(Modifier::ITALIC);
+pub const REASONING: Style = Style::new().fg(TAUPE).add_modifier(Modifier::ITALIC);
 
 /// Tool activity, warnings, and messages from the harness itself.
 pub const NOTE: Style = Style::new().fg(ASH);
@@ -56,7 +56,7 @@ pub const NOTE: Style = Style::new().fg(ASH);
 pub const BORDER: Style = Style::new().fg(SHADOW);
 
 /// The line telling the person where they are and what they can do.
-pub const STATUS: Style = Style::new().fg(SLATE).bg(RAISED);
+pub const STATUS: Style = Style::new().fg(TAUPE).bg(RAISED);
 
 /// The frame and title of a question the person must answer before anything else happens.
 pub const ATTENTION: Style = Style::new().fg(AMBER);
