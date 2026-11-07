@@ -1,4 +1,4 @@
-//! A Provider that replays canned responses, for tests.
+//! A [`Provider`] that replays canned responses, for tests.
 
 use std::collections::VecDeque;
 use std::sync::Mutex;
@@ -11,7 +11,7 @@ use crate::session::{AssistantEntry, Entry};
 /// One canned response: its text is streamed before the response is returned.
 pub type Scripted = Result<AssistantEntry, String>;
 
-/// Stands in for a real Provider, so tests can script responses and inspect requests.
+/// Stands in for a real [`Provider`], so tests can script responses and inspect requests.
 #[derive(Debug, Default)]
 pub struct ScriptedProvider {
     /// The responses not yet returned.
@@ -21,7 +21,7 @@ pub struct ScriptedProvider {
 }
 
 impl ScriptedProvider {
-    /// Creates a Provider that returns `script` in order.
+    /// Creates a [`Provider`] that returns `script` in order.
     #[must_use]
     pub fn new(script: impl IntoIterator<Item = Scripted>) -> Self {
         Self {

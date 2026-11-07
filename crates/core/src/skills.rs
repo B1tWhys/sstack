@@ -1,5 +1,5 @@
-//! Finding the Skills a person has installed for Claude Code or Codex, so the Harness can use the
-//! same ones.
+//! Finding the [`Skill`]s a person has installed for Claude Code or Codex, so the Harness can use
+//! the same ones.
 
 use std::collections::HashSet;
 use std::ffi::OsString;
@@ -58,7 +58,7 @@ pub fn locations(
         .collect()
 }
 
-/// Finds every Skill in `locations`, searching earlier locations first.
+/// Finds every [`Skill`] in `locations`, searching earlier locations first.
 ///
 /// Symlinks are followed, and links that loop back on themselves are harmless. Missing
 /// locations, broken links and unreadable files are skipped. A Skill's own subdirectories are not
@@ -79,7 +79,7 @@ struct Search {
     visited: HashSet<PathBuf>,
     /// The names of the Skills kept so far.
     names: HashSet<String>,
-    /// The Skills kept so far, in the order they were found.
+    /// The [`Skill`]s kept so far, in the order they were found.
     skills: Vec<Skill>,
 }
 
@@ -125,7 +125,7 @@ fn subdirectories(directory: &Path) -> Vec<OsString> {
     names
 }
 
-/// Reads the Skill described by `file`, which lives in `directory`. Returns nothing if the file
+/// Reads the [`Skill`] described by `file`, which lives in `directory`. Returns nothing if the file
 /// cannot be read as text.
 ///
 /// A missing or malformed header still gives a Skill, named after its directory.

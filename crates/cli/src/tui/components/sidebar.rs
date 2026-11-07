@@ -105,7 +105,8 @@ impl Row {
     }
 }
 
-/// Lists the Sessions in the order the App gives them, keeping the one on screen in view.
+/// Lists the Sessions in the order the [`App`](crate::tui::app::App) gives them, keeping the one on
+/// screen in view.
 #[derive(Debug, Default)]
 pub struct Sidebar {
     /// What to show, in order.

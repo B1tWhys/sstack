@@ -18,10 +18,11 @@ pub struct ToolCall {
     pub input: Value,
 }
 
-/// The data a Provider returned for a model response, opaque to everything but that Provider.
+/// The data a [`Provider`](crate::provider::Provider) returned for a model response, opaque to
+/// everything but that Provider.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProviderPayload {
-    /// The name of the Provider that produced this data.
+    /// The name of the [`Provider`](crate::provider::Provider) that produced this data.
     pub provider: String,
     /// The identifier of the model that produced this data.
     pub model: String,
@@ -52,7 +53,7 @@ pub enum StopReason {
     Refused,
 }
 
-/// One response from the model, in a form any Provider can read.
+/// One response from the model, in a form any [`Provider`](crate::provider::Provider) can read.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AssistantEntry {
     /// The visible text of the response.

@@ -46,7 +46,7 @@ const GLOBAL_KEYS: [(char, Action); 5] = [
     ('g', Action::LongestWaiting),
 ];
 
-/// Everything the App needs done to Sessions beyond the screen.
+/// Everything the [`App`] needs done to Sessions beyond the screen.
 pub trait Sessions {
     /// Starts an agent on the Session `start` asks for.
     ///
@@ -611,7 +611,7 @@ mod tests {
     /// A width too narrow for the sidebar.
     const NARROW: u16 = 60;
 
-    /// An App wired to real agents, with the events it would receive held back for the test.
+    /// An [`App`] wired to real agents, with the events it would receive held back for the test.
     struct Harness {
         dir: TempDir,
         app: App<'static>,
@@ -630,7 +630,7 @@ mod tests {
         dir.path().join(id).with_extension("jsonl")
     }
 
-    /// Sessions that all run on one Provider, numbering new ones from one.
+    /// Sessions that all run on one [`Provider`], numbering new ones from one.
     struct TestSessions {
         /// Where Sessions are stored.
         root: PathBuf,
@@ -696,7 +696,7 @@ mod tests {
         start(tempfile::tempdir().unwrap(), provider, vec![])
     }
 
-    /// Starts an App in `dir` showing a new Session, with `stored` a key press away.
+    /// Starts an [`App`] in `dir` showing a new Session, with `stored` a key press away.
     fn start(dir: TempDir, provider: Arc<dyn Provider>, stored: Vec<SessionSummary>) -> Harness {
         start_with()
             .dir(dir)
@@ -706,7 +706,7 @@ mod tests {
             .call()
     }
 
-    /// Starts an App like [`start`], with `adjust` applied to its Sessions first.
+    /// Starts an [`App`] like [`start`], with `adjust` applied to its Sessions first.
     #[bon::builder]
     fn start_with(
         /// Where the Sessions are stored.
@@ -759,12 +759,12 @@ mod tests {
     }
 
     impl Harness {
-        /// Replaces the App with a new one on the same Session, as a Rebuild does.
+        /// Replaces the [`App`] with a new one on the same Session, as a Rebuild does.
         fn rebuilt(self) -> Harness {
             start(self.dir, Arc::new(ScriptedProvider::new(vec![])), vec![])
         }
 
-        /// Presses a key that goes to the App rather than to the prompt.
+        /// Presses a key that goes to the [`App`] rather than to the prompt.
         fn press(&mut self, character: char) -> Option<Exit> {
             self.app.handle(Event::Key(alt(character)))
         }
@@ -1025,7 +1025,7 @@ mod tests {
         }
     }
 
-    /// Starts an App with two stored Sessions as well as the new one.
+    /// Starts an [`App`] with two stored Sessions as well as the new one.
     fn with_stored(provider: Arc<dyn Provider>) -> Harness {
         let dir = tempfile::tempdir().unwrap();
         let stored = vec![summary(&dir, "younger", 100), summary(&dir, "older", 200)];

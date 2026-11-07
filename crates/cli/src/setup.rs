@@ -131,7 +131,7 @@ fn workplace(main: &Path, id: &str, wants_worktree: bool) -> Workplace {
     Workplace { worktree, notice }
 }
 
-/// Readies a harness for the current directory, with the Connection and model the run's
+/// Readies a harness for the current directory, with the [`Connection`] and model the run's
 /// arguments ask for.
 ///
 /// `start` says which Session to work on. `approver` is given the Session's id and returns what

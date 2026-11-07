@@ -96,7 +96,7 @@ fn starting_session<'a>(args: &'a Args, stored: &'a [SessionSummary]) -> Start<'
     wanted.map_or(Start::New(Place::Worktree), Start::Resume)
 }
 
-/// Opens and archives Sessions for real, on behalf of the App.
+/// Opens and archives Sessions for real, on behalf of the [`App`].
 struct LiveSessions<'a> {
     /// The arguments of this run.
     args: &'a Args,
@@ -167,7 +167,7 @@ impl Sessions for LiveSessions<'_> {
     }
 }
 
-/// Finds the Skills installed for Claude Code or Codex, for this project and for the person.
+/// Finds the [`Skill`]s installed for Claude Code or Codex, for this project and for the person.
 ///
 /// # Errors
 /// Fails only if the current directory cannot be found. Finding no Skills is not an error.

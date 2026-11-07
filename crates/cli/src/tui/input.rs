@@ -1,4 +1,4 @@
-//! Turning what the terminal reports into events for the App.
+//! Turning what the terminal reports into events for the [`App`](crate::tui::app::App).
 
 use std::io;
 
@@ -9,7 +9,8 @@ use futures::{Stream, StreamExt};
 
 use super::event::{Event, EventSender, Scroll};
 
-/// Starts passing terminal input to `events`, until the terminal or the App goes away.
+/// Starts passing terminal input to `events`, until the terminal or the
+/// [`App`](crate::tui::app::App) goes away.
 pub fn spawn(events: EventSender) {
     tokio::spawn(forward(EventStream::new(), events));
 }

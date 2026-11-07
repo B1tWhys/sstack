@@ -1,4 +1,4 @@
-//! Finding the secret a Connection names.
+//! Finding the secret a [`Connection`](crate::config::Connection) names.
 
 use std::path::Path;
 use std::sync::Arc;

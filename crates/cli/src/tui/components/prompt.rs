@@ -100,8 +100,9 @@ const BINDINGS: &[(KeyModifiers, KeyCode, Edit)] = &[
 /// Collects input from the person, with shell-style editing keys, and submits it when they
 /// press Enter.
 ///
-/// It submits whatever is typed, leaving the App to decide whether that can happen now. Long input
-/// wraps onto more rows, so the App should give it the height [`Prompt::height`] asks for.
+/// It submits whatever is typed, leaving the [`App`](crate::tui::app::App) to decide whether that
+/// can happen now. Long input wraps onto more rows, so the App should give it the height
+/// [`Prompt::height`] asks for.
 #[derive(Debug, Default)]
 pub struct Prompt {
     /// What has been typed since the last submission, and where the cursor is in it.

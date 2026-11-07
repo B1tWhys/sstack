@@ -5,8 +5,9 @@
 //! each color for how it looks, so a role can move to another color, or a color can be adjusted
 //! everywhere at once. The colors are soft and light, meant for a dark terminal.
 //!
-//! Colors are written as exact 24-bit values. On terminals that cannot show those, the App draws
-//! each one as the nearest color the terminal has, using [`ColorDepth`].
+//! Colors are written as exact 24-bit values. On terminals that cannot show those, the
+//! [`App`](crate::tui::app::App) draws each one as the nearest color the terminal has, using
+//! [`ColorDepth`].
 
 use anstyle::{Ansi256Color, AnsiColor, RgbColor};
 use anstyle_lossy::palette;

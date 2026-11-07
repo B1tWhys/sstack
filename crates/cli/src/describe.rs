@@ -24,7 +24,7 @@ pub fn context_warning(used: u64, limit: u64) -> String {
     format!("[warning] context is {used} of {limit} tokens; start a new Session soon")
 }
 
-/// Tells the person which Skills were loaded, or that none were found.
+/// Tells the person which [`Skill`]s were loaded, or that none were found.
 pub fn skills_loaded(skills: &[Skill]) -> String {
     if skills.is_empty() {
         return "no skills found for Claude Code or Codex".to_owned();

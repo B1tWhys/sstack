@@ -1,4 +1,4 @@
-//! User settings, chiefly the Connections a run can use.
+//! User settings, chiefly the [`Connection`]s a run can use.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -11,16 +11,16 @@ use serde::Deserialize;
 use crate::provider::anthropic::AnthropicProvider;
 use crate::provider::{Effort, Provider, ProviderError};
 
-/// The name of the built-in Connection.
+/// The name of the built-in [`Connection`].
 const DEFAULT_CONNECTION: &str = "anthropic";
 /// The model used unless settings or arguments choose another.
 const DEFAULT_MODEL: &str = "claude-opus-5-5";
-/// The secret the built-in Connection authenticates with.
+/// The secret the built-in [`Connection`] authenticates with.
 const DEFAULT_SECRET: &str = "ANTHROPIC_API_KEY";
-/// The context window assumed for a Connection that does not set one, in tokens.
+/// The context window assumed for a [`Connection`] that does not set one, in tokens.
 const DEFAULT_CONTEXT_LIMIT: u64 = 1_000_000;
 
-/// Identifies the kind of Provider a Connection talks to.
+/// Identifies the kind of Provider a [`Connection`] talks to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ProviderKind {
@@ -55,7 +55,7 @@ impl Connection {
     /// Opens this Connection with `secret`, ready to serve requests.
     ///
     /// # Errors
-    /// Returns an error if the Provider cannot be set up.
+    /// Returns an error if the [`Provider`] cannot be set up.
     pub fn provider(&self, secret: String) -> Result<Arc<dyn Provider>, ProviderError> {
         match self.provider {
             ProviderKind::Anthropic => Ok(Arc::new(AnthropicProvider::new(
@@ -71,11 +71,11 @@ impl Connection {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
-    /// The Connection used unless a run chooses another.
+    /// The [`Connection`] used unless a run chooses another.
     pub default_connection: String,
     /// The model used unless a run chooses another.
     pub default_model: String,
-    /// The Connections available, by name.
+    /// The [`Connection`]s available, by name.
     pub connections: BTreeMap<String, Connection>,
     /// Whether new Sessions edit their input with a real nvim, where one is installed.
     #[serde(default = "vim_by_default")]
@@ -114,7 +114,7 @@ pub enum ConfigError {
     /// The settings file is not valid.
     #[error("invalid settings: {0}")]
     Invalid(#[from] toml::de::Error),
-    /// A run asked for a Connection the settings do not define.
+    /// A run asked for a [`Connection`] the settings do not define.
     #[error("no connection named {0}")]
     UnknownConnection(String),
 }
@@ -132,7 +132,7 @@ impl Config {
         }
     }
 
-    /// Finds a Connection by name, or the default one if `name` is `None`.
+    /// Finds a [`Connection`] by name, or the default one if `name` is `None`.
     ///
     /// # Errors
     /// Returns an error if no Connection has that name.

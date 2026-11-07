@@ -67,7 +67,7 @@ pub enum TurnEnd {
 /// A failure that stops a Turn.
 #[derive(Debug, thiserror::Error)]
 pub enum AgentError {
-    /// The Provider failed to produce a response.
+    /// The [`Provider`] failed to produce a response.
     #[error(transparent)]
     Provider(#[from] ProviderError),
     /// The Session could not be recorded.
@@ -145,7 +145,7 @@ impl Agent {
     /// Runs one Turn to its end, unless `context` cancels it first.
     ///
     /// # Errors
-    /// Returns an error if the Provider fails or the Session cannot be recorded.
+    /// Returns an error if the [`Provider`] fails or the Session cannot be recorded.
     pub async fn run_turn(
         &mut self,
         input: &str,
@@ -160,7 +160,7 @@ impl Agent {
     /// Carries on a Turn that stopped with [`TurnEnd::Paused`], in this run or an earlier one.
     ///
     /// # Errors
-    /// Returns an error if the Provider fails or the Session cannot be recorded.
+    /// Returns an error if the [`Provider`] fails or the Session cannot be recorded.
     pub async fn continue_turn(
         &mut self,
         context: &mut TurnContext<'_>,
@@ -199,7 +199,7 @@ impl Agent {
         self.run_tools(&calls, context).await
     }
 
-    /// Asks the Provider for the next response, reporting it as it arrives.
+    /// Asks the [`Provider`] for the next response, reporting it as it arrives.
     async fn request(&self, on_event: EventSink<'_>) -> Result<AssistantEntry, ProviderError> {
         let request = ModelRequest {
             model: &self.config.model,
@@ -273,7 +273,7 @@ impl Agent {
     }
 }
 
-/// Converts a Provider stream event into the equivalent agent event.
+/// Converts a [`Provider`] stream event into the equivalent agent event.
 fn stream_event(event: StreamEvent) -> AgentEvent {
     match event {
         StreamEvent::Text(text) => AgentEvent::Text(text),

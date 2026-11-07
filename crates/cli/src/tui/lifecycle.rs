@@ -1,7 +1,8 @@
 //! The rules for what a Session is doing and what stopping means, kept apart from the screen.
 //!
-//! Everything here is a pure function of its inputs, so each rule can be tested without a
-//! terminal or an agent. The App feeds in what happened and carries out what comes back.
+//! Everything here is a pure function of its inputs, so each rule can be tested without a terminal
+//! or an agent. The [`App`](crate::tui::app::App) feeds in what happened and carries out what comes
+//! back.
 
 use std::path::PathBuf;
 
@@ -181,8 +182,8 @@ pub enum Effect {
 pub enum Exit {
     /// The person is finished.
     Quit,
-    /// The Rebuild is ready: the harness should relaunch into this binary. The App can be run
-    /// again if that fails.
+    /// The Rebuild is ready: the harness should relaunch into this binary. The
+    /// [`App`](crate::tui::app::App) can be run again if that fails.
     Rebuild(PathBuf),
 }
 

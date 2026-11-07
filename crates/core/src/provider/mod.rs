@@ -37,7 +37,7 @@ pub struct ToolSpec {
     pub input_schema: Value,
 }
 
-/// Everything a Provider needs to produce one response.
+/// Everything a [`Provider`] needs to produce one response.
 #[derive(Debug, Clone, Copy)]
 pub struct ModelRequest<'a> {
     /// The identifier of the model to use.

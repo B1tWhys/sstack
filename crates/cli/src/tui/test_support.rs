@@ -1,4 +1,4 @@
-//! Helpers for testing components and the App without a real terminal.
+//! Helpers for testing components and the [`App`](crate::tui::app::App) without a real terminal.
 
 use std::path::Path;
 use std::sync::Arc;

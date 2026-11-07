@@ -10,12 +10,13 @@ use super::event::{ApprovalRequest, Event, Reply, SessionSender};
 /// A command is denied if the interactive harness has gone or drops the question unanswered,
 /// such as when the Turn is cancelled.
 pub struct EventApprover {
-    /// Where questions are sent for the App to show.
+    /// Where questions are sent for the [`App`](crate::tui::app::App) to show.
     events: SessionSender,
 }
 
 impl EventApprover {
-    /// Creates an approver that asks through the App listening on `events`.
+    /// Creates an approver that asks through the [`App`](crate::tui::app::App) listening on
+    /// `events`.
     pub fn new(events: SessionSender) -> Self {
         Self { events }
     }

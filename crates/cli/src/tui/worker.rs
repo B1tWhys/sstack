@@ -9,7 +9,8 @@ use tokio_util::sync::CancellationToken;
 
 use super::event::{Event, SessionSender};
 
-/// Lets the App start and cancel Turns on an agent that runs on its own task.
+/// Lets the [`App`](crate::tui::app::App) start and cancel Turns on an agent that runs on its own
+/// task.
 ///
 /// Everything comes back as events. First [`Event::Resumed`] tells what the Session already holds.
 /// Then each Turn sends [`Event::TurnStarted`] or [`Event::TurnContinued`], any number of
