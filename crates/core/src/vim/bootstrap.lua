@@ -158,6 +158,15 @@ api.nvim_set_current_buf(api.nvim_create_buf(false, true))
 match_the_drawn_prompt()
 load_draft()
 
+-- Enter in Normal mode submits. The mapping is local to the buffer, so it wins over any the
+-- person's config made for Enter, and `nowait` stops a longer mapping that starts with Enter from
+-- holding it back.
+vim.keymap.set("n", "<CR>", _G.sstack_submit, {
+  buffer = true,
+  nowait = true,
+  desc = "Submit to sstack",
+})
+
 api.nvim_create_autocmd({
   "ModeChanged",
   "CursorMoved",

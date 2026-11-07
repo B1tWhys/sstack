@@ -160,6 +160,11 @@ mod real {
         /// Submits and returns the text.
         async fn submitted(&mut self) -> String {
             self.vim.submit();
+            self.until_submitted().await
+        }
+
+        /// Waits for the text to be handed over, however that was asked for, and returns it.
+        async fn until_submitted(&mut self) -> String {
             loop {
                 if let VimEvent::Submitted(text) = self.next().await {
                     return text;
@@ -229,6 +234,23 @@ mod real {
         vim.typed("abc").await;
         vim.vim.send_keys("f");
         assert_eq!(vim.submitted().await, "abc");
+    }
+
+    #[tokio::test]
+    async fn enter_in_normal_mode_submits() {
+        let mut vim = Harness::new().await;
+        vim.typed("one\ntwo").await;
+        vim.vim.send_keys("<CR>");
+        assert_eq!(vim.until_submitted().await, "one\ntwo");
+        vim.until(|state| state.text.is_empty() && state.mode == VimMode::Insert)
+            .await;
+    }
+
+    #[tokio::test]
+    async fn enter_typed_right_after_leaving_insert_mode_submits() {
+        let mut vim = Harness::new().await;
+        vim.vim.send_keys("hello<Esc><CR>");
+        assert_eq!(vim.until_submitted().await, "hello");
     }
 
     #[tokio::test]

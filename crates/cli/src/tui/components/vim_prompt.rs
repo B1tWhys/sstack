@@ -117,7 +117,8 @@ fn numbered(lead: String, row: Vec<Span<'static>>) -> Line<'static> {
 }
 
 /// Passes what the person types to a real nvim and draws what comes back, without knowing any
-/// vim behavior itself. Alt-Enter submits, because Enter means what it means in vim.
+/// vim behavior itself. Alt-Enter submits in any mode, and Enter submits in Normal mode, where
+/// nvim decides what Enter does so that it applies in the mode nvim is really in.
 #[derive(Debug)]
 pub struct VimPrompt {
     /// Does the editing.
