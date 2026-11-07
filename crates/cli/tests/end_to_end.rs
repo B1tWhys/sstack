@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::{Arc, Mutex};
 
+use serde_json::json;
+
 const SECRET_NAME: &str = "SSTACK_E2E_KEY";
 const SECRET: &str = "e2e-secret-value";
 
@@ -43,6 +45,23 @@ fn text_reply(text: &str) -> String {
             r#"{"type":"content_block_stop","index":0}"#
         )
     );
+    stream(&blocks, "end_turn")
+}
+
+fn thinking_then_text(thinking: &str, text: &str) -> String {
+    let blocks = [
+        json!({"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": ""}}),
+        json!({"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": thinking}}),
+        json!({"type": "content_block_delta", "index": 0, "delta": {"type": "signature_delta", "signature": "sig"}}),
+        json!({"type": "content_block_stop", "index": 0}),
+        json!({"type": "content_block_start", "index": 1, "content_block": {"type": "text", "text": ""}}),
+        json!({"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": text}}),
+        json!({"type": "content_block_stop", "index": 1}),
+    ];
+    let blocks: String = blocks
+        .iter()
+        .map(|block| event(block["type"].as_str().unwrap(), &block.to_string()))
+        .collect();
     stream(&blocks, "end_turn")
 }
 
@@ -226,6 +245,19 @@ fn a_headless_prompt_streams_a_reply_and_can_be_resumed() {
     assert!(stdout(&second).contains("second reply"));
     assert!(api.request(1).contains("remember this"));
     assert!(api.request(1).contains("first reply"));
+}
+
+#[test]
+fn piped_reasoning_has_no_escape_codes_and_ends_before_the_reply() {
+    let api = FakeApi::start(vec![thinking_then_text("pondering", "the answer")]);
+    let sandbox = Sandbox::new(&api.url);
+
+    let output = sandbox.run(&["--prompt", "think"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let shown = stdout(&output);
+    assert!(shown.contains("pondering\nthe answer"), "{shown}");
+    assert!(!shown.contains('\x1b'), "{shown}");
 }
 
 #[test]

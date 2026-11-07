@@ -19,7 +19,7 @@ use sstack_core::session::{Entry, SessionLog};
 use sstack_core::tools::project::Project;
 use sstack_core::tools::{Approver, DenyAll, ToolBox};
 use sstack_core::workspace;
-use terminal::{InputLines, TerminalApprover, render_event};
+use terminal::{EventView, InputLines, TerminalApprover, wants_style};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::{Mutex, mpsc};
 use tokio_util::sync::CancellationToken;
@@ -164,10 +164,11 @@ fn relaunch_args(args: &Args, session: &Path) -> Vec<String> {
 async fn run_headless(args: &Args, prompt: &str) -> Result<ExitCode, AnyError> {
     let Run { mut agent, session } = prepare(args, Arc::new(DenyAll))?;
     let cancel = CancellationToken::new();
-    let mut out = stdout();
+    let out = stdout();
+    let mut view = EventView::new(&out, wants_style(&out));
     let mut context = TurnContext {
         cancel: &cancel,
-        on_event: &mut |event| render_event(&event, &mut out),
+        on_event: &mut |event| view.show(&event),
     };
     let result = agent.run_turn(prompt, &mut context).await;
     print!(
@@ -224,6 +225,7 @@ async fn run_interactive(args: &Args) -> Result<ExitCode, AnyError> {
         input,
         interrupts: spawn_interrupts(),
         out: stdout(),
+        styled: wants_style(&stdout()),
     };
     while repl.run(&mut agent).await == Exit::Rebuild {
         let rebuilder = Rebuilder {
@@ -353,6 +355,7 @@ mod tests {
             input: Arc::new(Mutex::new(input)),
             interrupts,
             out: Vec::new(),
+            styled: false,
         }
     }
 

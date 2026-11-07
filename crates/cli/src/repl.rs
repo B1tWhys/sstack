@@ -7,7 +7,7 @@ use sstack_core::agent::{Agent, TurnContext, TurnEnd};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::terminal::{InputLines, render_event, turn_end_text};
+use crate::terminal::{EventView, InputLines, turn_end_text};
 
 /// What a typed line asks for.
 #[derive(Debug, PartialEq, Eq)]
@@ -55,6 +55,8 @@ pub struct Repl<W> {
     pub interrupts: mpsc::Receiver<()>,
     /// Where output is written.
     pub out: W,
+    /// Whether `out` may use terminal styling, such as to set the model's reasoning apart.
+    pub styled: bool,
 }
 
 impl<W: Write + Send> Repl<W> {
@@ -103,9 +105,13 @@ impl<W: Write + Send> Repl<W> {
         let cancel = CancellationToken::new();
         let outcome = {
             let Self {
-                interrupts, out, ..
+                interrupts,
+                out,
+                styled,
+                ..
             } = self;
-            let mut sink = |event| render_event(&event, out);
+            let mut view = EventView::new(out, *styled);
+            let mut sink = |event| view.show(&event);
             let mut context = TurnContext {
                 cancel: &cancel,
                 on_event: &mut sink,
@@ -197,6 +203,7 @@ mod tests {
                 input: Arc::new(Mutex::new(input)),
                 interrupts: interrupted,
                 out: Vec::new(),
+                styled: false,
             },
         }
     }
