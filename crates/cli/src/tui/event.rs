@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use crossterm::event::KeyEvent;
 use sstack_core::agent::{AgentEvent, TurnEnd};
 use sstack_core::session::Entry;
+use sstack_core::vim::VimEvent;
 use tokio::sync::{mpsc, oneshot};
 
 /// Lets any task tell the App that something happened. Sending never blocks, so it is safe from
@@ -53,6 +54,8 @@ pub enum Event {
     Approval(ApprovalRequest),
     /// The harness has something to tell the person, such as a mistyped Human Command.
     Notice(String),
+    /// The nvim behind the Session's input reported something.
+    Vim(VimEvent),
 }
 
 /// Lets a Session's agent report to the App, which keeps it apart from other Sessions' reports.

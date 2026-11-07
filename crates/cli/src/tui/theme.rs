@@ -61,6 +61,12 @@ pub const STATUS: Style = Style::new().fg(TAUPE).bg(RAISED);
 /// The frame and title of a question the person must answer before anything else happens.
 pub const ATTENTION: Style = Style::new().fg(BRICK);
 
+/// Text selected in vim's Visual mode.
+pub const SELECTION: Style = Style::new().fg(SAND).bg(SHADOW);
+
+/// Which vim mode the input is in.
+pub const MODE: Style = Style::new().fg(TAUPE);
+
 /// The 16 basic terminal colors in their standard order, so that a color's number picks its name.
 /// Named colors are drawn with codes that even the most limited terminals understand.
 const BASIC: [Color; 16] = [

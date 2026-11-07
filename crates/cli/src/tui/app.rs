@@ -1,15 +1,19 @@
 //! The interactive harness as a whole: it keeps every Session, routes events to them and carries
 //! out what they ask for.
 
+use std::io;
 use std::path::Path;
 use std::time::SystemTime;
 
 use anyhow::Result;
 use bon::bon;
+use crossterm::cursor::SetCursorStyle;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::execute;
 use ratatui::backend::Backend;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::{Frame, Terminal};
+use sstack_core::vim::{VimEvent, VimFailure};
 use sstack_core::workspace::SessionSummary;
 
 use super::component::{Component, KeyOutcome};
@@ -22,16 +26,17 @@ use crate::command::{Command, parse_command};
 use crate::setup::{Place, Start};
 
 /// Tells the person why their input was not acted on.
-const BUSY: &str = "a Turn is running: wait for it to end, or press Ctrl-C to cancel it";
+const BUSY: &str = "a Turn is running: wait for it to end, or press Alt-C to cancel it";
 /// Tells the person why the harness did not rebuild.
 const BUSY_ELSEWHERE: &str = "a Turn is running in another Session: wait for it to end first";
-/// Tells the person why Ctrl-C did not quit.
+/// Tells the person why Alt-C did not quit.
 const OTHERS_WORKING: &str = "other Sessions are working: use /quit to stop them too";
 /// The narrowest screen that shows the sidebar, which would otherwise crowd out the Session.
 const SIDEBAR_MIN_SCREEN_WIDTH: u16 = 80;
 
 /// The keys that work whatever the Session on screen is doing, even with a question open, so the
-/// person can always get away to something more urgent.
+/// person can always get away to something more urgent. Each is pressed with Alt, the one modifier
+/// vim leaves free.
 const GLOBAL_KEYS: [(char, Action); 5] = [
     ('c', Action::Interrupt),
     ('x', Action::Archive),
@@ -83,6 +88,11 @@ pub struct App<'a> {
     sessions: Box<dyn Sessions + 'a>,
     /// How many colors the terminal can show, which the theme's colors are fitted to.
     colors: ColorDepth,
+    /// The cursor shape the terminal was last told to use.
+    cursor_style: SetCursorStyle,
+    /// Whether the person has heard that nvim is missing, which every Session would otherwise
+    /// repeat.
+    told_nvim_missing: bool,
 }
 
 #[bon]
@@ -112,6 +122,8 @@ impl<'a> App<'a> {
             sidebar: Sidebar::default(),
             sessions,
             colors,
+            cursor_style: SetCursorStyle::DefaultUserShape,
+            told_nvim_missing: false,
         }
     }
 }
@@ -136,12 +148,23 @@ impl App<'_> {
     ) -> Result<Exit, B::Error> {
         loop {
             terminal.draw(|frame| self.render(frame))?;
+            self.apply_cursor_style();
             let Some(event) = events.recv().await else {
                 return Ok(Exit::Quit);
             };
             if let Some(exit) = self.handle_waiting(event, events) {
                 return Ok(exit);
             }
+        }
+    }
+
+    /// Gives the terminal's cursor the shape the Session on screen calls for. Goes straight to the
+    /// terminal, because the screen library has no notion of cursor shape.
+    fn apply_cursor_style(&mut self) {
+        let wanted = self.panes[self.shown].cursor_style();
+        if wanted != self.cursor_style {
+            self.cursor_style = wanted;
+            let _ = execute!(io::stdout(), wanted);
         }
     }
 
@@ -162,18 +185,44 @@ impl App<'_> {
     pub fn handle(&mut self, event: Event) -> Option<Exit> {
         match event {
             Event::Key(key) => return self.key(key),
-            Event::Session(id, event) => self.pass_on(&id, &event),
+            Event::Session(id, event) => return self.pass_on(&id, &event),
             Event::Click { column, row } => self.click(column, row),
             event => self.panes[self.shown].update(&event),
         }
         None
     }
 
-    /// Passes on something the Session with id `id` did.
-    fn pass_on(&mut self, id: &str, event: &Event) {
-        if let Some(index) = self.position(id) {
-            self.panes[index].observe(event, index == self.shown);
+    /// Passes on something the Session with id `id` did, returning why to stop if it calls for
+    /// that.
+    fn pass_on(&mut self, id: &str, event: &Event) -> Option<Exit> {
+        let index = self.position(id)?;
+        self.panes[index].observe(event, index == self.shown);
+        match event {
+            Event::Vim(VimEvent::Submitted(line)) => return self.vim_submitted(index, line),
+            Event::Vim(VimEvent::Lost { failure, .. }) => self.vim_lost(index, failure),
+            _ => {}
         }
+        None
+    }
+
+    /// Acts on a line the Session at position `index` submitted through nvim. The person may have
+    /// switched away while nvim answered, so that Session comes back to take its line.
+    fn vim_submitted(&mut self, index: usize, line: &str) -> Option<Exit> {
+        if index != self.shown {
+            self.show(index);
+        }
+        self.submit(line)
+    }
+
+    /// Tells the person that the Session at position `index` is back to the plain prompt.
+    fn vim_lost(&mut self, index: usize, failure: &VimFailure) {
+        let missing = *failure == VimFailure::NotInstalled;
+        if missing && self.told_nvim_missing {
+            return;
+        }
+        self.told_nvim_missing |= missing;
+        let notice = format!("typing into the plain prompt: {failure}. /vim tries again");
+        self.panes[index].update(&Event::Notice(notice));
     }
 
     /// Returns the position in `panes` of the Session with id `id`.
@@ -214,7 +263,7 @@ impl App<'_> {
         None
     }
 
-    /// Acts on Ctrl-C.
+    /// Acts on Alt-C.
     fn interrupt(&mut self) -> Option<Exit> {
         let pane = &self.panes[self.shown];
         match lifecycle::interrupt(pane.state(), self.others_in_turn()) {
@@ -290,6 +339,7 @@ impl App<'_> {
             Command::New => self.open_new(Place::Worktree),
             Command::NewMain => self.open_new(Place::MainCheckout),
             Command::Archive { force } => self.archive(force),
+            Command::Vim => self.panes[self.shown].toggle_vim(),
             Command::Quit => return Some(Exit::Quit),
             Command::Unknown(name) => self.notice(format!("unknown command: {name}")),
             Command::Empty => {}
@@ -442,7 +492,7 @@ fn global_action(key: KeyEvent) -> Option<Action> {
     };
     GLOBAL_KEYS
         .into_iter()
-        .find(|(bound, _)| *bound == character && key.modifiers == KeyModifiers::CONTROL)
+        .find(|(bound, _)| *bound == character && key.modifiers == KeyModifiers::ALT)
         .map(|(_, action)| action)
 }
 
@@ -451,7 +501,7 @@ mod tests {
     use super::*;
     use crate::tui::event::EventSender;
     use crate::tui::lifecycle::SessionState;
-    use crate::tui::test_support::{bash_call, ctrl, key, opened, reply, rows};
+    use crate::tui::test_support::{alt, bash_call, ctrl, key, opened, reply, rows};
     use anyhow::{anyhow, bail};
     use async_trait::async_trait;
     use ratatui::backend::TestBackend;
@@ -459,6 +509,7 @@ mod tests {
     use sstack_core::provider::scripted::{Scripted, ScriptedProvider};
     use sstack_core::provider::{ModelRequest, Provider, ProviderError, StreamEvent};
     use sstack_core::session::{AssistantEntry, Entry, SessionLog};
+    use sstack_core::vim::Draft;
     use std::cell::RefCell;
     use std::fs;
     use std::path::PathBuf;
@@ -613,7 +664,7 @@ mod tests {
 
         /// Presses a key that goes to the App rather than to the prompt.
         fn press(&mut self, character: char) -> Option<Exit> {
-            self.app.handle(Event::Key(ctrl(character)))
+            self.app.handle(Event::Key(alt(character)))
         }
 
         /// Starts a new Session, which leaves the keyboard's prompt ready for it.
@@ -635,6 +686,12 @@ mod tests {
                 );
             }
             self.app.handle(Event::Key(key(KeyCode::Enter)))
+        }
+
+        /// Passes on a report from the nvim of the Session on screen.
+        fn vim_reports(&mut self, event: VimEvent) -> Option<Exit> {
+            let event = Box::new(Event::Vim(event));
+            self.app.handle(Event::Session(self.shown(), event))
         }
 
         /// Handles events from the agent until one matching `last` has been handled.
@@ -755,12 +812,12 @@ mod tests {
         assert_eq!(h.enter("/rebuild"), None);
         assert!(h.screen().contains("a Turn is running"));
 
-        assert_eq!(h.app.handle(Event::Key(ctrl('c'))), None);
+        assert_eq!(h.app.handle(Event::Key(alt('c'))), None);
         h.until_turn_ends().await;
         assert!(h.screen().contains("[cancelled]"));
         assert_eq!(h.session().last(), Some(&Entry::TurnCancelled));
 
-        assert_eq!(h.app.handle(Event::Key(ctrl('c'))), Some(Exit::Quit));
+        assert_eq!(h.app.handle(Event::Key(alt('c'))), Some(Exit::Quit));
     }
 
     #[tokio::test]
@@ -945,6 +1002,120 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_vim_command_switches_how_the_person_types_and_back() {
+        let mut h = harness(Arc::new(NeverResponds));
+        assert!(!h.screen().contains("INSERT"));
+        h.enter("/vim");
+        assert!(h.screen().contains("INSERT"));
+        h.app.apply_cursor_style();
+        assert_eq!(h.app.cursor_style, SetCursorStyle::SteadyBar);
+        h.vim_reports(VimEvent::Submitted("/vim".into()));
+        assert!(!h.screen().contains("INSERT"));
+        assert!(!h.screen().contains("/vim\n"));
+    }
+
+    #[tokio::test]
+    async fn a_session_starts_in_vim_if_the_person_wants_it() {
+        let (sender, _events) = mpsc::unbounded_channel();
+        let dir = tempfile::tempdir().unwrap();
+        let mut wanted = opened(&path_of(&dir, "s"), Arc::new(NeverResponds), &sender);
+        wanted.vim = true;
+        let pane = Pane::opened(wanted);
+        assert_eq!(pane.cursor_style(), SetCursorStyle::SteadyBar);
+    }
+
+    #[tokio::test]
+    async fn the_vim_command_does_nothing_before_a_session_can_report() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut pane = Pane::stored(summary(&dir, "stored", 1));
+        pane.toggle_vim();
+        assert_eq!(pane.cursor_style(), SetCursorStyle::DefaultUserShape);
+    }
+
+    #[tokio::test]
+    async fn a_line_submitted_through_nvim_counts_as_entered() {
+        let mut h = harness(Arc::new(NeverResponds));
+        h.enter("/vim");
+        assert_eq!(
+            h.vim_reports(VimEvent::Submitted("/quit".into())),
+            Some(Exit::Quit)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_session_that_submits_while_away_comes_back_to_take_its_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let stored = vec![summary(&dir, "older", 100)];
+        let mut h = start(dir, Arc::new(NeverResponds), stored);
+        h.press('n');
+        let away = h.shown();
+        h.press('p');
+        let event = Box::new(Event::Vim(VimEvent::Submitted("hello".into())));
+        h.app.handle(Event::Session(away.clone(), event));
+        assert_eq!(h.shown(), away);
+        assert!(h.app.panes[h.app.shown].state().in_turn());
+    }
+
+    #[tokio::test]
+    async fn losing_nvim_falls_back_to_the_prompt_with_the_text_so_far() {
+        let mut h = harness(Arc::new(NeverResponds));
+        h.enter("/vim");
+        h.vim_reports(VimEvent::Lost {
+            draft: Draft {
+                text: "half typed".into(),
+                cursor: 4,
+            },
+            failure: VimFailure::TimedOut,
+        });
+        let screen = h.screen();
+        assert!(!screen.contains("INSERT"));
+        assert!(screen.contains("> half typed"), "{screen}");
+        assert!(screen.contains("nvim took too long to start"), "{screen}");
+        assert!(screen.contains("/vim tries again"), "{screen}");
+    }
+
+    #[tokio::test]
+    async fn a_report_from_an_nvim_already_left_behind_changes_nothing() {
+        let mut h = harness(Arc::new(NeverResponds));
+        h.app.handle(Event::Paste("kept".into()));
+        h.vim_reports(VimEvent::Lost {
+            draft: Draft::default(),
+            failure: VimFailure::TimedOut,
+        });
+        assert!(h.screen().contains("> kept"));
+    }
+
+    #[tokio::test]
+    async fn a_missing_nvim_is_mentioned_once() {
+        let mut h = harness(Arc::new(NeverResponds));
+        let lost = VimEvent::Lost {
+            draft: Draft::default(),
+            failure: VimFailure::NotInstalled,
+        };
+        h.vim_reports(lost.clone());
+        h.vim_reports(lost);
+        assert_eq!(h.screen().matches("nvim is not installed").count(), 1);
+    }
+
+    #[cfg(feature = "nvim-tests")]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_prompt_typed_into_a_real_nvim_starts_a_turn() {
+        let mut h = scripted(vec![Ok(reply("done"))]);
+        h.enter("/vim");
+        for character in "hello".chars() {
+            h.app.handle(Event::Key(key(KeyCode::Char(character))));
+        }
+        h.until(
+            |event| matches!(event, Event::Vim(VimEvent::State(state)) if state.text == "hello"),
+        )
+        .await;
+        let submit = KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT);
+        h.app.handle(Event::Key(submit));
+        h.until(|event| matches!(event, Event::TurnEnded(_))).await;
+        assert!(h.screen().contains("done"));
+    }
+
+    #[tokio::test]
     async fn sessions_run_side_by_side() {
         let mut h = harness(Arc::new(NeverResponds));
         h.enter("one");
@@ -1066,9 +1237,10 @@ mod tests {
 
     #[test]
     fn only_control_keys_are_global() {
-        assert_eq!(global_action(ctrl('n')), Some(Action::NextSession));
+        assert_eq!(global_action(alt('n')), Some(Action::NextSession));
         assert_eq!(global_action(key(KeyCode::Char('n'))), None);
-        assert_eq!(global_action(ctrl('z')), None);
+        assert_eq!(global_action(alt('z')), None);
+        assert_eq!(global_action(ctrl('n')), None);
         assert_eq!(global_action(key(KeyCode::Enter)), None);
     }
 

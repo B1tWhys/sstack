@@ -29,6 +29,11 @@ pub fn ctrl(character: char) -> KeyEvent {
     KeyEvent::new(KeyCode::Char(character), KeyModifiers::CONTROL)
 }
 
+/// Returns a press of `character` with Alt held.
+pub fn alt(character: char) -> KeyEvent {
+    KeyEvent::new(KeyCode::Char(character), KeyModifiers::ALT)
+}
+
 /// Offers each character of `text` to `component` as a key press, and checks that each was used.
 pub fn type_into(component: &mut impl Component, text: &str) {
     for character in text.chars() {
@@ -95,6 +100,8 @@ pub fn opened(path: &Path, provider: Arc<dyn Provider>, events: &EventSender) ->
         agent: AgentHandle::spawn(agent, SessionSender::new(&id, events.clone())),
         path: path.to_owned(),
         notice: None,
+        events: SessionSender::new(&id, events.clone()),
+        vim: false,
     }
 }
 

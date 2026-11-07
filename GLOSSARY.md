@@ -46,6 +46,16 @@ _Avoid_: The harness (when the Running Harness could be meant)
 The smallest Harness able to make a real change to its own Harness Source with no outside tool.
 _Avoid_: MVP, prototype
 
+### Input
+
+**Draft**:
+Text a person has typed but not submitted, along with where its cursor is.
+_Avoid_: Buffer, pending input
+
+**Vim Input**:
+Typing into a real nvim that runs behind the Harness, as opposed to the plain prompt. The nvim does all the editing, and the Harness only passes keys in and draws what comes back.
+_Avoid_: Vim mode, vim emulation
+
 ### Commands
 
 **Human Command**:

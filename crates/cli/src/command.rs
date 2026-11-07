@@ -16,6 +16,9 @@ pub enum Command<'a> {
         /// Whether to go ahead even if that deletes work.
         force: bool,
     },
+    /// The `/vim` Human Command, which switches the Session on screen between typing into a real
+    /// nvim and the plain prompt.
+    Vim,
     /// The `/quit` Human Command, also spelled `/exit`.
     Quit,
     /// A slash-prefixed line that is not a known Human Command.
@@ -36,6 +39,7 @@ pub fn parse_command(line: &str) -> Command<'_> {
         "/new-main" => Command::NewMain,
         "/archive" => Command::Archive { force: false },
         "/archive --force" => Command::Archive { force: true },
+        "/vim" => Command::Vim,
         "/quit" | "/exit" => Command::Quit,
         other if other.starts_with('/') => Command::Unknown(other),
         other => Command::Prompt(other),
@@ -58,6 +62,7 @@ mod tests {
             parse_command("/archive --force"),
             Command::Archive { force: true }
         );
+        assert_eq!(parse_command("/vim"), Command::Vim);
         assert_eq!(parse_command("/quit"), Command::Quit);
         assert_eq!(parse_command("/exit"), Command::Quit);
         assert_eq!(parse_command("/nope"), Command::Unknown("/nope"));

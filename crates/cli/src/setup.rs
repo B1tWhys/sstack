@@ -102,6 +102,8 @@ pub struct Run {
     pub session: PathBuf,
     /// Something the person should know about how the Session was set up.
     pub notice: Option<String>,
+    /// Whether the person wants to type into a real nvim.
+    pub vim: bool,
 }
 
 /// Where a Session turned out to work.
@@ -160,6 +162,7 @@ pub fn prepare(
         agent: Agent::new(agent_config, session.log, session.entries)?,
         session: session.path,
         notice: place.notice,
+        vim: config.vim,
     })
 }
 

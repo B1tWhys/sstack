@@ -34,6 +34,16 @@ fn big_word(character: char) -> bool {
 }
 
 impl Editor {
+    /// Starts with `text` already typed and the cursor at the byte offset `cursor`, which must be
+    /// on a character boundary.
+    pub fn with_text(text: &str, cursor: usize) -> Self {
+        Self {
+            text: text.to_owned(),
+            cursor,
+            killed: String::new(),
+        }
+    }
+
     /// Returns the text being edited.
     pub fn text(&self) -> &str {
         &self.text

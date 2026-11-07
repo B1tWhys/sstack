@@ -30,6 +30,7 @@ use std::sync::Arc;
 use anyhow::{Result, bail, ensure};
 use app::{App, Exit, Sessions};
 use approver::EventApprover;
+use crossterm::cursor::SetCursorStyle;
 use crossterm::event::{
     DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
 };
@@ -128,6 +129,8 @@ impl Sessions for LiveSessions<'_> {
             agent: AgentHandle::spawn(run.agent, report_to(&id)),
             path: run.session,
             notice: run.notice,
+            events: report_to(&id),
+            vim: run.vim,
         })
     }
 
@@ -192,7 +195,12 @@ impl InputModes {
 
 impl Drop for InputModes {
     fn drop(&mut self) {
-        let _ = execute!(io::stdout(), DisableMouseCapture, DisableBracketedPaste);
+        let _ = execute!(
+            io::stdout(),
+            SetCursorStyle::DefaultUserShape,
+            DisableMouseCapture,
+            DisableBracketedPaste
+        );
     }
 }
 

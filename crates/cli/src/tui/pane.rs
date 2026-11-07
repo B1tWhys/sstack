@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
+use crossterm::cursor::SetCursorStyle;
 use crossterm::event::KeyEvent;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -10,8 +11,8 @@ use sstack_core::session::Entry;
 use sstack_core::workspace::{self, SessionSummary};
 
 use super::component::{Component, KeyOutcome};
-use super::components::{Activity, Approval, Prompt, Row, Status, Transcript};
-use super::event::Event;
+use super::components::{Activity, Approval, Input, Row, Status, Transcript};
+use super::event::{Event, SessionSender};
 use super::lifecycle::{SessionEvent, SessionState};
 use super::worker::AgentHandle;
 
@@ -26,6 +27,10 @@ pub struct Opened {
     pub path: PathBuf,
     /// Something the person should know about how the Session was set up.
     pub notice: Option<String>,
+    /// Where the Session's input reports.
+    pub events: SessionSender,
+    /// Whether the person wants to type into a real nvim.
+    pub vim: bool,
 }
 
 /// Something that ended while the person was looking at another Session.
@@ -49,6 +54,8 @@ pub struct Pane {
     /// Starts and cancels Turns. Missing until the Session is first shown, because a Session the
     /// person never opens needs no agent.
     agent: Option<AgentHandle>,
+    /// Where the Session's input reports. Missing until the agent is.
+    events: Option<SessionSender>,
     /// What the Session is doing.
     state: SessionState,
     /// When the Session last started waiting for the person, which orders the queue.
@@ -60,7 +67,7 @@ pub struct Pane {
     /// Asks about shell commands, over everything else.
     approval: Approval,
     /// Where the person types.
-    prompt: Prompt,
+    input: Input,
     /// The Session so far.
     transcript: Transcript,
     /// The Session id and what the agent is doing.
@@ -91,12 +98,13 @@ impl Pane {
             path,
             title: None,
             agent: None,
+            events: None,
             state: SessionState::Idle,
             waiting_since,
             working_since: waiting_since,
             unseen: None,
             approval: Approval::default(),
-            prompt: Prompt::default(),
+            input: Input::default(),
             transcript: Transcript::default(),
         }
     }
@@ -121,9 +129,14 @@ impl Pane {
         self.agent.is_some()
     }
 
-    /// Gives the Session the agent it was missing.
+    /// Gives the Session the agent it was missing, and starts nvim if the person wants it, which
+    /// spares a Session never opened from running one.
     pub fn attach(&mut self, opened: Opened) {
         self.agent = Some(opened.agent);
+        if opened.vim {
+            self.input.start_vim(&opened.events);
+        }
+        self.events = Some(opened.events);
         if let Some(notice) = opened.notice {
             self.update(&Event::Notice(notice));
         }
@@ -207,7 +220,7 @@ impl Pane {
     fn components(&mut self) -> [&mut dyn Component; 4] {
         [
             &mut self.approval,
-            &mut self.prompt,
+            &mut self.input,
             &mut self.transcript,
             &mut self.status,
         ]
@@ -227,6 +240,18 @@ impl Pane {
             .map(|component| component.key(key))
             .find(|outcome| *outcome != KeyOutcome::Ignored)
             .unwrap_or(KeyOutcome::Ignored)
+    }
+
+    /// Switches between typing into a real nvim and the plain prompt.
+    pub fn toggle_vim(&mut self) {
+        if let Some(events) = &self.events {
+            self.input.toggle(events);
+        }
+    }
+
+    /// Returns the cursor shape the Session's input calls for.
+    pub fn cursor_style(&self) -> SetCursorStyle {
+        self.input.cursor_style()
     }
 
     /// Notes that the person answered about a shell command.
@@ -258,18 +283,18 @@ impl Pane {
 
     /// Draws the Session into `area`, with any question for the person on top.
     ///
-    /// The prompt grows with what is typed, up to half of `area`.
+    /// The input grows with what is typed, up to half of `area`.
     pub fn render(&self, frame: &mut Frame, area: Rect) {
-        let prompt_height = self.prompt.height(area.width).min(area.height / 2).max(3);
-        let [transcript, status, prompt] = Layout::vertical([
+        let input_height = self.input.height(area.width).min(area.height / 2).max(3);
+        let [transcript, status, input] = Layout::vertical([
             Constraint::Min(1),
             Constraint::Length(1),
-            Constraint::Length(prompt_height),
+            Constraint::Length(input_height),
         ])
         .areas(area);
         self.transcript.render(frame, transcript);
         self.status.render(frame, status);
-        self.prompt.render(frame, prompt);
+        self.input.render(frame, input);
         self.approval.render(frame, area);
     }
 }

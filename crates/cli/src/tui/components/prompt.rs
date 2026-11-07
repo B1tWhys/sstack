@@ -5,24 +5,13 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
-use unicode_width::UnicodeWidthChar;
+use sstack_core::vim::Draft;
 
+use super::wrap::{BORDER, GUTTER, gutter, normalize_newlines, to_u16, wrap};
 use crate::tui::component::{Component, KeyOutcome};
 use crate::tui::editor::{Edit, Editor};
 use crate::tui::event::{Action, Event};
 use crate::tui::theme;
-
-/// Shown before the first row of what the person types.
-const MARKER: &str = "> ";
-
-/// Shown before every later row, so wrapped text lines up after the marker.
-const INDENT: &str = "  ";
-
-/// How many columns the marker and indent take.
-const GUTTER: usize = MARKER.len();
-
-/// How the border around the prompt adds to its height and width.
-const BORDER: u16 = 2;
 
 /// The keys that edit what is typed, in the style of a shell's command line, and the edit each
 /// one makes.
@@ -130,12 +119,23 @@ impl Prompt {
     /// Returns what is typed broken into rows that fit `width` columns after the gutter, and the
     /// row and column the cursor is at.
     fn wrapped(&self, width: u16) -> (Vec<String>, (usize, usize)) {
-        let (before, after) = self.editor.text().split_at(self.editor.cursor());
-        let mut rows = Rows::new(usize::from(width).saturating_sub(GUTTER));
-        before.chars().for_each(|character| rows.push(character));
-        let cursor = rows.position();
-        after.chars().for_each(|character| rows.push(character));
-        (rows.finish(), cursor)
+        wrap(self.editor.text(), self.editor.cursor(), width)
+    }
+
+    /// Creates a prompt with `draft` already typed.
+    pub fn with_draft(draft: &Draft) -> Self {
+        Self {
+            editor: Editor::with_text(&draft.text, draft.cursor),
+        }
+    }
+
+    /// Hands over what is typed, leaving the prompt empty.
+    pub fn take_draft(&mut self) -> Draft {
+        let cursor = self.editor.cursor();
+        Draft {
+            text: self.editor.take(),
+            cursor,
+        }
     }
 
     /// Makes the edit bound to `key`, if there is one.
@@ -175,90 +175,14 @@ impl Component for Prompt {
         let inner = block.inner(area);
         let (rows, (row, column)) = self.wrapped(inner.width);
         let top = (row + 1).saturating_sub(usize::from(inner.height));
-        let lines: Vec<Line> = rows.into_iter().enumerate().map(gutter).collect();
+        let plain = |(index, row)| gutter(index, vec![Span::raw(row)]);
+        let lines: Vec<Line> = rows.into_iter().enumerate().map(plain).collect();
         let paragraph = Paragraph::new(lines).scroll((to_u16(top), 0));
         let paragraph = paragraph.style(theme::INPUT);
         frame.render_widget(paragraph.block(block), area);
         let x = inner.x.saturating_add(to_u16(GUTTER + column));
         let y = inner.y.saturating_add(to_u16(row.saturating_sub(top)));
         frame.set_cursor_position((x.min(inner.right()), y));
-    }
-}
-
-/// Returns the row at `index` with the marker or indent before it.
-fn gutter((index, row): (usize, String)) -> Line<'static> {
-    let lead = if index == 0 { MARKER } else { INDENT };
-    Line::from(vec![Span::styled(lead, theme::MARKER), Span::raw(row)])
-}
-
-/// Returns `text` with every line break as a plain newline, since terminals paste them as
-/// carriage returns, which would garble the screen.
-fn normalize_newlines(text: &str) -> String {
-    text.replace("\r\n", "\n").replace('\r', "\n")
-}
-
-/// Converts a count to screen units, saturating rather than wrapping when it is too big.
-fn to_u16(count: usize) -> u16 {
-    u16::try_from(count).unwrap_or(u16::MAX)
-}
-
-/// Lays out text into rows of a fixed width, one character at a time, breaking at newlines and
-/// wherever the next character would not fit.
-struct Rows {
-    /// The rows before the one being filled.
-    full: Vec<String>,
-    /// The row being filled.
-    row: String,
-    /// How many columns a row can hold. Always at least one.
-    width: usize,
-    /// How many columns of the row being filled are used.
-    column: usize,
-}
-
-impl Rows {
-    /// Starts laying out rows `width` columns wide.
-    fn new(width: usize) -> Self {
-        Self {
-            full: Vec::new(),
-            row: String::new(),
-            width: width.max(1),
-            column: 0,
-        }
-    }
-
-    /// Adds `character`, starting a new row first if it would not fit.
-    fn push(&mut self, character: char) {
-        if character == '\n' {
-            self.break_row();
-            return;
-        }
-        let width = character.width().unwrap_or(0);
-        if self.column + width > self.width {
-            self.break_row();
-        }
-        self.row.push(character);
-        self.column += width;
-    }
-
-    /// Returns the row and column where the next character would go, starting a new row if the
-    /// current one is full.
-    fn position(&mut self) -> (usize, usize) {
-        if self.column >= self.width {
-            self.break_row();
-        }
-        (self.full.len(), self.column)
-    }
-
-    /// Starts a new, empty row.
-    fn break_row(&mut self) {
-        self.full.push(std::mem::take(&mut self.row));
-        self.column = 0;
-    }
-
-    /// Returns every row, ending with the one being filled even if it is empty.
-    fn finish(mut self) -> Vec<String> {
-        self.full.push(self.row);
-        self.full
     }
 }
 

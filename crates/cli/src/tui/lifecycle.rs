@@ -93,7 +93,7 @@ impl SessionState {
     }
 }
 
-/// What Ctrl-C does right now.
+/// What Alt-C does right now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Interrupt {
     /// Cancels the Turn on screen.
@@ -104,7 +104,7 @@ pub enum Interrupt {
     RefuseToQuit,
 }
 
-/// Decides what Ctrl-C does. It only ever affects the Session on screen, whose state is `shown`,
+/// Decides what Alt-C does. It only ever affects the Session on screen, whose state is `shown`,
 /// so that one stray press cannot stop work the person is not looking at. `others_in_turn` says
 /// whether any other Session has a Turn running.
 #[must_use]

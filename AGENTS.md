@@ -6,9 +6,11 @@ Use the vocabulary in `GLOSSARY.md`. Design decisions are in `docs/adr/`.
 
 ```sh
 cargo install --locked cargo-llvm-cov cargo-crap4rust committed
-brew install prek
+brew install prek neovim
 prek install
 ```
+
+Tests that need a real nvim sit behind the `nvim-tests` feature, on by default. `cargo test --workspace --no-default-features` skips them where nvim is not installed.
 
 ## Rules
 
