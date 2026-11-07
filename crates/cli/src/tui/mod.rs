@@ -28,14 +28,15 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use anyhow::{Result, bail, ensure};
-use app::{App, Exit, Sessions};
+use app::{App, Sessions};
 use approver::EventApprover;
 use crossterm::cursor::SetCursorStyle;
 use crossterm::event::{
     DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
 };
 use crossterm::execute;
-use event::{EventReceiver, EventSender, SessionSender};
+use event::{Event, EventReceiver, EventSender, SessionSender};
+use lifecycle::Exit;
 use pane::Opened;
 use sstack_core::skills::{self, Skill};
 use sstack_core::tools::Approver;
@@ -43,11 +44,12 @@ use sstack_core::workspace::SessionSummary;
 use sstack_core::{workspace, worktree};
 use theme::ColorDepth;
 use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 use worker::AgentHandle;
 
 use crate::Args;
 use crate::describe;
-use crate::rebuild::rebuild;
+use crate::rebuild;
 use crate::setup::{Place, Start, main_checkout, prepare, relaunch_args, sessions_directory};
 
 /// Runs the interactive harness until the person quits, rebuilding when asked.
@@ -63,6 +65,7 @@ pub async fn run(args: &Args) -> Result<ExitCode> {
         events: sender.clone(),
         main: main_checkout()?,
         directory: sessions_directory()?,
+        build: None,
     };
     let stored = sessions.stored()?;
     let first = sessions.open(starting_session(args, &stored))?;
@@ -73,10 +76,11 @@ pub async fn run(args: &Args) -> Result<ExitCode> {
         .colors(ColorDepth::detect())
         .build();
     app.notice(describe::skills_loaded(&load_skills()?));
+    app.continue_parked();
     input::spawn(sender);
-    while on_screen(&mut app, &mut events).await? == Exit::Rebuild {
-        let failure = rebuild(&relaunch_args(args, app.session()));
-        app.notice(format!("rebuild failed: {failure}"));
+    while let Exit::Rebuild(binary) = on_screen(&mut app, &mut events).await? {
+        let failure = rebuild::relaunch(&binary, &relaunch_args(args, app.session()));
+        app.relaunch_failed(&failure.to_string());
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -102,6 +106,8 @@ struct LiveSessions<'a> {
     main: PathBuf,
     /// Where the project's Sessions are stored.
     directory: PathBuf,
+    /// The build in progress. Aborting it stops the build.
+    build: Option<JoinHandle<()>>,
 }
 
 impl LiveSessions<'_> {
@@ -145,6 +151,19 @@ impl Sessions for LiveSessions<'_> {
         worktree::remove(&self.main, id)?;
         workspace::archive_session(&self.directory, id)?;
         Ok(())
+    }
+
+    fn start_build(&mut self) {
+        let events = self.events.clone();
+        self.build = Some(tokio::spawn(async move {
+            let _ = events.send(Event::BuildFinished(rebuild::build().await));
+        }));
+    }
+
+    fn cancel_build(&mut self) {
+        if let Some(build) = self.build.take() {
+            build.abort();
+        }
     }
 }
 
@@ -214,6 +233,7 @@ mod tests {
             path: PathBuf::from(format!("/s/{id}.jsonl")),
             first_prompt: first_prompt.map(str::to_owned),
             modified: std::time::UNIX_EPOCH,
+            parked: false,
         };
         let stored = [summary("1", Some("hello")), summary("2", None)];
         let spoken = &stored[..1];

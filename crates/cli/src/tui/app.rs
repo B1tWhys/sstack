@@ -2,7 +2,8 @@
 //! out what they ask for.
 
 use std::io;
-use std::path::Path;
+use std::mem;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use anyhow::Result;
@@ -19,7 +20,7 @@ use sstack_core::workspace::SessionSummary;
 use super::component::{Component, KeyOutcome};
 use super::components::{Activity, Row, SIDEBAR_WIDTH, Sidebar};
 use super::event::{Action, Event, EventReceiver};
-use super::lifecycle::{self, Interrupt};
+use super::lifecycle::{self, Effect, Exit, Interrupt, Phase, SessionState, Trigger};
 use super::pane::{Opened, Pane};
 use super::theme::ColorDepth;
 use crate::command::{Command, parse_command};
@@ -27,8 +28,8 @@ use crate::setup::{Place, Start};
 
 /// Tells the person why their input was not acted on.
 const BUSY: &str = "a Turn is running: wait for it to end, or press Alt-C to cancel it";
-/// Tells the person why the harness did not rebuild.
-const BUSY_ELSEWHERE: &str = "a Turn is running in another Session: wait for it to end first";
+/// Tells the person why nothing new started.
+const DRAINING: &str = "the harness is stopping: press Alt-C to stay";
 /// Tells the person why Alt-C did not quit.
 const OTHERS_WORKING: &str = "other Sessions are working: use /quit to stop them too";
 /// The narrowest screen that shows the sidebar, which would otherwise crowd out the Session.
@@ -64,15 +65,13 @@ pub trait Sessions {
     /// # Errors
     /// Returns an error if the Session could not be put away.
     fn archive(&mut self, id: &str) -> Result<()>;
-}
 
-/// Why the interactive harness stopped.
-#[derive(Debug, PartialEq, Eq)]
-pub enum Exit {
-    /// The person is finished.
-    Quit,
-    /// The person asked for a Rebuild. The App can be run again if the Rebuild fails.
-    Rebuild,
+    /// Starts building the Harness Source in the background, which ends in an
+    /// [`Event::BuildFinished`].
+    fn start_build(&mut self);
+
+    /// Stops the build, if one is running.
+    fn cancel_build(&mut self);
 }
 
 /// Runs the interactive harness: the one place that knows every Session and what each [`Action`]
@@ -82,6 +81,8 @@ pub struct App<'a> {
     panes: Vec<Pane>,
     /// The position in `panes` of the Session on screen.
     shown: usize,
+    /// Whether the harness is carrying on or on its way out.
+    phase: Phase,
     /// Lists the Sessions.
     sidebar: Sidebar,
     /// Opens and archives Sessions as the person asks.
@@ -119,6 +120,7 @@ impl<'a> App<'a> {
         Self {
             panes,
             shown,
+            phase: Phase::Running,
             sidebar: Sidebar::default(),
             sessions,
             colors,
@@ -186,6 +188,7 @@ impl App<'_> {
         match event {
             Event::Key(key) => return self.key(key),
             Event::Session(id, event) => return self.pass_on(&id, &event),
+            Event::BuildFinished(outcome) => return self.build_finished(outcome),
             Event::Click { column, row } => self.click(column, row),
             event => self.panes[self.shown].update(&event),
         }
@@ -200,9 +203,82 @@ impl App<'_> {
         match event {
             Event::Vim(VimEvent::Submitted(line)) => return self.vim_submitted(index, line),
             Event::Vim(VimEvent::Lost { failure, .. }) => self.vim_lost(index, failure),
+            Event::TurnEnded(_) if !self.phase.is_draining() => {
+                self.panes[index].continue_turn();
+            }
             _ => {}
         }
-        None
+        self.check_settled()
+    }
+
+    /// Reports that no Turn is running, if that is news the current phase is waiting for.
+    fn check_settled(&mut self) -> Option<Exit> {
+        let settled = !self.panes.iter().any(|pane| pane.state().in_turn());
+        (self.phase.is_draining() && settled)
+            .then(|| self.advance(Trigger::Settled))
+            .flatten()
+    }
+
+    /// Moves the harness to its next phase and does what that takes.
+    fn advance(&mut self, trigger: Trigger) -> Option<Exit> {
+        let (phase, effect) = mem::take(&mut self.phase).after(trigger);
+        self.phase = phase;
+        match effect {
+            Effect::None => return None,
+            Effect::Drain => self.set_paused(true),
+            Effect::DrainAndBuild => {
+                self.set_paused(true);
+                self.sessions.start_build();
+            }
+            Effect::Abandon => {
+                self.sessions.cancel_build();
+                self.resume_parked();
+            }
+            Effect::Exit(exit) => return Some(exit),
+        }
+        self.check_settled()
+    }
+
+    /// Asks every Session's Turns to stop at the end of their Step, or stops asking.
+    fn set_paused(&self, paused: bool) {
+        for pane in &self.panes {
+            pane.set_paused(paused);
+        }
+    }
+
+    /// Lets every Session carry on, including any Turn that has already parked.
+    fn resume_parked(&mut self) {
+        self.set_paused(false);
+        for pane in &mut self.panes {
+            pane.continue_turn();
+        }
+    }
+
+    /// Carries on every Turn an earlier run left parked. A Session that cannot open stays parked
+    /// and says so.
+    pub fn continue_parked(&mut self) {
+        for index in 0..self.panes.len() {
+            if self.panes[index].state() != SessionState::Parked {
+                continue;
+            }
+            match self.ensure_agent(index) {
+                Ok(()) => self.panes[index].continue_turn(),
+                Err(error) => self.notice(format!("could not carry on a Session: {error}")),
+            }
+        }
+    }
+
+    /// Acts on the end of the build.
+    fn build_finished(&mut self, outcome: Result<PathBuf, String>) -> Option<Exit> {
+        let binary = outcome.map_err(|failure| self.notice(failure)).ok();
+        self.advance(Trigger::BuildFinished(binary))
+            .or_else(|| self.check_settled())
+    }
+
+    /// Tells the person that the relaunch failed, and lets every Session carry on here.
+    pub fn relaunch_failed(&mut self, failure: &str) {
+        self.notice(format!("rebuild failed: {failure}"));
+        self.resume_parked();
     }
 
     /// Acts on a line the Session at position `index` submitted through nvim. The person may have
@@ -263,8 +339,11 @@ impl App<'_> {
         None
     }
 
-    /// Acts on Alt-C.
+    /// Acts on Alt-C, which backs out of a drain before it does anything else.
     fn interrupt(&mut self) -> Option<Exit> {
+        if self.phase.is_draining() {
+            return self.advance(Trigger::Interrupted);
+        }
         let pane = &self.panes[self.shown];
         match lifecycle::interrupt(pane.state(), self.others_in_turn()) {
             Interrupt::CancelTurn => pane.cancel(),
@@ -333,18 +412,33 @@ impl App<'_> {
 
     /// Acts on a line the person entered.
     fn submit(&mut self, line: &str) -> Option<Exit> {
-        match parse_command(line) {
+        let command = parse_command(line);
+        if self.phase.is_draining() && command.changes_work() {
+            self.notice(DRAINING.to_owned());
+            return None;
+        }
+        match command {
             Command::Prompt(text) => self.prompt(text),
-            Command::Rebuild => return self.rebuild(),
+            Command::Rebuild => return self.advance(Trigger::RebuildAsked),
             Command::New => self.open_new(Place::Worktree),
             Command::NewMain => self.open_new(Place::MainCheckout),
             Command::Archive { force } => self.archive(force),
             Command::Vim => self.panes[self.shown].toggle_vim(),
-            Command::Quit => return Some(Exit::Quit),
+            Command::Quit => return self.quit(),
             Command::Unknown(name) => self.notice(format!("unknown command: {name}")),
             Command::Empty => {}
         }
         None
+    }
+
+    /// Starts to quit, or stops waiting if already quitting. A Rebuild has to be backed out of
+    /// first, because it would otherwise end in a relaunch.
+    fn quit(&mut self) -> Option<Exit> {
+        if self.phase.is_rebuilding() {
+            self.notice(DRAINING.to_owned());
+            return None;
+        }
+        self.advance(Trigger::QuitAsked)
     }
 
     /// Starts a Turn on `text` in the Session on screen, if it is free to run one.
@@ -353,19 +447,6 @@ impl App<'_> {
             self.notice(BUSY.to_owned());
         } else {
             self.panes[self.shown].start_turn(text);
-        }
-    }
-
-    /// Asks to Rebuild, unless that would cut a Turn short.
-    fn rebuild(&mut self) -> Option<Exit> {
-        if self.panes[self.shown].state().in_turn() {
-            self.notice(BUSY.to_owned());
-            None
-        } else if self.others_in_turn() {
-            self.notice(BUSY_ELSEWHERE.to_owned());
-            None
-        } else {
-            Some(Exit::Rebuild)
         }
     }
 
@@ -383,6 +464,10 @@ impl App<'_> {
     /// Puts the Session on screen away and moves on to the next one, unless `force` is false and
     /// that would lose work.
     fn archive(&mut self, force: bool) {
+        if self.phase.is_draining() {
+            self.notice(DRAINING.to_owned());
+            return;
+        }
         if self.panes[self.shown].state().in_turn() {
             self.notice(BUSY.to_owned());
             return;
@@ -457,10 +542,13 @@ impl App<'_> {
             .map(|index| self.panes[*index].row(now))
             .collect();
         let on_screen = queue.iter().position(|index| *index == self.shown);
+        let running = self.panes.iter().filter(|pane| pane.state().in_turn());
+        let progress = self.phase.progress(running.count());
         let others = (area.is_empty())
-            .then(|| self.summary_of_others(&rows))
+            .then(|| progress.clone().or_else(|| self.summary_of_others(&rows)))
             .flatten();
         self.panes[self.shown].set_others(others);
+        self.sidebar.set_progress(progress);
         self.sidebar.place(area);
         self.sidebar.list(rows, on_screen.unwrap_or_default());
     }
@@ -500,7 +588,6 @@ fn global_action(key: KeyEvent) -> Option<Action> {
 mod tests {
     use super::*;
     use crate::tui::event::EventSender;
-    use crate::tui::lifecycle::SessionState;
     use crate::tui::test_support::{alt, bash_call, ctrl, key, opened, reply, rows};
     use anyhow::{anyhow, bail};
     use async_trait::async_trait;
@@ -534,6 +621,8 @@ mod tests {
         places: Rc<RefCell<Vec<Place>>>,
         /// The ids of the Sessions archived so far.
         archived: Rc<RefCell<Vec<String>>>,
+        /// What has happened to builds so far.
+        builds: Rc<RefCell<Vec<&'static str>>>,
     }
 
     /// Returns where the Session with id `id` is stored in `dir`.
@@ -555,6 +644,8 @@ mod tests {
         places: Rc<RefCell<Vec<Place>>>,
         /// The ids of the Sessions archived so far.
         archived: Rc<RefCell<Vec<String>>>,
+        /// What has happened to builds so far.
+        builds: Rc<RefCell<Vec<&'static str>>>,
         /// Why opening fails, if it does.
         open_failure: Option<&'static str>,
         /// Why archiving is refused, if it is.
@@ -591,6 +682,14 @@ mod tests {
             self.archived.borrow_mut().push(id.to_owned());
             Ok(())
         }
+
+        fn start_build(&mut self) {
+            self.builds.borrow_mut().push("started");
+        }
+
+        fn cancel_build(&mut self) {
+            self.builds.borrow_mut().push("cancelled");
+        }
     }
 
     fn harness(provider: Arc<dyn Provider>) -> Harness {
@@ -624,6 +723,7 @@ mod tests {
         let first = opened(&path_of(&dir, "first"), provider.clone(), &sender);
         let places = Rc::default();
         let archived = Rc::default();
+        let builds = Rc::default();
         let mut sessions = TestSessions {
             root: dir.path().to_owned(),
             provider,
@@ -631,6 +731,7 @@ mod tests {
             created: 0,
             places: Rc::clone(&places),
             archived: Rc::clone(&archived),
+            builds: Rc::clone(&builds),
             open_failure: None,
             refusal: None,
             archive_failure: None,
@@ -649,6 +750,7 @@ mod tests {
             events,
             places,
             archived,
+            builds,
         }
     }
 
@@ -670,6 +772,33 @@ mod tests {
         /// Starts a new Session, which leaves the keyboard's prompt ready for it.
         fn enter_new(&mut self) {
             assert_eq!(self.enter("/new"), None);
+        }
+
+        /// Handles events from the agents until one stops the harness.
+        async fn until_exit(&mut self) -> Exit {
+            loop {
+                let event = self.events.recv().await.unwrap();
+                if let Some(exit) = self.app.handle(event) {
+                    return exit;
+                }
+            }
+        }
+
+        /// Starts a Turn that will ask about `touch ran`, then asks for `command` from a new
+        /// Session, so that the question does not catch what is typed.
+        async fn drain_with_a_question_open(&mut self, command: &str) -> Option<Exit> {
+            self.enter("go");
+            self.enter_new();
+            let exit = self.enter(command);
+            self.until(|event| matches!(event, Event::Approval(_)))
+                .await;
+            exit
+        }
+
+        /// Answers yes to the question on the Session that has waited longest.
+        fn approve(&mut self) {
+            self.press('g');
+            self.app.handle(Event::Key(key(KeyCode::Char('y'))));
         }
 
         /// Returns the id of the Session on screen.
@@ -763,7 +892,6 @@ mod tests {
         assert_eq!(h.enter(""), None);
         assert_eq!(h.enter("/nope"), None);
         assert!(h.screen().contains("unknown command: /nope"));
-        assert_eq!(h.enter("/rebuild"), Some(Exit::Rebuild));
         assert_eq!(h.enter("/quit"), Some(Exit::Quit));
         assert_eq!(h.session(), Vec::new());
     }
@@ -809,7 +937,6 @@ mod tests {
         assert!(h.screen().contains("working"));
 
         assert_eq!(h.enter("again"), None);
-        assert_eq!(h.enter("/rebuild"), None);
         assert!(h.screen().contains("a Turn is running"));
 
         assert_eq!(h.app.handle(Event::Key(alt('c'))), None);
@@ -894,6 +1021,7 @@ mod tests {
             path,
             first_prompt: Some(text),
             modified: SystemTime::now() - Duration::from_secs(age),
+            parked: false,
         }
     }
 
@@ -1150,9 +1278,6 @@ mod tests {
         assert_eq!(h.press('c'), None);
         assert!(h.screen().contains("other Sessions are working"));
         assert_eq!(h.app.panes[0].state(), SessionState::Working);
-
-        assert_eq!(h.enter("/rebuild"), None);
-        assert!(h.screen().contains("in another Session"));
     }
 
     #[tokio::test]
@@ -1356,5 +1481,223 @@ mod tests {
         h.press('x');
         assert_eq!(h.shown(), "first");
         assert_eq!(*h.archived.borrow(), Vec::<String>::new());
+    }
+
+    /// The new binary a test build produces.
+    fn binary() -> PathBuf {
+        PathBuf::from("/bin/sstack")
+    }
+
+    fn built() -> Event {
+        Event::BuildFinished(Ok(binary()))
+    }
+
+    fn two_steps() -> Harness {
+        scripted(vec![Ok(bash_call("touch ran")), Ok(reply("all done"))])
+    }
+
+    #[tokio::test]
+    async fn a_rebuild_with_nothing_running_relaunches_once_built() {
+        let mut h = scripted(vec![]);
+        assert_eq!(h.enter("/rebuild"), None);
+        assert_eq!(*h.builds.borrow(), ["started"]);
+        assert_eq!(h.app.handle(built()), Some(Exit::Rebuild(binary())));
+    }
+
+    #[tokio::test]
+    async fn a_rebuild_waits_for_both_the_build_and_the_step_in_progress() {
+        let mut h = two_steps();
+        assert_eq!(h.drain_with_a_question_open("/rebuild").await, None);
+        assert_eq!(h.app.handle(built()), None);
+        let screen = h.screen_of(WIDE);
+        assert!(screen.contains("built, 1 running"), "{screen}");
+        assert!(screen.contains("! go"), "{screen}");
+
+        h.approve();
+
+        assert_eq!(h.until_exit().await, Exit::Rebuild(binary()));
+        let entries = SessionLog::open(&path_of(&h.dir, "first")).unwrap().1;
+        assert_eq!(entries.last(), Some(&Entry::TurnParked));
+        assert!(h.dir.path().join("ran").exists());
+    }
+
+    #[tokio::test]
+    async fn a_build_that_finishes_after_the_turns_stop_still_relaunches() {
+        let mut h = two_steps();
+        h.drain_with_a_question_open("/rebuild").await;
+        h.approve();
+        h.until(|event| matches!(event, Event::TurnEnded(_))).await;
+        assert_eq!(h.app.panes[0].state(), SessionState::Parked);
+        let screen = h.screen_of(WIDE);
+        assert!(screen.contains("- go"), "{screen}");
+        assert!(screen.contains("parked"), "{screen}");
+
+        assert_eq!(h.app.handle(built()), Some(Exit::Rebuild(binary())));
+    }
+
+    #[tokio::test]
+    async fn parked_turns_carry_on_after_a_relaunch() {
+        let mut h = two_steps();
+        h.drain_with_a_question_open("/rebuild").await;
+        h.app.handle(built());
+        h.approve();
+        h.until_exit().await;
+
+        let stored = SessionSummary {
+            path: path_of(&h.dir, "first"),
+            first_prompt: Some("go".into()),
+            modified: SystemTime::now(),
+            parked: true,
+        };
+        let provider = Arc::new(ScriptedProvider::new(vec![Ok(reply("carried on"))]));
+        let mut h = start(h.dir, provider, vec![stored]);
+        assert_eq!(h.app.panes[0].state(), SessionState::Parked);
+
+        h.app.continue_parked();
+
+        assert_eq!(h.app.panes[0].state(), SessionState::Working);
+        h.until_turn_ends().await;
+        assert_eq!(h.app.panes[0].state(), SessionState::Idle);
+        assert!(h.screen().contains("carried on"));
+        assert_eq!(h.session().len(), 5);
+    }
+
+    #[tokio::test]
+    async fn a_parked_session_that_cannot_open_stays_parked_and_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut stored = summary(&dir, "older", 100);
+        stored.parked = true;
+        let mut h = start_with()
+            .dir(dir)
+            .provider(Arc::new(NeverResponds))
+            .stored(vec![stored])
+            .adjust(|sessions| sessions.open_failure = Some("no keychain"))
+            .call();
+
+        h.app.continue_parked();
+
+        assert_eq!(h.app.panes[0].state(), SessionState::Parked);
+        assert!(h.screen().contains("could not carry on a Session"));
+    }
+
+    #[tokio::test]
+    async fn a_failed_build_stops_the_drain_and_the_turns_carry_on() {
+        let mut h = two_steps();
+        h.drain_with_a_question_open("/rebuild").await;
+        h.approve();
+        h.until(|event| matches!(event, Event::TurnEnded(_))).await;
+
+        let failed = Event::BuildFinished(Err("the build did not succeed".into()));
+        assert_eq!(h.app.handle(failed), None);
+
+        assert!(!h.app.phase.is_draining());
+        assert!(h.screen().contains("the build did not succeed"));
+        assert_eq!(h.app.panes[0].state(), SessionState::Working);
+        h.until_turn_ends().await;
+        assert_eq!(h.app.panes[0].state(), SessionState::Idle);
+        assert!(h.screen().contains("all done"));
+    }
+
+    #[tokio::test]
+    async fn alt_c_backs_out_of_a_rebuild_without_cancelling_any_turn() {
+        let mut h = two_steps();
+        h.drain_with_a_question_open("/rebuild").await;
+
+        assert_eq!(h.app.handle(Event::Key(alt('c'))), None);
+
+        assert!(!h.app.phase.is_draining());
+        assert_eq!(*h.builds.borrow(), ["started", "cancelled"]);
+        assert_eq!(h.app.panes[0].state(), SessionState::AwaitingApproval);
+        h.approve();
+        h.until_turn_ends().await;
+        assert_eq!(h.app.panes[0].state(), SessionState::Idle);
+        assert!(h.session().iter().all(|entry| *entry != Entry::TurnParked));
+    }
+
+    #[tokio::test]
+    async fn a_turn_that_parks_just_after_a_drain_is_abandoned_carries_on() {
+        let mut h = two_steps();
+        h.drain_with_a_question_open("/rebuild").await;
+        h.approve();
+        h.app.handle(Event::Key(alt('c')));
+        h.app.panes[0].set_paused(true);
+        h.until(|event| matches!(event, Event::TurnEnded(_))).await;
+        h.app.panes[0].set_paused(false);
+        assert_eq!(h.app.panes[0].state(), SessionState::Working);
+        h.until_turn_ends().await;
+        assert_eq!(h.app.panes[0].state(), SessionState::Idle);
+    }
+
+    #[tokio::test]
+    async fn nothing_new_starts_during_a_drain_but_the_person_can_still_move_around() {
+        let mut h = two_steps();
+        h.drain_with_a_question_open("/rebuild").await;
+
+        h.enter("hello");
+        assert!(h.screen().contains("the harness is stopping"));
+        assert_eq!(h.app.panes[1].state(), SessionState::Idle);
+        h.enter("/new");
+        h.enter("/rebuild");
+        h.enter("/quit");
+        h.press('x');
+        assert_eq!(h.app.panes.len(), 2);
+        assert_eq!(*h.builds.borrow(), ["started"]);
+
+        h.press('g');
+        assert_eq!(h.shown(), "first");
+        assert!(h.screen().contains("[y/N]"));
+    }
+
+    #[tokio::test]
+    async fn the_narrow_status_line_says_what_a_drain_is_doing() {
+        let mut h = two_steps();
+        h.drain_with_a_question_open("/rebuild").await;
+        let narrow = h.screen();
+        assert!(narrow.contains("building, 1 running"), "{narrow}");
+    }
+
+    #[tokio::test]
+    async fn quitting_waits_for_turns_to_reach_the_end_of_their_step() {
+        let mut h = two_steps();
+        assert_eq!(h.drain_with_a_question_open("/quit").await, None);
+        assert!(h.screen_of(WIDE).contains("quitting, 1 running"));
+        assert_eq!(*h.builds.borrow(), Vec::<&str>::new());
+
+        h.approve();
+
+        assert_eq!(h.until_exit().await, Exit::Quit);
+        let entries = SessionLog::open(&path_of(&h.dir, "first")).unwrap().1;
+        assert_eq!(entries.last(), Some(&Entry::TurnParked));
+    }
+
+    #[tokio::test]
+    async fn quitting_a_second_time_does_not_wait() {
+        let mut h = two_steps();
+        h.drain_with_a_question_open("/quit").await;
+        assert_eq!(h.enter("/quit"), Some(Exit::Quit));
+    }
+
+    #[tokio::test]
+    async fn alt_c_backs_out_of_quitting() {
+        let mut h = two_steps();
+        h.drain_with_a_question_open("/quit").await;
+        assert_eq!(h.app.handle(Event::Key(alt('c'))), None);
+        assert!(!h.app.phase.is_draining());
+    }
+
+    #[tokio::test]
+    async fn a_failed_relaunch_says_so_and_turns_carry_on_here() {
+        let mut h = two_steps();
+        h.drain_with_a_question_open("/rebuild").await;
+        h.app.handle(built());
+        h.approve();
+        assert_eq!(h.until_exit().await, Exit::Rebuild(binary()));
+
+        h.app.relaunch_failed("exec failed");
+
+        assert!(h.screen().contains("rebuild failed: exec failed"));
+        assert_eq!(h.app.panes[0].state(), SessionState::Working);
+        h.until_turn_ends().await;
+        assert_eq!(h.app.panes[0].state(), SessionState::Idle);
     }
 }

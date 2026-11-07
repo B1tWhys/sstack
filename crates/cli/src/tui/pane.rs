@@ -7,6 +7,7 @@ use crossterm::cursor::SetCursorStyle;
 use crossterm::event::KeyEvent;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
+use sstack_core::agent::TurnEnd;
 use sstack_core::session::Entry;
 use sstack_core::workspace::{self, SessionSummary};
 
@@ -79,6 +80,9 @@ impl Pane {
     pub fn stored(summary: SessionSummary) -> Self {
         let mut pane = Self::blank(summary.path, summary.modified);
         pane.title = summary.first_prompt;
+        if summary.parked {
+            pane.state = SessionState::Parked;
+        }
         pane
     }
 
@@ -175,6 +179,7 @@ impl Pane {
             (SessionState::Idle, Some(Unseen::Failed)) => Activity::Failed,
             (SessionState::Idle, Some(Unseen::Finished)) => Activity::Done,
             (SessionState::Idle, None) => Activity::Idle,
+            (SessionState::Parked, _) => Activity::Parked,
         }
     }
 
@@ -189,6 +194,7 @@ impl Pane {
         match event {
             Event::Resumed(entries) => self.title = self.title.take().or(first_prompt(entries)),
             Event::Approval(_) => self.moved(SessionEvent::ApprovalRequested),
+            Event::TurnEnded(Ok(TurnEnd::Paused)) => self.moved(SessionEvent::Parked),
             Event::TurnEnded(outcome) => {
                 self.moved(SessionEvent::TurnEnded);
                 self.unseen = (!on_screen).then_some(if outcome.is_ok() {
@@ -267,6 +273,24 @@ impl Pane {
         agent.prompt(text.to_owned());
         self.title.get_or_insert_with(|| text.to_owned());
         self.moved(SessionEvent::TurnStarted);
+    }
+
+    /// Carries on the Turn that parked, if the Session has one and an agent to run it.
+    pub fn continue_turn(&mut self) {
+        if self.state != SessionState::Parked {
+            return;
+        }
+        if let Some(agent) = &mut self.agent {
+            agent.continue_turn();
+            self.moved(SessionEvent::Continued);
+        }
+    }
+
+    /// Asks the Session's Turns to stop at the end of their Step, or stops asking.
+    pub fn set_paused(&self, paused: bool) {
+        if let Some(agent) = &self.agent {
+            agent.set_paused(paused);
+        }
     }
 
     /// Cancels the running Turn, if there is one.

@@ -4,6 +4,7 @@ use std::ffi::OsString;
 use std::io::{IsTerminal, Write, stdout};
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use anyhow::Result;
 use sstack_core::agent::{AgentEvent, TurnContext, TurnEnd};
@@ -29,8 +30,10 @@ pub async fn run(args: &Args, prompt: &str) -> Result<ExitCode> {
     let cancel = CancellationToken::new();
     let out = stdout();
     let mut view = EventView::new(&out, wants_style(&out));
+    let never_paused = AtomicBool::new(false);
     let mut context = TurnContext {
         cancel: &cancel,
+        pause: &never_paused,
         on_event: &mut |event| view.show(&event),
     };
     let result = agent.run_turn(prompt, &mut context).await;

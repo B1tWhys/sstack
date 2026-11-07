@@ -89,6 +89,9 @@ pub enum Entry {
     },
     /// The person cancelled the Turn at this point.
     TurnCancelled,
+    /// The Turn stopped here between Steps so that the harness could stop, and should carry on
+    /// once it runs again.
+    TurnParked,
 }
 
 /// A failure reading or writing a Session log.
@@ -174,6 +177,17 @@ pub fn first_prompt(path: &Path) -> io::Result<Option<String>> {
             Entry::User { text } => Some(text),
             _ => None,
         }))
+}
+
+/// Returns whether the Session stored at `path` stopped between Steps and should carry on. Does
+/// not disturb the log, so it is safe on a Session in use.
+///
+/// # Errors
+/// Returns an error if the file cannot be read.
+pub fn is_parked(path: &Path) -> io::Result<bool> {
+    let contents = fs::read_to_string(path)?;
+    let last = contents.lines().next_back().unwrap_or_default();
+    Ok(serde_json::from_str::<Entry>(last).is_ok_and(|entry| entry == Entry::TurnParked))
 }
 
 #[cfg(test)]
@@ -308,5 +322,20 @@ mod tests {
         assert!(first_prompt(&path).is_err());
         fs::write(&path, "not json\n").unwrap();
         assert_eq!(first_prompt(&path).unwrap(), None);
+    }
+
+    #[test]
+    fn a_session_is_parked_only_while_that_is_the_last_thing_it_did() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.jsonl");
+        assert!(is_parked(&path).is_err());
+        let mut log = SessionLog::create(&path).unwrap();
+        assert!(!is_parked(&path).unwrap());
+
+        log.append(&Entry::TurnParked).unwrap();
+        assert!(is_parked(&path).unwrap());
+
+        log.append(&Entry::TurnCancelled).unwrap();
+        assert!(!is_parked(&path).unwrap());
     }
 }

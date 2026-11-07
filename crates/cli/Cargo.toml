@@ -20,7 +20,7 @@ dirs = "7"
 futures = "0.3"
 ratatui = { version = "0.30", features = ["unstable-rendered-line-info"] }
 sstack-core = { path = "../core", default-features = false }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
+tokio = { version = "1", features = ["macros", "process", "rt-multi-thread", "sync"] }
 tokio-util = "0.7"
 unicode-width = "0.2"
 

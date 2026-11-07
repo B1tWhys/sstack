@@ -32,6 +32,8 @@ pub enum Activity {
     Failed,
     /// A Turn ended with output the person has not seen yet.
     Done,
+    /// A Turn stopped between Steps and will carry on.
+    Parked,
     /// Nothing is happening and nothing is new.
     Idle,
 }
@@ -44,6 +46,7 @@ impl Activity {
             Self::Blocked => "!",
             Self::Failed => "x",
             Self::Done => "+",
+            Self::Parked => "-",
             Self::Idle => " ",
         }
     }
@@ -55,6 +58,7 @@ impl Activity {
             Self::Blocked => "blocked",
             Self::Failed => "failed",
             Self::Done => "done",
+            Self::Parked => "parked",
             Self::Idle => "idle",
         }
     }
@@ -64,7 +68,7 @@ impl Activity {
         match self {
             Self::Blocked | Self::Failed => theme::ATTENTION,
             Self::Working | Self::Done => theme::TEXT,
-            Self::Idle => theme::NOTE,
+            Self::Parked | Self::Idle => theme::NOTE,
         }
     }
 }
@@ -110,6 +114,8 @@ pub struct Sidebar {
     on_screen: usize,
     /// Where the sidebar sits on the screen. Empty when it is hidden.
     area: Rect,
+    /// What the harness is doing instead of the usual heading, if anything.
+    progress: Option<String>,
 }
 
 impl Sidebar {
@@ -117,6 +123,11 @@ impl Sidebar {
     pub fn list(&mut self, rows: Vec<Row>, on_screen: usize) {
         self.rows = rows;
         self.on_screen = on_screen;
+    }
+
+    /// Sets what the harness is doing, which replaces the heading until it is cleared.
+    pub fn set_progress(&mut self, progress: Option<String>) {
+        self.progress = progress;
     }
 
     /// Tells the sidebar where it will be drawn, so that clicks can be matched to its rows. An
@@ -151,7 +162,10 @@ impl Component for Sidebar {
         if area.is_empty() {
             return;
         }
-        let heading = Line::styled("sessions", theme::NOTE);
+        let heading = match &self.progress {
+            Some(progress) => Line::styled(progress.as_str(), theme::ATTENTION),
+            None => Line::styled("sessions", theme::NOTE),
+        };
         let shown = self.rows.iter().enumerate().skip(self.first_shown());
         let rows = shown.map(|(index, row)| row.line(index == self.on_screen));
         let lines: Vec<Line> = std::iter::once(heading).chain(rows).collect();
@@ -247,6 +261,16 @@ mod tests {
         assert_eq!(shown[3], "  x update docs       failed     │");
         assert_eq!(shown[4], "  * fix the approva.. working    │");
         assert_eq!(shown[5], "    old               idle       │");
+    }
+
+    #[test]
+    fn what_the_harness_is_doing_replaces_the_heading() {
+        let mut sidebar = sidebar(vec![row("1", "t", Activity::Parked)], 0, 2);
+        sidebar.set_progress(Some("building".into()));
+        let shown = drawn(&sidebar, 2);
+        assert!(shown[0].starts_with("building"), "{shown:#?}");
+        assert!(shown[1].contains("- t"), "{shown:#?}");
+        assert!(shown[1].contains("parked"), "{shown:#?}");
     }
 
     #[test]

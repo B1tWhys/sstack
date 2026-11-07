@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use tokio_util::sync::CancellationToken;
 
@@ -59,6 +60,8 @@ pub enum TurnEnd {
     Refused,
     /// The person cancelled the Turn.
     Cancelled,
+    /// The Turn stopped between Steps when asked to, and [`Agent::continue_turn`] picks it up.
+    Paused,
 }
 
 /// A failure that stops a Turn.
@@ -105,6 +108,9 @@ pub type EventSink<'a> = &'a mut (dyn FnMut(AgentEvent) + Send);
 pub struct TurnContext<'a> {
     /// Stops the Turn when cancelled, leaving the Session resumable.
     pub cancel: &'a CancellationToken,
+    /// Stops the Turn at the end of the current Step while set, unlike `cancel`, which abandons
+    /// the Step. A Turn that ends by itself in that Step simply ends. Can be cleared again.
+    pub pause: &'a AtomicBool,
     /// Receives each event as the Turn progresses.
     pub on_event: EventSink<'a>,
 }
@@ -148,9 +154,29 @@ impl Agent {
         self.record(Entry::User {
             text: input.to_owned(),
         })?;
+        self.run_steps(context).await
+    }
+
+    /// Carries on a Turn that stopped with [`TurnEnd::Paused`], in this run or an earlier one.
+    ///
+    /// # Errors
+    /// Returns an error if the Provider fails or the Session cannot be recorded.
+    pub async fn continue_turn(
+        &mut self,
+        context: &mut TurnContext<'_>,
+    ) -> Result<TurnEnd, AgentError> {
+        self.run_steps(context).await
+    }
+
+    /// Runs Steps until one ends the Turn, or until the Turn is asked to pause between them.
+    async fn run_steps(&mut self, context: &mut TurnContext<'_>) -> Result<TurnEnd, AgentError> {
         loop {
             if let Some(end) = self.step(context).await? {
                 return Ok(end);
+            }
+            if context.pause.load(Ordering::SeqCst) {
+                self.record(Entry::TurnParked)?;
+                return Ok(TurnEnd::Paused);
             }
         }
     }
@@ -362,7 +388,12 @@ mod tests {
         cancel: &CancellationToken,
         on_event: EventSink<'_>,
     ) -> Result<TurnEnd, AgentError> {
-        let mut context = TurnContext { cancel, on_event };
+        let pause = AtomicBool::new(false);
+        let mut context = TurnContext {
+            cancel,
+            pause: &pause,
+            on_event,
+        };
         agent.run_turn("go", &mut context).await
     }
 
@@ -551,5 +582,63 @@ mod tests {
         assert_eq!(tool_results(agent.entries()), [("1", INTERRUPTED, true)]);
         let (_, stored) = SessionLog::open(&path).unwrap();
         assert_eq!(stored.len(), 2);
+    }
+
+    /// Runs a Turn that is told to pause, then carries it on in a new agent, as a relaunch does.
+    #[tokio::test]
+    async fn a_paused_turn_stops_between_steps_and_carries_on_after_a_restart() {
+        let script = vec![
+            Ok(calling("1", "read", json!({"path": "missing"}))),
+            Ok(reply("done")),
+        ];
+        let mut h = harness(script, Arc::new(AllowAll));
+        let cancel = CancellationToken::new();
+        let pause = AtomicBool::new(true);
+        let mut ignore = |_| {};
+        let mut context = TurnContext {
+            cancel: &cancel,
+            pause: &pause,
+            on_event: &mut ignore,
+        };
+
+        let end = h.agent.run_turn("go", &mut context).await.unwrap();
+
+        assert_eq!(end, TurnEnd::Paused);
+        assert_eq!(h.agent.entries().last(), Some(&Entry::TurnParked));
+        assert!(matches!(
+            h.agent.entries()[h.agent.entries().len() - 2],
+            Entry::ToolResult { .. }
+        ));
+
+        pause.store(false, Ordering::SeqCst);
+        let (log, entries) = SessionLog::open(&h.session).unwrap();
+        let (dir, project) = git_project();
+        let config = config(h.provider.clone(), project, Arc::new(AllowAll));
+        let mut resumed = Agent::new(config, log, entries).unwrap();
+        let mut context = TurnContext {
+            cancel: &cancel,
+            pause: &pause,
+            on_event: &mut ignore,
+        };
+
+        let end = resumed.continue_turn(&mut context).await.unwrap();
+
+        assert_eq!(end, TurnEnd::Finished);
+        drop(dir);
+    }
+
+    #[tokio::test]
+    async fn a_turn_that_finishes_in_its_step_ends_normally_even_when_asked_to_pause() {
+        let mut h = harness(vec![Ok(reply("done"))], Arc::new(AllowAll));
+        let cancel = CancellationToken::new();
+        let pause = AtomicBool::new(true);
+        let mut ignore = |_| {};
+        let mut context = TurnContext {
+            cancel: &cancel,
+            pause: &pause,
+            on_event: &mut ignore,
+        };
+        let end = h.agent.run_turn("go", &mut context).await.unwrap();
+        assert_eq!(end, TurnEnd::Finished);
     }
 }

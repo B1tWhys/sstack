@@ -3,7 +3,10 @@
 use std::io;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+
+/// How many lines of a failed build to show the person.
+const MAX_ERROR_LINES: usize = 20;
 
 /// Returns the Harness Source this binary was built from.
 fn source_dir() -> PathBuf {
@@ -24,9 +27,27 @@ fn binary_path(source: &Path, profile_dir: &str) -> PathBuf {
     source.join("target").join(profile_dir).join("sstack")
 }
 
-/// Returns whether `command` ran and succeeded. Failing to start counts as not succeeding.
-fn succeeded(command: &mut Command) -> bool {
-    command.status().is_ok_and(|status| status.success())
+/// Runs `command` to its end, returning what went wrong if it fails. Stops the build if dropped,
+/// so a Rebuild that is abandoned leaves nothing running.
+async fn run_build(command: Command) -> Result<(), String> {
+    let mut command = tokio::process::Command::from(command);
+    let output = command
+        .stdin(Stdio::null())
+        .kill_on_drop(true)
+        .output()
+        .await
+        .map_err(|error| format!("could not start the build: {error}"))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let said = String::from_utf8_lossy(&output.stderr);
+    Err(format!("the build did not succeed:\n{}", tail(&said)))
+}
+
+/// Keeps the end of build output, where the failure is.
+fn tail(text: &str) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    lines[lines.len().saturating_sub(MAX_ERROR_LINES)..].join("\n")
 }
 
 /// Returns the cargo profile this binary was built with, and its output directory.
@@ -38,11 +59,12 @@ fn profile() -> (&'static str, &'static str) {
     }
 }
 
-/// Builds the Harness Source, returning the new binary if that worked.
-pub fn build() -> Option<PathBuf> {
+/// Builds the Harness Source, returning the new binary, or what went wrong.
+pub async fn build() -> Result<PathBuf, String> {
     let (profile, directory) = profile();
     let source = source_dir();
-    succeeded(&mut build_command(&source, profile)).then(|| binary_path(&source, directory))
+    run_build(build_command(&source, profile)).await?;
+    Ok(binary_path(&source, directory))
 }
 
 /// Replaces this process with `binary`. Only returns if that fails.
@@ -50,67 +72,9 @@ pub fn relaunch(binary: &Path, args: &[String]) -> io::Error {
     Command::new(binary).args(args).exec()
 }
 
-/// Rebuilds the Harness Source and relaunches into it, passing the new binary `relaunch_args`.
-///
-/// Only returns if that could not be done, saying why. Build output goes straight to the
-/// terminal, so the caller should hand the terminal back first.
-pub fn rebuild(relaunch_args: &[String]) -> String {
-    Rebuilder { build, relaunch }.run(relaunch_args)
-}
-
-/// The two steps of a Rebuild, kept apart so that the decision between them can be tested.
-struct Rebuilder<B, R> {
-    /// Builds the Harness Source, returning the new binary if that worked.
-    build: B,
-    /// Replaces this process with a binary, returning only if that fails.
-    relaunch: R,
-}
-
-impl<B, R> Rebuilder<B, R>
-where
-    B: FnOnce() -> Option<PathBuf>,
-    R: FnOnce(&Path, &[String]) -> io::Error,
-{
-    /// Replaces the Running Harness with a fresh build, passing it `relaunch_args`.
-    ///
-    /// Only returns if that could not be done, saying why.
-    fn run(self, relaunch_args: &[String]) -> String {
-        match (self.build)() {
-            Some(binary) => (self.relaunch)(&binary, relaunch_args).to_string(),
-            None => "the build did not succeed".to_owned(),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_failed_build_does_not_relaunch_and_says_so() {
-        let rebuilder = Rebuilder {
-            build: || None,
-            relaunch: |_: &Path, _: &[String]| panic!("a failed build must not relaunch"),
-        };
-        assert_eq!(rebuilder.run(&[]), "the build did not succeed");
-    }
-
-    #[test]
-    fn a_successful_build_relaunches_with_the_given_arguments() {
-        let mut launched = None;
-        let rebuilder = Rebuilder {
-            build: || Some(PathBuf::from("/bin/sstack")),
-            relaunch: |binary: &Path, arguments: &[String]| {
-                launched = Some((binary.to_owned(), arguments.to_vec()));
-                io::Error::other("exec failed")
-            },
-        };
-        let failure = rebuilder.run(&["--resume".to_owned()]);
-        let (binary, arguments) = launched.unwrap();
-        assert_eq!(binary, Path::new("/bin/sstack"));
-        assert_eq!(arguments, ["--resume"]);
-        assert_eq!(failure, "exec failed");
-    }
 
     #[test]
     fn the_build_targets_the_harness_binary() {
@@ -126,11 +90,25 @@ mod tests {
         assert_eq!(path, Path::new("/src/target/debug/sstack"));
     }
 
+    #[tokio::test]
+    async fn a_failed_build_says_what_went_wrong() {
+        assert_eq!(run_build(Command::new("true")).await, Ok(()));
+
+        let mut failing = Command::new("sh");
+        failing.args(["-c", "echo broken >&2; exit 1"]);
+        let failure = run_build(failing).await.unwrap_err();
+        assert!(failure.ends_with("broken"), "{failure}");
+
+        let missing = run_build(Command::new("/definitely/not/here")).await;
+        assert!(missing.unwrap_err().contains("could not start"));
+    }
+
     #[test]
-    fn a_failed_build_does_not_count() {
-        assert!(succeeded(&mut Command::new("true")));
-        assert!(!succeeded(&mut Command::new("false")));
-        assert!(!succeeded(&mut Command::new("/definitely/not/here")));
+    fn long_build_output_keeps_its_end() {
+        let lines: Vec<String> = (0..MAX_ERROR_LINES + 5).map(|n| n.to_string()).collect();
+        let kept = tail(&lines.join("\n"));
+        assert_eq!(kept.lines().count(), MAX_ERROR_LINES);
+        assert_eq!(kept.lines().next(), Some("5"));
     }
 
     #[test]

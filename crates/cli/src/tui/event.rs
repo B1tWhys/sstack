@@ -1,5 +1,6 @@
 //! The messages that drive the interactive harness.
 
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use crossterm::event::KeyEvent;
@@ -46,12 +47,16 @@ pub enum Event {
     Resumed(Vec<Entry>),
     /// The agent started a Turn on this input from the person.
     TurnStarted(String),
+    /// The agent carried on a Turn that had paused.
+    TurnContinued,
     /// Something happened during the running Turn.
     Agent(AgentEvent),
     /// The running Turn ended, either normally or with the error that stopped it.
     TurnEnded(Result<TurnEnd, String>),
     /// The model wants to run a shell command, and the Turn is waiting for the person to decide.
     Approval(ApprovalRequest),
+    /// The Rebuild's build finished, with the new binary or what went wrong.
+    BuildFinished(Result<PathBuf, String>),
     /// The harness has something to tell the person, such as a mistyped Human Command.
     Notice(String),
     /// The nvim behind the Session's input reported something.

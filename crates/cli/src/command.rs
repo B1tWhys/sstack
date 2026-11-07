@@ -27,6 +27,18 @@ pub enum Command<'a> {
     Empty,
 }
 
+impl Command<'_> {
+    /// Returns whether this starts or removes work, which has no place while the harness is on
+    /// its way out.
+    #[must_use]
+    pub fn changes_work(&self) -> bool {
+        matches!(
+            self,
+            Self::Prompt(_) | Self::Rebuild | Self::New | Self::NewMain | Self::Archive { .. }
+        )
+    }
+}
+
 /// Works out what a line entered by the person asks for.
 ///
 /// Slash-prefixed lines never reach the model, even if the command is mistyped.
@@ -67,5 +79,14 @@ mod tests {
         assert_eq!(parse_command("/exit"), Command::Quit);
         assert_eq!(parse_command("/nope"), Command::Unknown("/nope"));
         assert_eq!(parse_command("   "), Command::Empty);
+    }
+
+    #[test]
+    fn only_some_commands_change_work() {
+        assert!(Command::Prompt("hi").changes_work());
+        assert!(Command::New.changes_work());
+        assert!(Command::Archive { force: true }.changes_work());
+        assert!(Command::Rebuild.changes_work());
+        assert!(!Command::Quit.changes_work());
     }
 }

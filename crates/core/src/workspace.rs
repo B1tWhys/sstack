@@ -69,6 +69,8 @@ pub struct SessionSummary {
     pub first_prompt: Option<String>,
     /// The last time anything was recorded in it.
     pub modified: SystemTime,
+    /// Whether it stopped between Steps and should carry on.
+    pub parked: bool,
 }
 
 /// Describes every Session in `sessions_dir`, except archived ones.
@@ -84,10 +86,12 @@ pub fn list_sessions(sessions_dir: &Path) -> io::Result<Vec<SessionSummary>> {
 fn summarize(path: PathBuf) -> Option<SessionSummary> {
     let first_prompt = session::first_prompt(&path).ok()?;
     let modified = fs::metadata(&path).and_then(|file| file.modified()).ok()?;
+    let parked = session::is_parked(&path).ok()?;
     Some(SessionSummary {
         path,
         first_prompt,
         modified,
+        parked,
     })
 }
 
@@ -188,7 +192,8 @@ mod tests {
         let empty = session_path(dir.path(), "empty");
         fs::write(&empty, "").unwrap();
         let spoken = session_path(dir.path(), "spoken");
-        fs::write(&spoken, "{\"type\":\"user\",\"text\":\"hello\"}\n").unwrap();
+        let entries = "{\"type\":\"user\",\"text\":\"hello\"}\n{\"type\":\"turn_parked\"}\n";
+        fs::write(&spoken, entries).unwrap();
 
         let mut listed = list_sessions(dir.path()).unwrap();
         listed.sort_by_key(|summary| summary.path.clone());
@@ -197,6 +202,8 @@ mod tests {
         assert_eq!(listed[0].path, empty);
         assert_eq!(listed[0].first_prompt, None);
         assert_eq!(listed[1].first_prompt.as_deref(), Some("hello"));
+        assert!(listed[1].parked);
+        assert!(!listed[0].parked);
         let modified = fs::metadata(&spoken).unwrap().modified().unwrap();
         assert_eq!(listed[1].modified, modified);
     }

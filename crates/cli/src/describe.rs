@@ -40,6 +40,7 @@ pub fn turn_end_text(end: TurnEnd) -> Option<&'static str> {
         TurnEnd::Truncated => Some("[stopped: the response hit the output limit]"),
         TurnEnd::Refused => Some("[stopped: the model declined this request]"),
         TurnEnd::Cancelled => Some("[cancelled]"),
+        TurnEnd::Paused => Some("[paused until the harness runs again]"),
     }
 }
 
@@ -103,7 +104,12 @@ mod tests {
     #[test]
     fn unusual_turn_ends_are_described() {
         assert_eq!(turn_end_text(TurnEnd::Finished), None);
-        for end in [TurnEnd::Truncated, TurnEnd::Refused, TurnEnd::Cancelled] {
+        for end in [
+            TurnEnd::Truncated,
+            TurnEnd::Refused,
+            TurnEnd::Cancelled,
+            TurnEnd::Paused,
+        ] {
             assert!(turn_end_text(end).is_some());
         }
     }

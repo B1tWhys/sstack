@@ -119,6 +119,7 @@ impl Transcript {
             }
             Entry::ToolResult { .. } => {}
             Entry::TurnCancelled => self.ended(TurnEnd::Cancelled),
+            Entry::TurnParked => self.ended(TurnEnd::Paused),
         }
     }
 
@@ -311,6 +312,7 @@ mod tests {
                 text: "next".into(),
             },
             Entry::TurnCancelled,
+            Entry::TurnParked,
         ])]);
         assert_eq!(
             texts(&shown),
@@ -324,6 +326,7 @@ mod tests {
                 (Kind::Note, "[stopped: the response hit the output limit]"),
                 (Kind::Prompt, "next"),
                 (Kind::Note, "[cancelled]"),
+                (Kind::Note, "[paused until the harness runs again]"),
             ]
         );
     }

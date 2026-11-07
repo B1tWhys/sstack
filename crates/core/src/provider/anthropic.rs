@@ -146,7 +146,7 @@ fn to_message(chunk: &[Entry]) -> Option<ChatMessage> {
         Entry::User { text } => Some(ChatMessage::user(text.as_str())),
         Entry::Assistant(assistant) => assistant_message(assistant),
         Entry::ToolResult { .. } => Some(tool_message(chunk)),
-        Entry::TurnCancelled => None,
+        Entry::TurnCancelled | Entry::TurnParked => None,
     }
 }
 
@@ -386,6 +386,7 @@ mod tests {
         assert_eq!(responses[0].content, "ok");
         assert_eq!(responses[1].content, "Error: bad");
         assert!(tool_response(&Entry::TurnCancelled).is_none());
+        assert!(tool_response(&Entry::TurnParked).is_none());
     }
 
     #[test]

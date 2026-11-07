@@ -56,7 +56,7 @@ impl Status {
 impl Component for Status {
     fn update(&mut self, event: &Event) {
         match event {
-            Event::TurnStarted(_) => self.working = true,
+            Event::TurnStarted(_) | Event::TurnContinued => self.working = true,
             Event::TurnEnded(_) => self.working = false,
             _ => {}
         }
