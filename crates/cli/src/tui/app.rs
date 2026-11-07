@@ -38,12 +38,13 @@ const SIDEBAR_MIN_SCREEN_WIDTH: u16 = 80;
 
 /// The keys that work whatever the Session on screen is doing, even with a question open, so the
 /// person can always get away to something more urgent. Each is pressed with Alt, the one modifier
-/// vim leaves free.
+/// vim leaves free. Switching Sessions uses E and Y, after vim's Ctrl-E and Ctrl-Y, which scroll
+/// down and up.
 const GLOBAL_KEYS: [(char, Action); 5] = [
     ('c', Action::Interrupt),
     ('x', Action::Archive),
-    ('n', Action::NextSession),
-    ('p', Action::PreviousSession),
+    ('e', Action::NextSession),
+    ('y', Action::PreviousSession),
     ('g', Action::LongestWaiting),
 ];
 
@@ -1138,13 +1139,13 @@ mod tests {
     #[tokio::test]
     async fn keys_move_through_the_sidebar_and_wrap() {
         let mut h = with_stored(Arc::new(NeverResponds));
-        h.press('n');
+        h.press('e');
         assert_eq!(h.shown(), "older");
-        h.press('n');
+        h.press('e');
         assert_eq!(h.shown(), "younger");
-        h.press('p');
+        h.press('y');
         assert_eq!(h.shown(), "older");
-        h.press('p');
+        h.press('y');
         assert_eq!(h.shown(), "first");
     }
 
@@ -1177,7 +1178,7 @@ mod tests {
     #[tokio::test]
     async fn switching_to_a_stored_session_resumes_it() {
         let mut h = with_stored(Arc::new(NeverResponds));
-        h.press('n');
+        h.press('e');
         h.until(|event| matches!(event, Event::Resumed(entries) if !entries.is_empty()))
             .await;
         assert!(h.screen().contains("> older"));
@@ -1194,7 +1195,7 @@ mod tests {
             .adjust(|sessions| sessions.open_failure = Some("no keychain"))
             .call();
 
-        h.press('n');
+        h.press('e');
         assert_eq!(h.shown(), "first");
         assert!(
             h.screen()
@@ -1252,9 +1253,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let stored = vec![summary(&dir, "older", 100)];
         let mut h = start(dir, Arc::new(NeverResponds), stored);
-        h.press('n');
+        h.press('e');
         let away = h.shown();
-        h.press('p');
+        h.press('y');
         let event = Box::new(Event::Vim(VimEvent::Submitted("hello".into())));
         h.app.handle(Event::Session(away.clone(), event));
         assert_eq!(h.shown(), away);
@@ -1339,10 +1340,10 @@ mod tests {
         let mut h = harness(Arc::new(NeverResponds));
         h.enter_new();
         h.app.handle(Event::Paste("half typed".into()));
-        h.press('n');
+        h.press('e');
         assert_eq!(h.shown(), "first");
         assert!(!h.screen().contains("half typed"));
-        h.press('n');
+        h.press('e');
         assert!(h.screen().contains("half typed"));
     }
 
@@ -1366,7 +1367,7 @@ mod tests {
         let screen = h.screen_of(WIDE);
         assert!(screen.contains("+ one"), "{screen}");
 
-        h.press('n');
+        h.press('e');
         assert_eq!(h.shown(), "first");
         let screen = h.screen_of(WIDE);
         assert!(!screen.contains("+ one"), "{screen}");
@@ -1411,10 +1412,10 @@ mod tests {
     async fn the_keys_for_getting_away_work_with_a_question_open() {
         let mut h = scripted(vec![Ok(bash_call("touch ran"))]);
         h.enter("/new");
-        h.press('n');
+        h.press('e');
         h.enter("go");
         h.until(|event| matches!(event, Event::Approval(_))).await;
-        h.press('n');
+        h.press('e');
         assert_eq!(h.shown(), "new1");
     }
 
@@ -1439,8 +1440,11 @@ mod tests {
 
     #[test]
     fn only_control_keys_are_global() {
-        assert_eq!(global_action(alt('n')), Some(Action::NextSession));
-        assert_eq!(global_action(key(KeyCode::Char('n'))), None);
+        assert_eq!(global_action(alt('e')), Some(Action::NextSession));
+        assert_eq!(global_action(alt('y')), Some(Action::PreviousSession));
+        assert_eq!(global_action(alt('n')), None);
+        assert_eq!(global_action(alt('p')), None);
+        assert_eq!(global_action(key(KeyCode::Char('e'))), None);
         assert_eq!(global_action(alt('z')), None);
         assert_eq!(global_action(ctrl('n')), None);
         assert_eq!(global_action(key(KeyCode::Enter)), None);
@@ -1539,7 +1543,7 @@ mod tests {
     #[tokio::test]
     async fn the_session_on_screen_survives_removing_one_stored_before_it() {
         let mut h = with_stored(Arc::new(NeverResponds));
-        h.press('p');
+        h.press('y');
         assert_eq!(h.shown(), "younger");
         h.press('x');
         assert_eq!(h.shown(), "older");

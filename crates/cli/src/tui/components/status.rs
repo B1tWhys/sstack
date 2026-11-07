@@ -46,7 +46,7 @@ impl Status {
             .as_ref()
             .map_or_else(String::new, |others| format!(" | {others}"));
         format!(
-            "session {} | {state}{others} | {stop} | Alt-N/P switch | Alt-G next | \
+            "session {} | {state}{others} | {stop} | Alt-E/Y switch | Alt-G next | \
              PgUp/PgDn scroll | /new /vim /rebuild /quit",
             self.session
         )
@@ -77,6 +77,7 @@ mod tests {
     fn shows_the_session_and_whether_a_turn_is_running() {
         let mut status = Status::new("42".into());
         assert!(status.text().starts_with("session 42 | ready | Alt-C quit"));
+        assert!(status.text().contains("Alt-E/Y switch"));
 
         status.update(&Event::TurnStarted("go".into()));
         assert!(status.text().contains("working | Alt-C cancel"));
