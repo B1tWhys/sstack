@@ -18,8 +18,11 @@ use crate::session::{AssistantEntry, Entry, ProviderPayload, StopReason, ToolCal
 const PROVIDER: &str = "anthropic";
 /// The most output tokens to allow in one response.
 const MAX_OUTPUT_TOKENS: u32 = 64_000;
-/// Asks the API to retry a refused request on another model.
-const FALLBACK_BETA: (&str, &str) = ("anthropic-beta", "server-side-fallback-2026-07-01");
+/// Turns on retrying refused requests on another model, and tolerating outdated thinking.
+const BETA_FEATURES: (&str, &str) = (
+    "anthropic-beta",
+    "server-side-fallback-2026-07-01,thinking-binding-controls-2026-08-01",
+);
 
 /// Lets a Session be run by Claude models.
 pub struct AnthropicProvider {
@@ -77,9 +80,15 @@ fn chat_options(effort: Effort) -> ChatOptions {
         .with_capture_content(true)
         .with_capture_reasoning_content(true)
         .with_capture_tool_calls(true)
-        .with_extra_headers(FALLBACK_BETA)
+        .with_extra_headers(BETA_FEATURES)
         .with_extra_body(json!({
-            "thinking": {"type": "adaptive", "display": "summarized"},
+            "thinking": {
+                "type": "adaptive",
+                "display": "summarized",
+                // Thinking is tied to the system prompt and tools, which a Rebuild can change.
+                // Losing the old thinking is better than the Session failing to resume.
+                "block_binding": {"prefix_mismatch_behavior": "drop_block"},
+            },
             "fallbacks": "default",
         }))
 }
@@ -576,7 +585,9 @@ mod tests {
 
         let request = server.join().unwrap().to_lowercase();
         assert!(request.contains("x-api-key: test-key"));
-        assert!(request.contains("anthropic-beta: server-side-fallback-2026-07-01"));
+        assert!(request.contains("server-side-fallback-2026-07-01"));
+        assert!(request.contains("thinking-binding-controls-2026-08-01"));
+        assert!(request.contains("\"prefix_mismatch_behavior\":\"drop_block\""));
         assert!(request.contains("\"fallbacks\":\"default\""));
         assert!(request.contains("\"display\":\"summarized\""));
         assert!(request.contains("\"cache_control\""));
