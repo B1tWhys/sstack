@@ -226,17 +226,17 @@ mod tests {
 
     #[test]
     fn typing_goes_in_at_the_cursor() {
-        let mut editor = editor("hé|o");
+        let mut editor = editor("h\u{e9}|o");
         editor.insert('l');
         editor.insert_str("l");
-        assert_eq!(shown(&editor), "héll|o");
+        assert_eq!(shown(&editor), "h\u{e9}ll|o");
     }
 
     #[test]
     fn the_cursor_moves_by_character_without_leaving_the_text() {
-        assert_eq!(after("hé|", Editor::move_left), "h|é");
+        assert_eq!(after("h\u{e9}|", Editor::move_left), "h|\u{e9}");
         assert_eq!(after("|hi", Editor::move_left), "|hi");
-        assert_eq!(after("h|é", Editor::move_right), "hé|");
+        assert_eq!(after("h|\u{e9}", Editor::move_right), "h\u{e9}|");
         assert_eq!(after("hi|", Editor::move_right), "hi|");
     }
 
@@ -274,9 +274,9 @@ mod tests {
 
     #[test]
     fn deleting_takes_one_character_either_side() {
-        assert_eq!(after("hé|o", Editor::delete_left), "h|o");
+        assert_eq!(after("h\u{e9}|o", Editor::delete_left), "h|o");
         assert_eq!(after("|ho", Editor::delete_left), "|ho");
-        assert_eq!(after("h|éo", Editor::delete_right), "h|o");
+        assert_eq!(after("h|\u{e9}o", Editor::delete_right), "h|o");
         assert_eq!(after("ho|", Editor::delete_right), "ho|");
     }
 

@@ -256,12 +256,12 @@ mod tests {
 
         let shown = drawn(&sidebar(rows, 1, 6), 6);
 
-        assert_eq!(shown[0], "sessions                         │");
-        assert_eq!(shown[1], "  ! add land tool     blocked 14m│");
-        assert_eq!(shown[2], "> + scroll transcript done       │");
-        assert_eq!(shown[3], "  x update docs       failed     │");
-        assert_eq!(shown[4], "  * fix the approva.. working    │");
-        assert_eq!(shown[5], "    old               idle       │");
+        assert_eq!(shown[0], "sessions                         \u{2502}");
+        assert_eq!(shown[1], "  ! add land tool     blocked 14m\u{2502}");
+        assert_eq!(shown[2], "> + scroll transcript done       \u{2502}");
+        assert_eq!(shown[3], "  x update docs       failed     \u{2502}");
+        assert_eq!(shown[4], "  * fix the approva.. working    \u{2502}");
+        assert_eq!(shown[5], "    old               idle       \u{2502}");
     }
 
     #[test]
@@ -332,6 +332,10 @@ mod tests {
         assert_eq!(fit("one more than 10", 10), "one more..");
         assert_eq!(fit("two\nlines", 10), "two");
         assert_eq!(fit("", 10), "");
-        assert_eq!(fit("日本語のタイトルです", 10), "日本語の..");
+        let two_columns_wide = "\u{65e5}";
+        assert_eq!(
+            fit(&two_columns_wide.repeat(10), 10),
+            format!("{}..", two_columns_wide.repeat(4))
+        );
     }
 }

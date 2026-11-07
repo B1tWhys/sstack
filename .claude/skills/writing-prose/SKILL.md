@@ -66,7 +66,7 @@ Terms in `GLOSSARY.md` beat these rules, so Harness and Turn stay as they are th
 25. **Active voice.** Name the actor: "queries are validated" becomes "the compiler validates queries". Keep the passive only when the actor is unknown or doesn't matter.
 26. **Adverbs.** Use a stronger verb or the number: "significantly improves" becomes the measured delta.
 27. **Mannered prose.** Replace aphorisms, rhetorical fragments, personified code ("the plan holds it") and figurative verbs ("rides along") with the literal phrase. "A dial worth turning" becomes "a parameter worth varying".
-28. **Over-compression.** Write whole sentences with their articles and verbs, and spell out arrows and abbreviations. "Parser rejects bad date → exit 2, no write" becomes "The parser rejects a bad date, exits with code 2, and writes nothing."
+28. **Over-compression.** Write whole sentences with their articles and verbs, and spell out arrows and abbreviations. "Parser rejects bad date -> exit 2, no write" becomes "The parser rejects a bad date, exits with code 2, and writes nothing."
 29. **One reading.** Make every "it", "they" and "this" point at one obvious thing, repeating the noun when in doubt. Keep "only" and "not" next to the word they change.
 30. **Rhythm and view.** Mix sentence lengths: short ones state a point, and longer ones carry a fact with its condition. Where the text weighs a trade-off, as an ADR does, say what you make of it.
 
@@ -74,7 +74,7 @@ Terms in `GLOSSARY.md` beat these rules, so Harness and Turn stay as they are th
 
 Before:
 
-> Additionally, Rebuild serves as a crucial mechanism for seamlessly leveraging your latest changes — ensuring that the Session is preserved in the event that the build is successful.
+> Additionally, Rebuild serves as a crucial mechanism for seamlessly leveraging your latest changes -- ensuring that the Session is preserved in the event that the build is successful.
 
 After:
 

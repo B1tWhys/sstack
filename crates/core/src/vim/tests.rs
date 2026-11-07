@@ -187,11 +187,11 @@ mod real {
     #[tokio::test]
     async fn the_cursor_is_a_byte_offset_across_lines_and_multibyte_text() {
         let mut vim = Harness::new().await;
-        vim.typed("é\n日本").await;
+        vim.typed("\u{e9}\n\u{65e5}\u{672c}").await;
         let state = vim.press("gg", |state| state.cursor == 0).await;
-        assert_eq!(state.text, "é\n日本");
+        assert_eq!(state.text, "\u{e9}\n\u{65e5}\u{672c}");
         let state = vim.press("j$", |state| state.cursor > 0).await;
-        assert_eq!(state.cursor, "é\n日".len());
+        assert_eq!(state.cursor, "\u{e9}\n\u{65e5}".len());
     }
 
     #[tokio::test]
@@ -330,7 +330,7 @@ mod real {
     #[tokio::test]
     async fn charwise_selection_is_reported_in_bytes() {
         let mut vim = Harness::new().await;
-        vim.typed("aé日b").await;
+        vim.typed("a\u{e9}\u{65e5}b").await;
         let state = vim
             .press("0lvl", |state| {
                 state.mode == VimMode::Visual && state.cursor == 3

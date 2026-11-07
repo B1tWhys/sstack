@@ -3,6 +3,11 @@ default_stages: [pre-commit]
 fail_fast: true
 
 repos:
+  - repo: https://github.com/B1tWhys/no-emoji.git
+    rev: "1.0"
+    hooks:
+      - id: no-emoji
+
   - repo: local
     hooks:
       - id: rustfmt

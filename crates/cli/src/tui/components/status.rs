@@ -44,10 +44,10 @@ impl Status {
         let others = self
             .others
             .as_ref()
-            .map_or_else(String::new, |others| format!(" · {others}"));
+            .map_or_else(String::new, |others| format!(" | {others}"));
         format!(
-            "session {} · {state}{others} · {stop} · Alt-N/P switch · Alt-G next · \
-             PgUp/PgDn scroll · /new /vim /rebuild /quit",
+            "session {} | {state}{others} | {stop} | Alt-N/P switch | Alt-G next | \
+             PgUp/PgDn scroll | /new /vim /rebuild /quit",
             self.session
         )
     }
@@ -76,18 +76,18 @@ mod tests {
     #[test]
     fn shows_the_session_and_whether_a_turn_is_running() {
         let mut status = Status::new("42".into());
-        assert!(status.text().starts_with("session 42 · ready · Alt-C quit"));
+        assert!(status.text().starts_with("session 42 | ready | Alt-C quit"));
 
         status.update(&Event::TurnStarted("go".into()));
-        assert!(status.text().contains("working · Alt-C cancel"));
+        assert!(status.text().contains("working | Alt-C cancel"));
 
         status.set_others(Some("1 blocked".into()));
-        assert!(status.text().contains("working · 1 blocked · Alt-C"));
+        assert!(status.text().contains("working | 1 blocked | Alt-C"));
         status.set_others(None);
 
         status.update(&Event::Resize);
         status.update(&Event::TurnEnded(Ok(TurnEnd::Finished)));
         let shown = screen(30, 1, |frame| status.render(frame, frame.area()));
-        assert_eq!(shown, ["session 42 · ready · Alt-C qui"]);
+        assert_eq!(shown, ["session 42 | ready | Alt-C qui"]);
     }
 }

@@ -264,7 +264,7 @@ mod tests {
         let mut prompt = Prompt::default();
         type_into(&mut prompt, "hi");
         let (shown, cursor) = draw(&prompt, 10);
-        assert_eq!(shown[1], "│> hi    │");
+        assert_eq!(shown[1], "\u{2502}> hi    \u{2502}");
         assert_eq!(cursor, (5, 1));
     }
 
@@ -278,7 +278,12 @@ mod tests {
 
         assert_eq!(
             shown[1..5],
-            ["│> abcd│", "│  efgh│", "│  ij  │", "│  k   │"]
+            [
+                "\u{2502}> abcd\u{2502}",
+                "\u{2502}  efgh\u{2502}",
+                "\u{2502}  ij  \u{2502}",
+                "\u{2502}  k   \u{2502}"
+            ]
         );
         assert_eq!(cursor, (4, 4));
     }
@@ -295,11 +300,17 @@ mod tests {
     #[test]
     fn wide_characters_wrap_whole() {
         let mut prompt = Prompt::default();
-        type_into(&mut prompt, "a日本");
+        type_into(&mut prompt, "a\u{65e5}\u{672c}");
         press(&mut prompt, &[key(KeyCode::Home)]);
         let (shown, cursor) = draw(&prompt, 8);
         // The test buffer shows the second cell of each wide character as a space.
-        assert_eq!(shown[1..3], ["│> a日  │", "│  本   │"]);
+        assert_eq!(
+            shown[1..3],
+            [
+                "\u{2502}> a\u{65e5}  \u{2502}",
+                "\u{2502}  \u{672c}   \u{2502}"
+            ]
+        );
         assert_eq!(cursor, (3, 1));
     }
 
@@ -308,6 +319,6 @@ mod tests {
         let mut prompt = Prompt::default();
         type_into(&mut prompt, "abcdefghij");
         let shown = screen(8, 3, |frame| prompt.render(frame, frame.area()));
-        assert_eq!(shown[1], "│  ij  │");
+        assert_eq!(shown[1], "\u{2502}  ij  \u{2502}");
     }
 }

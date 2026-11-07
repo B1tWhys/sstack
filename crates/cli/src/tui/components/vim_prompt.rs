@@ -405,7 +405,7 @@ mod tests {
         prompt.update(&Event::Vim(VimEvent::State(shown)));
         let (screen, cursor) = draw(&prompt, 30, 4);
         assert!(screen[0].contains("NORMAL"), "{screen:?}");
-        assert_eq!(screen[1], "│> hello                     │");
+        assert_eq!(screen[1], "\u{2502}> hello                     \u{2502}");
         assert_eq!(cursor, (8, 1));
     }
 
@@ -414,9 +414,9 @@ mod tests {
         let (prompt, _events) = idle_prompt();
         assert_eq!(prompt.height(30), 3);
         let (screen, cursor) = draw(&prompt, 30, 3);
-        assert!(screen[0].starts_with('┌'), "{screen:?}");
-        assert_eq!(screen[1], "│>                           │");
-        assert!(screen[2].starts_with('└'), "{screen:?}");
+        assert!(screen[0].starts_with('\u{250c}'), "{screen:?}");
+        assert_eq!(screen[1], "\u{2502}>                           \u{2502}");
+        assert!(screen[2].starts_with('\u{2514}'), "{screen:?}");
         assert_eq!(cursor, (3, 1));
     }
 
@@ -429,7 +429,7 @@ mod tests {
         ))));
         assert_eq!(prompt.height(30), 5);
         let (screen, cursor) = draw(&prompt, 30, 4);
-        assert_eq!(screen[2], "│  three                     │");
+        assert_eq!(screen[2], "\u{2502}  three                     \u{2502}");
         assert_eq!(cursor, (8, 2));
     }
 
@@ -441,10 +441,10 @@ mod tests {
         prompt.update(&Event::Vim(VimEvent::State(shown)));
         assert_eq!(prompt.height(10), 6);
         let (screen, cursor) = draw(&prompt, 10, 6);
-        assert_eq!(screen[1], "│1   abcd│");
-        assert_eq!(screen[2], "│    efgh│");
-        assert_eq!(screen[3], "│    ij  │");
-        assert_eq!(screen[4], "│  1 k   │");
+        assert_eq!(screen[1], "\u{2502}1   abcd\u{2502}");
+        assert_eq!(screen[2], "\u{2502}    efgh\u{2502}");
+        assert_eq!(screen[3], "\u{2502}    ij  \u{2502}");
+        assert_eq!(screen[4], "\u{2502}  1 k   \u{2502}");
         assert_eq!(cursor, (6, 4));
     }
 
@@ -476,8 +476,11 @@ mod tests {
         });
         prompt.update(&Event::Vim(VimEvent::State(shown)));
         let (screen, cursor) = draw(&prompt, 30, 3);
-        assert_eq!(screen[1], "│> text                      │");
-        assert_eq!(screen[2], "└:wq─────────────────────────┘");
+        assert_eq!(screen[1], "\u{2502}> text                      \u{2502}");
+        assert_eq!(
+            screen[2],
+            format!("\u{2514}:wq{}\u{2518}", "\u{2500}".repeat(25))
+        );
         assert_eq!(cursor, (3, 2));
     }
 
@@ -488,7 +491,10 @@ mod tests {
         shown.message = Some("E492: nope".to_owned());
         prompt.update(&Event::Vim(VimEvent::State(shown)));
         let (screen, cursor) = draw(&prompt, 30, 3);
-        assert_eq!(screen[2], "└E492: nope──────────────────┘");
+        assert_eq!(
+            screen[2],
+            format!("\u{2514}E492: nope{}\u{2518}", "\u{2500}".repeat(18))
+        );
         assert_eq!(cursor, (7, 1));
     }
 
@@ -586,7 +592,7 @@ mod tests {
             type_into(&mut prompt, "0gjx");
             until_text(&mut prompt, &mut events, &"x".repeat(29)).await;
             let (screen, _) = draw(&prompt, 26, 5);
-            assert_eq!(screen[1], format!("│  1 {}│", "x".repeat(20)));
+            assert_eq!(screen[1], format!("\u{2502}  1 {}\u{2502}", "x".repeat(20)));
             assert_eq!(prompt.state.cursor, 20);
         }
 

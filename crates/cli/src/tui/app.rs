@@ -867,7 +867,7 @@ mod tests {
         let screen = h.screen();
         assert!(screen.contains("> hello"), "{screen}");
         assert!(screen.contains("hello back"), "{screen}");
-        assert!(screen.contains("session first · ready"), "{screen}");
+        assert!(screen.contains("session first | ready"), "{screen}");
         assert_eq!(h.session().len(), 2);
     }
 
@@ -883,7 +883,7 @@ mod tests {
         let screen = h.screen();
         assert!(screen.contains("> hello"), "{screen}");
         assert!(screen.contains("hello back"), "{screen}");
-        assert!(screen.contains("session first · ready"), "{screen}");
+        assert!(screen.contains("session first | ready"), "{screen}");
     }
 
     #[tokio::test]
@@ -956,8 +956,8 @@ mod tests {
         let rows: Vec<&str> = screen.lines().collect();
         assert_eq!(rows.len(), 12);
         assert!(rows[5].starts_with("session first"), "{screen}");
-        assert!(rows[6].starts_with("┌"), "{screen}");
-        assert!(rows[11].starts_with("└"), "{screen}");
+        assert!(rows[6].starts_with("\u{250c}"), "{screen}");
+        assert!(rows[11].starts_with("\u{2514}"), "{screen}");
 
         h.app.handle(Event::Paste("\n".repeat(20)));
         assert!(
