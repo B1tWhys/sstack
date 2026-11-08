@@ -80,7 +80,8 @@ fn answer(code: KeyCode) -> Option<bool> {
 mod tests {
     use super::*;
     use crate::tui::event::Reply;
-    use crate::tui::test_support::{key, screen};
+    use crate::tui::test_support::{drawn, key, screen};
+    use insta::assert_snapshot;
     use sstack::agent::TurnEnd;
     use tokio::sync::oneshot;
 
@@ -139,8 +140,8 @@ mod tests {
         assert!(empty.iter().all(String::is_empty));
 
         let _answer = ask(&mut approval, "ls");
-        let shown = screen(30, 7, |frame| approval.render(frame, frame.area()));
-        assert!(shown.join("\n").contains("Run `ls`? [y/N]"), "{shown:#?}");
+        let shown = drawn(30, 7, |frame| approval.render(frame, frame.area()));
+        assert_snapshot!(shown.backend());
     }
 
     #[test]
@@ -150,24 +151,15 @@ mod tests {
             &mut approval,
             "cargo nextest run --workspace --no-default-features",
         );
-        let shown = screen(30, 12, |frame| approval.render(frame, frame.area()));
-        let text = shown.join("\n");
-        assert!(text.contains("[y/N]"), "{shown:#?}");
-        assert!(text.contains(BOTTOM_LEFT), "{shown:#?}");
+        let shown = drawn(30, 12, |frame| approval.render(frame, frame.area()));
+        assert_snapshot!(shown.backend());
     }
 
     #[test]
     fn the_question_never_grows_past_the_screen() {
         let mut approval = Approval::default();
         let _answer = ask(&mut approval, &"x ".repeat(200));
-        let shown = screen(30, 6, |frame| approval.render(frame, frame.area()));
-        assert!(shown[0].contains(TOP_LEFT), "{shown:#?}");
-        assert!(shown[5].contains(BOTTOM_LEFT), "{shown:#?}");
+        let shown = drawn(30, 6, |frame| approval.render(frame, frame.area()));
+        assert_snapshot!(shown.backend());
     }
-
-    /// The corner a question's border starts at, so its top edge is on screen.
-    const TOP_LEFT: char = '\u{250c}';
-
-    /// The corner a question's border ends at, so its bottom edge is on screen.
-    const BOTTOM_LEFT: char = '\u{2514}';
 }

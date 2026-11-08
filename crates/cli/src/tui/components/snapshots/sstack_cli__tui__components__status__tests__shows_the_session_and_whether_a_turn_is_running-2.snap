@@ -1,0 +1,5 @@
+---
+source: crates/cli/src/tui/components/status.rs
+expression: status.text()
+---
+session 42 | working | Alt-C cancel | Alt-E/Y switch | Alt-G next | PgUp/PgDn scroll | /new /vim /rebuild /quit

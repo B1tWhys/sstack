@@ -1,0 +1,8 @@
+---
+source: crates/cli/src/tui/components/prompt.rs
+expression: shown
+---
+"┌──────┐"
+"│> a日 │" Hidden by multi-width symbols: [(5, " ")]
+"│  本  │" Hidden by multi-width symbols: [(4, " ")]
+"└──────┘"

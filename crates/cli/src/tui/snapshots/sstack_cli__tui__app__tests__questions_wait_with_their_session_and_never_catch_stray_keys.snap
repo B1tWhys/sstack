@@ -1,0 +1,16 @@
+---
+source: crates/cli/src/tui/app.rs
+expression: h.drawn_at(WIDE)
+---
+"sessions                         │                                                                  "
+">  new session            idle Ns│                                                                  "
+" ! go                  blocked Ns│                                                                  "
+"                                 │                                                                  "
+"                                 │                                                                  "
+"                                 │                                                                  "
+"                                 │                                                                  "
+"                                 │                                                                  "
+"                                 │session new1 | ready | Alt-C quit | Alt-E/Y switch | Alt-G next | "
+"                                 │┌────────────────────────────────────────────────────────────────┐"
+"                                 ││>                                                               │"
+"                                 │└────────────────────────────────────────────────────────────────┘"

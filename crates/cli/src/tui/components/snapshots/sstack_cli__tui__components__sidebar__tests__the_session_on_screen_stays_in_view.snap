@@ -1,0 +1,7 @@
+---
+source: crates/cli/src/tui/components/sidebar.rs
+expression: "shown(&sidebar, 3)"
+---
+"sessions                         │"
+"   t                         idle│"
+">  t                         idle│"

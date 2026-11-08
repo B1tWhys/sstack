@@ -1,0 +1,16 @@
+---
+source: crates/cli/src/tui/app.rs
+expression: h.drawn_at(NARROW)
+---
+"                                                            "
+"                                                            "
+"                                                            "
+"                                                            "
+"                                                            "
+"session first | ready | Alt-C quit | Alt-E/Y switch | Alt-G "
+"┌──────────────────────────────────────────────────────────┐"
+"│> word word word word word word word word word word word w│"
+"│  ord word word word word word word word word word word wo│"
+"│  rd word word word word word word word word word word wor│"
+"│  d word word word word word word                         │"
+"└──────────────────────────────────────────────────────────┘"

@@ -1,0 +1,8 @@
+---
+source: crates/cli/src/tui/components/transcript.rs
+expression: screen.backend()
+---
+"earlier             "
+"                    "
+"> two               "
+"lines               "

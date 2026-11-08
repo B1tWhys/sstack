@@ -70,25 +70,25 @@ impl Component for Status {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::test_support::screen;
+    use crate::tui::test_support::drawn;
+    use insta::assert_snapshot;
     use sstack::agent::TurnEnd;
 
     #[test]
     fn shows_the_session_and_whether_a_turn_is_running() {
         let mut status = Status::new("42".into());
-        assert!(status.text().starts_with("session 42 | ready | Alt-C quit"));
-        assert!(status.text().contains("Alt-E/Y switch"));
+        assert_snapshot!(status.text());
 
         status.update(&Event::TurnStarted("go".into()));
-        assert!(status.text().contains("working | Alt-C cancel"));
+        assert_snapshot!(status.text());
 
         status.set_others(Some("1 blocked".into()));
-        assert!(status.text().contains("working | 1 blocked | Alt-C"));
+        assert_snapshot!(status.text());
         status.set_others(None);
 
         status.update(&Event::Resize);
         status.update(&Event::TurnEnded(Ok(TurnEnd::Finished)));
-        let shown = screen(30, 1, |frame| status.render(frame, frame.area()));
-        assert_eq!(shown, ["session 42 | ready | Alt-C qui"]);
+        let shown = drawn(30, 1, |frame| status.render(frame, frame.area()));
+        assert_snapshot!(shown.backend());
     }
 }

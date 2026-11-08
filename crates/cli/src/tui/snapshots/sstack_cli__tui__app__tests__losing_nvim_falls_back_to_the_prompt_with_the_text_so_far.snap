@@ -1,0 +1,16 @@
+---
+source: crates/cli/src/tui/app.rs
+expression: h.drawn_at(NARROW)
+---
+"typing into the plain prompt: nvim took too long to start.  "
+"/vim tries again                                            "
+"                                                            "
+"                                                            "
+"                                                            "
+"                                                            "
+"                                                            "
+"                                                            "
+"session first | ready | Alt-C quit | Alt-E/Y switch | Alt-G "
+"┌──────────────────────────────────────────────────────────┐"
+"│> half typed                                              │"
+"└──────────────────────────────────────────────────────────┘"

@@ -1,0 +1,6 @@
+---
+source: crates/cli/src/tui/components/sidebar.rs
+expression: "shown(&sidebar, 2)"
+---
+"building                         │"
+">- t                       parked│"

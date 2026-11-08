@@ -222,7 +222,8 @@ impl Component for Transcript {
 mod tests {
     use super::*;
     use crate::tui::test_support::{bash_call, reply};
-    use crate::tui::test_support::{key, screen};
+    use crate::tui::test_support::{drawn, key, screen};
+    use insta::assert_snapshot;
     use sstack::agent::ToolCallSummary;
     use sstack::session::StopReason;
 
@@ -337,8 +338,8 @@ mod tests {
             Event::Agent(AgentEvent::Text("earlier".into())),
             Event::TurnStarted("two\nlines".into()),
         ]);
-        let screen = screen(20, 4, |frame| shown.render(frame, frame.area()));
-        assert_eq!(screen, ["earlier", "", "> two", "lines"]);
+        let screen = drawn(20, 4, |frame| shown.render(frame, frame.area()));
+        assert_snapshot!(screen.backend());
     }
 
     #[test]

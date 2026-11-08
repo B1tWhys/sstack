@@ -305,14 +305,14 @@ impl Component for VimPrompt {
 
 #[cfg(test)]
 mod tests {
-    use ratatui::Terminal;
+    use insta::assert_snapshot;
     use ratatui::backend::TestBackend;
     use sstack::vim::{VimCmdline, VimFailure};
     use tokio::sync::mpsc;
 
     use super::*;
     use crate::tui::event::EventReceiver;
-    use crate::tui::test_support::{alt, ctrl, key, rows};
+    use crate::tui::test_support::{alt, ctrl, drawn, key};
 
     /// Returns a press of `code` with `modifiers` held.
     fn with(modifiers: KeyModifiers, code: KeyCode) -> KeyEvent {
@@ -341,13 +341,10 @@ mod tests {
     }
 
     /// Draws `prompt` in `width` by `height`, returning the screen and cursor.
-    fn draw(prompt: &VimPrompt, width: u16, height: u16) -> (Vec<String>, (u16, u16)) {
-        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-        terminal
-            .draw(|frame| prompt.render(frame, frame.area()))
-            .unwrap();
+    fn draw(prompt: &VimPrompt, width: u16, height: u16) -> (TestBackend, (u16, u16)) {
+        let mut terminal = drawn(width, height, |frame| prompt.render(frame, frame.area()));
         let cursor = terminal.get_cursor_position().unwrap();
-        (rows(&terminal), (cursor.x, cursor.y))
+        (terminal.backend().clone(), (cursor.x, cursor.y))
     }
 
     #[test]
@@ -405,8 +402,7 @@ mod tests {
         let shown = state("hello", VimMode::Normal);
         prompt.update(&Event::Vim(VimEvent::State(shown)));
         let (screen, cursor) = draw(&prompt, 30, 4);
-        assert!(screen[0].contains("NORMAL"), "{screen:?}");
-        assert_eq!(screen[1], "\u{2502}> hello                     \u{2502}");
+        assert_snapshot!(screen);
         assert_eq!(cursor, (8, 1));
     }
 
@@ -415,9 +411,7 @@ mod tests {
         let (prompt, _events) = idle_prompt();
         assert_eq!(prompt.height(30), 3);
         let (screen, cursor) = draw(&prompt, 30, 3);
-        assert!(screen[0].starts_with('\u{250c}'), "{screen:?}");
-        assert_eq!(screen[1], "\u{2502}>                           \u{2502}");
-        assert!(screen[2].starts_with('\u{2514}'), "{screen:?}");
+        assert_snapshot!(screen);
         assert_eq!(cursor, (3, 1));
     }
 
@@ -430,7 +424,7 @@ mod tests {
         ))));
         assert_eq!(prompt.height(30), 5);
         let (screen, cursor) = draw(&prompt, 30, 4);
-        assert_eq!(screen[2], "\u{2502}  three                     \u{2502}");
+        assert_snapshot!(screen);
         assert_eq!(cursor, (8, 2));
     }
 
@@ -442,10 +436,7 @@ mod tests {
         prompt.update(&Event::Vim(VimEvent::State(shown)));
         assert_eq!(prompt.height(10), 6);
         let (screen, cursor) = draw(&prompt, 10, 6);
-        assert_eq!(screen[1], "\u{2502}1   abcd\u{2502}");
-        assert_eq!(screen[2], "\u{2502}    efgh\u{2502}");
-        assert_eq!(screen[3], "\u{2502}    ij  \u{2502}");
-        assert_eq!(screen[4], "\u{2502}  1 k   \u{2502}");
+        assert_snapshot!(screen);
         assert_eq!(cursor, (6, 4));
     }
 
@@ -455,11 +446,8 @@ mod tests {
         let mut shown = state("abc\ndef", VimMode::Visual);
         shown.selection = vec![1..2, 4..5];
         prompt.update(&Event::Vim(VimEvent::State(shown)));
-        let mut terminal = Terminal::new(TestBackend::new(30, 5)).unwrap();
-        terminal
-            .draw(|frame| prompt.render(frame, frame.area()))
-            .unwrap();
-        let buffer = terminal.backend().buffer();
+        let (screen, _) = draw(&prompt, 30, 5);
+        let buffer = screen.buffer();
         let is_selected = |x, y| buffer[(x, y)].bg == theme::SELECTION.bg.unwrap();
         assert!(is_selected(4, 1));
         assert!(is_selected(3, 2));
@@ -477,11 +465,7 @@ mod tests {
         });
         prompt.update(&Event::Vim(VimEvent::State(shown)));
         let (screen, cursor) = draw(&prompt, 30, 3);
-        assert_eq!(screen[1], "\u{2502}> text                      \u{2502}");
-        assert_eq!(
-            screen[2],
-            format!("\u{2514}:wq{}\u{2518}", "\u{2500}".repeat(25))
-        );
+        assert_snapshot!(screen);
         assert_eq!(cursor, (3, 2));
     }
 
@@ -492,10 +476,7 @@ mod tests {
         shown.message = Some("E492: nope".to_owned());
         prompt.update(&Event::Vim(VimEvent::State(shown)));
         let (screen, cursor) = draw(&prompt, 30, 3);
-        assert_eq!(
-            screen[2],
-            format!("\u{2514}E492: nope{}\u{2518}", "\u{2500}".repeat(18))
-        );
+        assert_snapshot!(screen);
         assert_eq!(cursor, (7, 1));
     }
 
@@ -586,7 +567,7 @@ mod tests {
             type_into(&mut prompt, "0gjx");
             until_text(&mut prompt, &mut events, &"x".repeat(29)).await;
             let (screen, _) = draw(&prompt, 26, 5);
-            assert_eq!(screen[1], format!("\u{2502}  1 {}\u{2502}", "x".repeat(20)));
+            assert_snapshot!(screen);
             assert_eq!(prompt.state.cursor, 20);
         }
 

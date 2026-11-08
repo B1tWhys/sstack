@@ -1,0 +1,7 @@
+---
+source: crates/cli/src/tui/components/vim_prompt.rs
+expression: screen
+---
+"┌──────────────────── INSERT ┐"
+"│>                           │"
+"└────────────────────────────┘"

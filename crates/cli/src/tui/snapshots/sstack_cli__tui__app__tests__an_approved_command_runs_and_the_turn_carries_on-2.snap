@@ -1,0 +1,16 @@
+---
+source: crates/cli/src/tui/app.rs
+expression: h.drawn_at(NARROW)
+---
+"                                                            "
+"> go                                                        "
+"                                                            "
+"[bash] {"command":"touch ran"}                              "
+"all done                                                    "
+"                                                            "
+"                                                            "
+"                                                            "
+"session first | ready | Alt-C quit | Alt-E/Y switch | Alt-G "
+"┌──────────────────────────────────────────────────────────┐"
+"│>                                                         │"
+"└──────────────────────────────────────────────────────────┘"

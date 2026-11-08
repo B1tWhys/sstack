@@ -1,0 +1,5 @@
+---
+source: crates/cli/src/tui/components/status.rs
+expression: shown.backend()
+---
+"session 42 | ready | Alt-C qui"

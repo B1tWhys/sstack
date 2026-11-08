@@ -1,0 +1,10 @@
+---
+source: crates/cli/src/tui/components/approval.rs
+expression: shown.backend()
+---
+"      ┌ Approve shell c┐      "
+"      │Run `x x x x x x│      "
+"      │x x x x x x x x │      "
+"      │x x x x x x x x │      "
+"      │x x x x x x x x │      "
+"      └────────────────┘      "

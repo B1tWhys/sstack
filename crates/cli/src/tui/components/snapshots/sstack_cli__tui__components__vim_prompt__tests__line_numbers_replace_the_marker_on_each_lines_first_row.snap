@@ -1,0 +1,10 @@
+---
+source: crates/cli/src/tui/components/vim_prompt.rs
+expression: screen
+---
+"┌ NORMAL ┐"
+"│1   abcd│"
+"│    efgh│"
+"│    ij  │"
+"│  1 k   │"
+"└────────┘"

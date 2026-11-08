@@ -1,0 +1,8 @@
+---
+source: crates/cli/src/tui/components/prompt.rs
+expression: shown
+---
+"┌──────┐"
+"│> abcd│"
+"│      │"
+"└──────┘"

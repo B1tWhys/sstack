@@ -1,0 +1,16 @@
+---
+source: crates/cli/src/tui/app.rs
+expression: h.drawn_at(WIDE)
+---
+"sessions                         │                                                                  "
+"   older                  idle 3m│                                                                  "
+"   younger                idle 1m│                                                                  "
+">  new session            idle Ns│                                                                  "
+"                                 │                                                                  "
+"                                 │                                                                  "
+"                                 │                                                                  "
+"                                 │                                                                  "
+"                                 │session first | ready | Alt-C quit | Alt-E/Y switch | Alt-G next |"
+"                                 │┌────────────────────────────────────────────────────────────────┐"
+"                                 ││>                                                               │"
+"                                 │└────────────────────────────────────────────────────────────────┘"

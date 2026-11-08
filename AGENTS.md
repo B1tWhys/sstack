@@ -5,7 +5,7 @@ Use the vocabulary in `GLOSSARY.md`. Design decisions are in `docs/adr/`.
 ## Setup
 
 ```sh
-cargo install --locked cargo-llvm-cov cargo-crap4rust cargo-nextest committed
+cargo install --locked cargo-llvm-cov cargo-crap4rust cargo-nextest cargo-insta committed
 brew install prek neovim
 prek install
 ```
@@ -13,6 +13,8 @@ prek install
 Run tests with `cargo nextest run --workspace`. Nextest stops any test after 3 seconds, set in `.config/nextest.toml`, so a test waiting on something that never happens fails instead of hanging. Plain `cargo test` has no limit.
 
 Tests that need a real nvim sit behind the `nvim-tests` feature, on by default. `cargo nextest run --workspace --no-default-features` skips them where nvim is not installed.
+
+TUI tests check what is drawn with insta snapshots, kept in a `snapshots` directory beside each module. To write or update them, run `INSTA_FORCE_PASS=1 cargo nextest run --workspace`, then `cargo insta review`. Without `INSTA_FORCE_PASS`, a test stops at its first changed snapshot and leaves the rest unwritten.
 
 ## Rules
 

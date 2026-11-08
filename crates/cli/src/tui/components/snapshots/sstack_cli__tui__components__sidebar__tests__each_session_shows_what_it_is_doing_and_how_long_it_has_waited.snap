@@ -1,0 +1,10 @@
+---
+source: crates/cli/src/tui/components/sidebar.rs
+expression: "shown(&sidebar(rows, 1, 6), 6)"
+---
+"sessions                         │"
+" ! add land tool      blocked 14m│"
+">+ scroll transcript         done│"
+" x update docs             failed│"
+" * fix the approval box.. working│"
+"   old                       idle│"

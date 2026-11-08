@@ -190,8 +190,8 @@ impl Component for Prompt {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::test_support::{ctrl, key, rows, screen, type_into};
-    use ratatui::Terminal;
+    use crate::tui::test_support::{ctrl, drawn, key, type_into};
+    use insta::assert_snapshot;
     use ratatui::backend::TestBackend;
 
     /// Returns a press of `code` with Alt held.
@@ -206,16 +206,13 @@ mod tests {
         }
     }
 
-    /// Draws the prompt `width` columns wide at the height it asks for, returning the rows and
+    /// Draws the prompt `width` columns wide at the height it asks for, returning the screen and
     /// where the cursor ends up.
-    fn draw(prompt: &Prompt, width: u16) -> (Vec<String>, (u16, u16)) {
-        let backend = TestBackend::new(width, prompt.height(width));
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal
-            .draw(|frame| prompt.render(frame, frame.area()))
-            .unwrap();
+    fn draw(prompt: &Prompt, width: u16) -> (TestBackend, (u16, u16)) {
+        let render = |frame: &mut Frame| prompt.render(frame, frame.area());
+        let mut terminal = drawn(width, prompt.height(width), render);
         let cursor = terminal.get_cursor_position().unwrap();
-        (rows(&terminal), (cursor.x, cursor.y))
+        (terminal.backend().clone(), (cursor.x, cursor.y))
     }
 
     #[test]
@@ -264,7 +261,7 @@ mod tests {
         let mut prompt = Prompt::default();
         type_into(&mut prompt, "hi");
         let (shown, cursor) = draw(&prompt, 10);
-        assert_eq!(shown[1], "\u{2502}> hi    \u{2502}");
+        assert_snapshot!(shown);
         assert_eq!(cursor, (5, 1));
     }
 
@@ -276,15 +273,7 @@ mod tests {
 
         let (shown, cursor) = draw(&prompt, 8);
 
-        assert_eq!(
-            shown[1..5],
-            [
-                "\u{2502}> abcd\u{2502}",
-                "\u{2502}  efgh\u{2502}",
-                "\u{2502}  ij  \u{2502}",
-                "\u{2502}  k   \u{2502}"
-            ]
-        );
+        assert_snapshot!(shown);
         assert_eq!(cursor, (4, 4));
     }
 
@@ -293,7 +282,7 @@ mod tests {
         let mut prompt = Prompt::default();
         type_into(&mut prompt, "abcd");
         let (shown, cursor) = draw(&prompt, 8);
-        assert_eq!(shown.len(), 4);
+        assert_snapshot!(shown);
         assert_eq!(cursor, (3, 2));
     }
 
@@ -303,14 +292,7 @@ mod tests {
         type_into(&mut prompt, "a\u{65e5}\u{672c}");
         press(&mut prompt, &[key(KeyCode::Home)]);
         let (shown, cursor) = draw(&prompt, 8);
-        // The test buffer shows the second cell of each wide character as a space.
-        assert_eq!(
-            shown[1..3],
-            [
-                "\u{2502}> a\u{65e5}  \u{2502}",
-                "\u{2502}  \u{672c}   \u{2502}"
-            ]
-        );
+        assert_snapshot!(shown);
         assert_eq!(cursor, (3, 1));
     }
 
@@ -318,7 +300,7 @@ mod tests {
     fn a_prompt_too_short_for_its_text_keeps_the_cursor_in_view() {
         let mut prompt = Prompt::default();
         type_into(&mut prompt, "abcdefghij");
-        let shown = screen(8, 3, |frame| prompt.render(frame, frame.area()));
-        assert_eq!(shown[1], "\u{2502}  ij  \u{2502}");
+        let shown = drawn(8, 3, |frame| prompt.render(frame, frame.area()));
+        assert_snapshot!(shown.backend());
     }
 }

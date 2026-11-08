@@ -1,0 +1,7 @@
+---
+source: crates/cli/src/tui/components/sidebar.rs
+expression: "shown(&sidebar(rows, 0, 3), 3)"
+---
+"sessions                         │"
+">  a name long enough to n.. idle│"
+" * a name long enough t.. working│"

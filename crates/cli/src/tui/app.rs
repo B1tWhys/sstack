@@ -641,9 +641,10 @@ fn global_action(key: KeyEvent) -> Option<Action> {
 mod tests {
     use super::*;
     use crate::tui::event::EventSender;
-    use crate::tui::test_support::{alt, bash_call, ctrl, key, opened, reply, rows};
+    use crate::tui::test_support::{alt, bash_call, ctrl, drawn, key, opened, reply, rows};
     use anyhow::{anyhow, bail};
     use async_trait::async_trait;
+    use insta::assert_snapshot;
     use ratatui::backend::TestBackend;
     use ratatui::style::Color;
     use sstack::provider::scripted::{Scripted, ScriptedProvider};
@@ -753,6 +754,14 @@ mod tests {
         fn cancel_build(&mut self) {
             self.builds.borrow_mut().push("cancelled");
         }
+    }
+
+    /// Runs `check` with every age in the sidebar under a minute shown as `Ns`, because how many
+    /// seconds a Session has waited depends on how fast the test runs.
+    fn hiding_seconds(check: impl FnOnce()) {
+        let mut settings = insta::Settings::clone_current();
+        settings.add_filter(r"\d+s\x{2502}", "Ns\u{2502}");
+        settings.bind(check);
     }
 
     fn harness(provider: Arc<dyn Provider>) -> Harness {
@@ -907,9 +916,14 @@ mod tests {
                 .await;
         }
 
+        /// Draws the whole screen `width` columns wide, returning it ready for a snapshot.
+        fn drawn_at(&mut self, width: u16) -> TestBackend {
+            let terminal = drawn(width, 12, |frame| self.app.render(frame));
+            terminal.backend().clone()
+        }
+
         fn screen_of(&mut self, width: u16) -> String {
-            let mut terminal = Terminal::new(TestBackend::new(width, 12)).unwrap();
-            terminal.draw(|frame| self.app.render(frame)).unwrap();
+            let terminal = drawn(width, 12, |frame| self.app.render(frame));
             rows(&terminal).join("\n")
         }
 
@@ -928,10 +942,7 @@ mod tests {
         assert_eq!(h.enter("hello"), None);
         h.until_turn_ends().await;
 
-        let screen = h.screen();
-        assert!(screen.contains("> hello"), "{screen}");
-        assert!(screen.contains("hello back"), "{screen}");
-        assert!(screen.contains("session first | ready"), "{screen}");
+        assert_snapshot!(h.drawn_at(NARROW));
         assert_eq!(h.session().len(), 2);
     }
 
@@ -944,10 +955,7 @@ mod tests {
         let mut h = h.rebuilt();
         h.until(|event| matches!(event, Event::Resumed(_))).await;
 
-        let screen = h.screen();
-        assert!(screen.contains("> hello"), "{screen}");
-        assert!(screen.contains("hello back"), "{screen}");
-        assert!(screen.contains("session first | ready"), "{screen}");
+        assert_snapshot!(h.drawn_at(NARROW));
     }
 
     /// Starts an [`App`] answered by `script`, whose first Session has a project Skill for each
@@ -1009,16 +1017,13 @@ mod tests {
         let mut h = scripted(script);
         h.enter("go");
         h.until(|event| matches!(event, Event::Approval(_))).await;
-        assert!(h.screen().contains("Run `touch ran`? [y/N]"));
+        assert_snapshot!(h.drawn_at(NARROW));
 
         assert_eq!(h.app.handle(Event::Key(key(KeyCode::Char('y')))), None);
         h.until_turn_ends().await;
 
         assert!(h.dir.path().join("ran").exists());
-        let screen = h.screen();
-        assert!(screen.contains("[bash]"), "{screen}");
-        assert!(screen.contains("all done"), "{screen}");
-        assert!(!screen.contains("[y/N]"), "{screen}");
+        assert_snapshot!(h.drawn_at(NARROW));
     }
 
     /// Never answers, so that a Turn stays running until it is cancelled.
@@ -1059,21 +1064,10 @@ mod tests {
         let mut h = scripted(vec![]);
         let typed = "word ".repeat(40);
         h.app.handle(Event::Paste(typed.clone()));
-        let screen = h.screen();
-        let rows: Vec<&str> = screen.lines().collect();
-        assert_eq!(rows.len(), 12);
-        assert!(rows[5].starts_with("session first"), "{screen}");
-        assert!(rows[6].starts_with("\u{250c}"), "{screen}");
-        assert!(rows[11].starts_with("\u{2514}"), "{screen}");
+        assert_snapshot!(h.drawn_at(NARROW));
 
         h.app.handle(Event::Paste("\n".repeat(20)));
-        assert!(
-            h.screen()
-                .lines()
-                .nth(5)
-                .unwrap()
-                .starts_with("session first")
-        );
+        assert_snapshot!(h.drawn_at(NARROW));
     }
 
     #[tokio::test]
@@ -1162,10 +1156,8 @@ mod tests {
     #[tokio::test]
     async fn the_sidebar_makes_way_on_a_narrow_screen() {
         let mut h = with_stored(Arc::new(NeverResponds));
-        let wide = h.screen_of(WIDE);
-        assert!(wide.contains("sessions"), "{wide}");
-        let narrow = h.screen_of(NARROW);
-        assert!(!narrow.contains("sessions  "), "{narrow}");
+        hiding_seconds(|| assert_snapshot!(h.drawn_at(WIDE)));
+        assert_snapshot!(h.drawn_at(NARROW));
     }
 
     #[tokio::test]
@@ -1305,11 +1297,7 @@ mod tests {
             },
             failure: VimFailure::TimedOut,
         });
-        let screen = h.screen();
-        assert!(!screen.contains("INSERT"));
-        assert!(screen.contains("> half typed"), "{screen}");
-        assert!(screen.contains("nvim took too long to start"), "{screen}");
-        assert!(screen.contains("/vim tries again"), "{screen}");
+        assert_snapshot!(h.drawn_at(NARROW));
     }
 
     #[tokio::test]
@@ -1424,10 +1412,7 @@ mod tests {
         h.enter_new();
         h.until(|event| matches!(event, Event::Approval(_))).await;
 
-        let screen = h.screen_of(WIDE);
-        assert!(screen.contains("! go"), "{screen}");
-        assert!(screen.contains("blocked"), "{screen}");
-        assert!(!screen.contains("[y/N]"), "{screen}");
+        hiding_seconds(|| assert_snapshot!(h.drawn_at(WIDE)));
 
         h.app.handle(Event::Key(key(KeyCode::Char('y'))));
         assert!(!h.dir.path().join("ran").exists());
@@ -1457,10 +1442,8 @@ mod tests {
         h.enter("go");
         h.enter_new();
         h.until(|event| matches!(event, Event::Approval(_))).await;
-        let narrow = h.screen();
-        assert!(narrow.contains("1 blocked"), "{narrow}");
-        let wide = h.screen_of(WIDE);
-        assert!(!wide.contains("1 blocked"), "{wide}");
+        assert_snapshot!(h.drawn_at(NARROW));
+        hiding_seconds(|| assert_snapshot!(h.drawn_at(WIDE)));
     }
 
     #[tokio::test]

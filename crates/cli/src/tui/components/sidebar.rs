@@ -228,7 +228,9 @@ fn shortened(text: &str, columns: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::test_support::screen;
+    use crate::tui::test_support::{drawn, screen};
+    use insta::assert_snapshot;
+    use ratatui::backend::TestBackend;
 
     fn row(id: &str, name: &str, activity: Activity) -> Row {
         Row {
@@ -246,8 +248,10 @@ mod tests {
         sidebar
     }
 
-    fn drawn(sidebar: &Sidebar, height: u16) -> Vec<String> {
-        screen(WIDTH, height, |frame| sidebar.render(frame, frame.area()))
+    /// Returns the screen with `sidebar` drawn over its whole width and `height` rows.
+    fn shown(sidebar: &Sidebar, height: u16) -> TestBackend {
+        let terminal = drawn(WIDTH, height, |frame| sidebar.render(frame, frame.area()));
+        terminal.backend().clone()
     }
 
     #[test]
@@ -262,14 +266,7 @@ mod tests {
             row("5", "old\nsession", Activity::Idle),
         ];
 
-        let shown = drawn(&sidebar(rows, 1, 6), 6);
-
-        assert_eq!(shown[0], "sessions                         \u{2502}");
-        assert_eq!(shown[1], " ! add land tool      blocked 14m\u{2502}");
-        assert_eq!(shown[2], ">+ scroll transcript         done\u{2502}");
-        assert_eq!(shown[3], " x update docs             failed\u{2502}");
-        assert_eq!(shown[4], " * fix the approval box.. working\u{2502}");
-        assert_eq!(shown[5], "   old                       idle\u{2502}");
+        assert_snapshot!(shown(&sidebar(rows, 1, 6), 6));
     }
 
     #[test]
@@ -279,19 +276,14 @@ mod tests {
             row("1", long, Activity::Idle),
             row("2", long, Activity::Working),
         ];
-        let shown = drawn(&sidebar(rows, 0, 3), 3);
-        assert_eq!(shown[1], ">  a name long enough to n.. idle\u{2502}");
-        assert_eq!(shown[2], " * a name long enough t.. working\u{2502}");
+        assert_snapshot!(shown(&sidebar(rows, 0, 3), 3));
     }
 
     #[test]
     fn what_the_harness_is_doing_replaces_the_heading() {
         let mut sidebar = sidebar(vec![row("1", "t", Activity::Parked)], 0, 2);
         sidebar.set_progress(Some("building".into()));
-        let shown = drawn(&sidebar, 2);
-        assert!(shown[0].starts_with("building"), "{shown:#?}");
-        assert!(shown[1].contains("- t"), "{shown:#?}");
-        assert!(shown[1].contains("parked"), "{shown:#?}");
+        assert_snapshot!(shown(&sidebar, 2));
     }
 
     #[test]
@@ -300,9 +292,7 @@ mod tests {
             .map(|id| row(&id.to_string(), "t", Activity::Idle))
             .collect();
         let sidebar = sidebar(rows, 4, 3);
-        let shown = drawn(&sidebar, 3);
-        assert!(shown[1].starts_with("   t "), "{shown:#?}");
-        assert!(shown[2].starts_with(">  t "), "{shown:#?}");
+        assert_snapshot!(shown(&sidebar, 3));
         assert_eq!(sidebar.session_at(0, 1), Some("3"));
         assert_eq!(sidebar.session_at(0, 2), Some("4"));
     }

@@ -6,7 +6,10 @@ repos:
   - repo: https://github.com/B1tWhys/no-emoji.git
     rev: "1.0"
     hooks:
+      # This hook rejects every non-ASCII character. Snapshots of the TUI hold the box-drawing
+      # characters the screen is drawn with, so they are left out.
       - id: no-emoji
+        exclude: \.snap$
 
   - repo: local
     hooks:

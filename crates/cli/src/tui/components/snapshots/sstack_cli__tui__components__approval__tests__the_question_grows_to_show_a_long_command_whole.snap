@@ -1,0 +1,16 @@
+---
+source: crates/cli/src/tui/components/approval.rs
+expression: shown.backend()
+---
+"                              "
+"                              "
+"                              "
+"      ┌ Approve shell c┐      "
+"      │Run `cargo      │      "
+"      │nextest run     │      "
+"      │--workspace     │      "
+"      │--no-default-fea│      "
+"      │tures`? [y/N]   │      "
+"      └────────────────┘      "
+"                              "
+"                              "

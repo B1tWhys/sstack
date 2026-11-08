@@ -45,9 +45,17 @@ pub fn type_into(component: &mut impl Component, text: &str) {
 
 /// Draws onto a blank screen of the given size, returning each row with trailing spaces removed.
 pub fn screen(width: u16, height: u16, draw: impl FnOnce(&mut Frame)) -> Vec<String> {
+    rows(&drawn(width, height, draw))
+}
+
+/// Draws onto a blank test terminal of the given size and returns it, ready for a snapshot.
+///
+/// Its backend displays one quoted line per row, so a snapshot shows trailing spaces and blank
+/// rows that a plain listing of the rows would lose.
+pub fn drawn(width: u16, height: u16, draw: impl FnOnce(&mut Frame)) -> Terminal<TestBackend> {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
     terminal.draw(draw).unwrap();
-    rows(&terminal)
+    terminal
 }
 
 /// Returns each row on a test terminal, with trailing spaces removed.
