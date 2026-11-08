@@ -1,6 +1,6 @@
 //! The durable record of a Session.
 
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::Path;
 
@@ -104,6 +104,11 @@ pub enum SessionError {
     /// An entry could not be converted to or from its stored form.
     #[error("session entry is malformed: {0}")]
     Malformed(#[from] serde_json::Error),
+    /// Another [`SessionLog`] has the Session open, most likely in another Running Harness, and
+    /// two of them appending to one log would interleave their entries. Lasts until that one is
+    /// dropped or its process ends.
+    #[error("this Session is open elsewhere")]
+    OpenElsewhere,
 }
 
 /// The durable record of a Session, which survives crashes and can be resumed.
@@ -114,10 +119,12 @@ pub struct SessionLog {
 }
 
 impl SessionLog {
-    /// Starts a new log at `path`, creating any missing directories.
+    /// Starts a new log at `path`, creating any missing directories. No other [`SessionLog`] can
+    /// open the Session until this one is dropped.
     ///
     /// # Errors
-    /// Returns an error if the file already exists or cannot be created.
+    /// Returns an error if the file already exists or cannot be created, and
+    /// [`SessionError::OpenElsewhere`] if another log opened it first.
     pub fn create(path: &Path) -> Result<Self, SessionError> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
@@ -126,26 +133,28 @@ impl SessionLog {
             .append(true)
             .create_new(true)
             .open(path)?;
-        Ok(Self { file })
+        Ok(Self {
+            file: exclusive(file)?,
+        })
     }
 
     /// Opens an existing log and returns it with its entries.
     ///
-    /// A partial entry left by a crash is discarded, because it was never recorded.
+    /// A partial entry left by a crash is discarded, because it was never recorded. No other
+    /// [`SessionLog`], in this process or any other, can open the Session until this one is
+    /// dropped.
     ///
     /// # Errors
-    /// Returns an error if the file cannot be read or a complete entry is malformed.
+    /// Returns [`SessionError::OpenElsewhere`] if another log has the Session open, and another
+    /// error if the file cannot be read or a complete entry is malformed.
     pub fn open(path: &Path) -> Result<(Self, Vec<Entry>), SessionError> {
-        let mut file = OpenOptions::new().read(true).append(true).open(path)?;
+        let file = OpenOptions::new().read(true).append(true).open(path)?;
+        let mut file = exclusive(file)?;
         let mut contents = String::new();
         file.read_to_string(&mut contents)?;
-        let complete = contents.rfind('\n').map_or("", |end| &contents[..=end]);
+        let complete = recorded(&contents);
         file.set_len(complete.len() as u64)?;
-        let entries = complete
-            .lines()
-            .map(serde_json::from_str)
-            .collect::<Result<Vec<Entry>, _>>()?;
-        Ok((Self { file }, entries))
+        Ok((Self { file }, parse(complete)?))
     }
 
     /// Durably appends one entry.
@@ -158,6 +167,47 @@ impl SessionLog {
         self.file.write_all(line.as_bytes())?;
         self.file.sync_data()?;
         Ok(())
+    }
+}
+
+/// Returns the part of a log's `contents` that was fully recorded, without any partial entry a
+/// crash or a write in progress left at the end.
+fn recorded(contents: &str) -> &str {
+    contents.rfind('\n').map_or("", |end| &contents[..=end])
+}
+
+/// Reads the entries of a log whose `recorded` contents end at a complete entry.
+///
+/// # Errors
+/// Returns [`SessionError::Malformed`] if any entry is malformed.
+fn parse(recorded: &str) -> Result<Vec<Entry>, SessionError> {
+    let entries = recorded
+        .lines()
+        .map(serde_json::from_str)
+        .collect::<Result<_, _>>()?;
+    Ok(entries)
+}
+
+/// Returns everything recorded so far in the Session stored at `path`. Does not disturb the
+/// log, so it is safe on a Session in use, but gives no way to add to it: that takes
+/// [`SessionLog::open`].
+///
+/// # Errors
+/// Returns an error if the file cannot be read or a complete entry is malformed.
+pub fn lock_free_read(path: &Path) -> Result<Vec<Entry>, SessionError> {
+    parse(recorded(&fs::read_to_string(path)?))
+}
+
+/// Claims the Session stored in `file` for the caller alone, until `file` is closed.
+///
+/// # Errors
+/// Returns [`SessionError::OpenElsewhere`] if another open file has claimed it, in this process
+/// or any other, and [`SessionError::Io`] if the claim cannot be made at all.
+fn exclusive(file: File) -> Result<File, SessionError> {
+    match file.try_lock() {
+        Ok(()) => Ok(file),
+        Err(TryLockError::WouldBlock) => Err(SessionError::OpenElsewhere),
+        Err(TryLockError::Error(error)) => Err(error.into()),
     }
 }
 
@@ -250,6 +300,30 @@ mod tests {
             SessionLog::create(&path),
             Err(SessionError::Io(_))
         ));
+    }
+
+    #[test]
+    fn a_session_open_in_one_place_cannot_be_opened_in_another() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.jsonl");
+        let created = SessionLog::create(&path).unwrap();
+        assert!(matches!(
+            SessionLog::open(&path),
+            Err(SessionError::OpenElsewhere)
+        ));
+        drop(created);
+
+        let (opened, _) = SessionLog::open(&path).unwrap();
+        assert!(matches!(
+            SessionLog::open(&path),
+            Err(SessionError::OpenElsewhere)
+        ));
+        assert_eq!(lock_free_read(&path).unwrap(), []);
+        assert_eq!(first_prompt(&path).unwrap(), None);
+        assert!(!is_parked(&path).unwrap());
+        drop(opened);
+
+        assert!(SessionLog::open(&path).is_ok());
     }
 
     #[test]

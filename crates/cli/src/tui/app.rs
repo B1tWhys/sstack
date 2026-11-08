@@ -649,7 +649,7 @@ mod tests {
     use ratatui::style::Color;
     use sstack::provider::scripted::{Scripted, ScriptedProvider};
     use sstack::provider::{ModelRequest, Provider, ProviderError, StreamEvent};
-    use sstack::session::{AssistantEntry, Entry, SessionLog};
+    use sstack::session::{self, AssistantEntry, Entry, SessionLog};
     use sstack::vim::Draft;
     use sstack::workspace;
     use std::cell::RefCell;
@@ -833,8 +833,24 @@ mod tests {
 
     impl Harness {
         /// Replaces the [`App`] with a new one on the same Session, as a Rebuild does.
-        fn rebuilt(self) -> Harness {
-            start(self.dir, Arc::new(ScriptedProvider::new(vec![])), vec![])
+        async fn rebuilt(self) -> Harness {
+            let dir = self.stopped().await;
+            start(dir, Arc::new(ScriptedProvider::new(vec![])), vec![])
+        }
+
+        /// Stops the [`App`] as a relaunch does, returning its project once every Session it
+        /// had open is closed and free to open again.
+        async fn stopped(self) -> TempDir {
+            let Self {
+                dir,
+                app,
+                sender,
+                mut events,
+                ..
+            } = self;
+            drop((app, sender));
+            while events.recv().await.is_some() {}
+            dir
         }
 
         /// Presses a key that goes to the [`App`] rather than to the prompt.
@@ -932,7 +948,7 @@ mod tests {
         }
 
         fn session(&self) -> Vec<Entry> {
-            SessionLog::open(&path_of(&self.dir, "first")).unwrap().1
+            session::lock_free_read(&path_of(&self.dir, "first")).unwrap()
         }
     }
 
@@ -952,7 +968,7 @@ mod tests {
         h.enter("hello");
         h.until_turn_ends().await;
 
-        let mut h = h.rebuilt();
+        let mut h = h.rebuilt().await;
         h.until(|event| matches!(event, Event::Resumed(_))).await;
 
         assert_snapshot!(h.drawn_at(NARROW));
@@ -1676,7 +1692,7 @@ mod tests {
         h.approve();
 
         assert_eq!(h.until_exit().await, Exit::Rebuild(binary()));
-        let entries = SessionLog::open(&path_of(&h.dir, "first")).unwrap().1;
+        let entries = session::lock_free_read(&path_of(&h.dir, "first")).unwrap();
         assert_eq!(entries.last(), Some(&Entry::TurnParked));
         assert!(h.dir.path().join("ran").exists());
     }
@@ -1711,7 +1727,7 @@ mod tests {
             parked: true,
         };
         let provider = Arc::new(ScriptedProvider::new(vec![Ok(reply("carried on"))]));
-        let mut h = start(h.dir, provider, vec![stored]);
+        let mut h = start(h.stopped().await, provider, vec![stored]);
         assert_eq!(h.app.panes[0].state(), SessionState::Parked);
 
         h.app.continue_parked();
@@ -1827,7 +1843,7 @@ mod tests {
         h.approve();
 
         assert_eq!(h.until_exit().await, Exit::Quit);
-        let entries = SessionLog::open(&path_of(&h.dir, "first")).unwrap().1;
+        let entries = session::lock_free_read(&path_of(&h.dir, "first")).unwrap();
         assert_eq!(entries.last(), Some(&Entry::TurnParked));
     }
 

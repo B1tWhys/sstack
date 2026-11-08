@@ -16,9 +16,11 @@ A step is done when its commit is in, the full test run is green, and its note i
 
 ## Steps
 
-### [ ] 1. Lock the Session log
+### [x] 1. Lock the Session log
 
 A Running Harness holds an exclusive lock on a Session's log for as long as it has the Session open, so that two Harnesses can never append to the same log. Take the lock with `File::try_lock` in `SessionLog::create` and `SessionLog::open` (`crates/core/src/session.rs`), and add a `SessionError` variant whose message is "this Session is open elsewhere". Reads that only look at a log, such as `first_prompt` and `is_parked`, take no lock. Check that the TUI and headless mode show the error well. Test that opening a log a second time in the same process fails.
+
+Note: The variant is `SessionError::OpenElsewhere`. I added `session::lock_free_read(path)`, a lock-free read of everything recorded so far, because many tests read a log back while an Agent still had it open. Use it, not `SessionLog::open`, wherever code only looks at a log. The lock lasts as long as the `SessionLog`. In the TUI that means as long as the worker task holding the `Agent`, which can outlive the `App` by a few polls. The test harness in `tui/app.rs` therefore has a `stopped()` helper that waits for the event channel to close before a test relaunches into the same Session. A real Rebuild needs nothing extra, because Rust opens files close-on-exec and the `exec` in `rebuild.rs` releases the lock. I checked the messages by reading the code rather than running a second Harness. At startup, headless mode and the TUI print `error: this Session is open elsewhere` before the TUI takes the terminal. Inside the TUI, the person sees `could not open the Session: this Session is open elsewhere` when switching to a Session that is open elsewhere, or `could not carry on a Session: ...` for a parked one. A GUI and a TUI on the same project can now list each other's Sessions but not open them.
 
 ### [ ] 2. Move the lifecycle, Human Commands and Rebuild into core
 

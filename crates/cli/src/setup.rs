@@ -318,13 +318,17 @@ mod tests {
         assert_eq!(new.entries, Vec::new());
         assert!(new.wants_worktree);
         new.log.append(&Entry::TurnCancelled).unwrap();
+        let path = new.path;
+        drop(new.log);
 
-        let id = workspace::session_id(&new.path);
+        let id = workspace::session_id(&path);
         let by_id = open_session(dir.path(), Start::Resume(&id)).unwrap();
+        assert!(open_session(dir.path(), Start::Resume(LATEST)).is_err());
+        drop(by_id.log);
         let newest = open_session(dir.path(), Start::Resume(LATEST)).unwrap();
 
-        assert_eq!(by_id.path, new.path);
-        assert_eq!(newest.path, new.path);
+        assert_eq!(by_id.path, path);
+        assert_eq!(newest.path, path);
         assert_eq!(by_id.entries, [Entry::TurnCancelled]);
         assert!(!by_id.wants_worktree);
     }

@@ -463,7 +463,7 @@ mod tests {
             name: "write".into(),
             is_error: false
         }));
-        let (_, stored) = SessionLog::open(&h.session).unwrap();
+        let stored = crate::session::lock_free_read(&h.session).unwrap();
         assert_eq!(stored, h.agent.entries());
     }
 
@@ -586,7 +586,7 @@ mod tests {
         let agent = Agent::new(config, log, entries).unwrap();
 
         assert_eq!(tool_results(agent.entries()), [("1", INTERRUPTED, true)]);
-        let (_, stored) = SessionLog::open(&path).unwrap();
+        let stored = crate::session::lock_free_read(&path).unwrap();
         assert_eq!(stored.len(), 2);
     }
 
@@ -616,6 +616,7 @@ mod tests {
             Entry::ToolResult { .. }
         ));
 
+        drop(h.agent);
         pause.store(false, Ordering::SeqCst);
         let (log, entries) = SessionLog::open(&h.session).unwrap();
         let (dir, project) = git_project();
