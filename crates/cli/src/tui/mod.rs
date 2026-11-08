@@ -38,11 +38,11 @@ use sstack::running_harness::Exit;
 use sstack::sandbox::Containers;
 use sstack::session_report::{ReportingApprover, SessionReport};
 use sstack::session_setup::{
-    Place, Start, installed_skills, main_checkout, prepare, sessions_directory,
+    Start, installed_skills, listed_sessions, main_checkout, prepare, sessions_directory,
+    starting_session,
 };
 use sstack::tools::Approver;
 use sstack::turn_runner::AgentHandle;
-use sstack::workspace::SessionSummary;
 use sstack::{workspace, worktree};
 use theme::ColorDepth;
 use tokio::sync::mpsc;
@@ -70,8 +70,8 @@ pub async fn run(args: &Args) -> Result<ExitCode> {
         build: None,
         containers: Arc::new(Containers::detect()),
     };
-    let stored = sessions.stored()?;
-    let first = sessions.open(starting_session(args, &stored))?;
+    let stored = listed_sessions(&main, &sessions.directory)?;
+    let first = sessions.open(starting_session(args.resume.as_deref(), &stored))?;
     let mut app = App::builder()
         .first(first)
         .stored(stored)
@@ -87,17 +87,6 @@ pub async fn run(args: &Args) -> Result<ExitCode> {
         app.relaunch_failed(&failure.to_string());
     }
     Ok(ExitCode::SUCCESS)
-}
-
-/// Picks what to show first: what the arguments ask for, or else a blank Session. One left unused
-/// and unnamed by an earlier run is reused, so that merely launching does not pile up worktrees.
-fn starting_session<'a>(args: &'a Args, stored: &'a [SessionSummary]) -> Start<'a> {
-    let unused = stored
-        .iter()
-        .find(|summary| summary.first_prompt.is_none() && summary.name.is_none())
-        .and_then(|summary| summary.path.file_stem()?.to_str());
-    let wanted = args.resume.as_deref().or(unused);
-    wanted.map_or(Start::New(Place::Worktree), Start::Resume)
 }
 
 /// Real Sessions, opened and archived on behalf of the [`App`].
@@ -117,20 +106,6 @@ struct LiveSessions<'a> {
     containers: Arc<Containers>,
     /// The build in progress. Aborting it stops the build.
     build: Option<JoinHandle<()>>,
-}
-
-impl LiveSessions<'_> {
-    /// Describes the Sessions worth listing: those with something in them, those the person
-    /// named, and blank ones with a worktree, which would otherwise be left behind unnoticed.
-    fn stored(&self) -> Result<Vec<SessionSummary>> {
-        let mut stored = workspace::list_sessions(&self.directory)?;
-        stored.retain(|summary| {
-            let id = workspace::session_id(&summary.path);
-            let named = summary.first_prompt.is_some() || summary.name.is_some();
-            named || worktree::path(&self.main, &id).exists()
-        });
-        Ok(stored)
-    }
 }
 
 impl Sessions for LiveSessions<'_> {
@@ -245,30 +220,6 @@ impl Drop for InputModes {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn launching_reuses_an_unused_session_unless_told_otherwise() {
-        let summary = |id: &str, first_prompt: Option<&str>| SessionSummary {
-            path: PathBuf::from(format!("/s/{id}.jsonl")),
-            first_prompt: first_prompt.map(str::to_owned),
-            name: None,
-            modified: std::time::UNIX_EPOCH,
-            parked: false,
-        };
-        let stored = [summary("1", Some("hello")), summary("2", None)];
-        let spoken = &stored[..1];
-
-        let plain = crate::tests::args(&[]);
-        assert_eq!(starting_session(&plain, &stored), Start::Resume("2"));
-        let fresh = Start::New(Place::Worktree);
-        assert_eq!(starting_session(&plain, spoken), fresh);
-        let chosen = crate::tests::args(&["--resume", "1"]);
-        assert_eq!(starting_session(&chosen, &stored), Start::Resume("1"));
-
-        let mut named = summary("3", None);
-        named.name = Some("for later".into());
-        assert_eq!(starting_session(&plain, &[named]), fresh);
-    }
 
     #[test]
     fn only_a_terminal_can_run_interactively() {

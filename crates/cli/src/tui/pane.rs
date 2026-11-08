@@ -1,13 +1,14 @@
 //! Everything the harness keeps for one Session, whether or not it is on screen.
 
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 use crossterm::cursor::SetCursorStyle;
 use crossterm::event::KeyEvent;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use sstack::agent::TurnEnd;
+use sstack::queue::Waits;
 use sstack::running_harness::SessionState;
 use sstack::session::Entry;
 use sstack::session_controller::SessionController;
@@ -69,10 +70,8 @@ pub struct Pane {
     /// What the Session is doing until it has a controller, which then keeps track instead:
     /// parked if an earlier run left a Turn parked in it, and otherwise idle.
     stored: SessionState,
-    /// When the Session last started waiting for the person, which orders the queue.
-    waiting_since: SystemTime,
-    /// When the running Turn started.
-    working_since: SystemTime,
+    /// How long the Session has waited for the person or worked, which orders the queue.
+    waits: Waits,
     /// What the person has not seen yet.
     unseen: Option<Unseen>,
     /// The questions about shell commands, shown over everything else.
@@ -116,8 +115,7 @@ impl Pane {
             controller: None,
             events: None,
             stored: SessionState::Idle,
-            waiting_since,
-            working_since: waiting_since,
+            waits: Waits::since(waiting_since),
             unseen: None,
             approval: Approval::default(),
             input: Input::default(),
@@ -170,11 +168,7 @@ impl Pane {
     /// Returns a value that sorts this Session into its place in the sidebar: waiting Sessions
     /// first and the longest wait first among them, then working Sessions, longest-running first.
     pub fn queue_position(&self) -> (bool, SystemTime) {
-        if self.state().is_waiting() {
-            (false, self.waiting_since)
-        } else {
-            (true, self.working_since)
-        }
+        self.waits.position(self.state())
     }
 
     /// Notes that the person is now looking at this Session.
@@ -189,7 +183,7 @@ impl Pane {
             name: (self.name.as_ref().or(self.first_prompt.as_ref()))
                 .map_or_else(|| UNTITLED.to_owned(), String::clone),
             activity: self.activity(),
-            waiting: self.state().is_waiting().then(|| self.waited(now)),
+            waiting: self.state().is_waiting().then(|| self.waits.waited(now)),
         }
     }
 
@@ -203,12 +197,6 @@ impl Pane {
             (SessionState::Idle, None) => Activity::Idle,
             (SessionState::Parked, _) => Activity::Parked,
         }
-    }
-
-    /// Returns how long the Session has been waiting as of `now`. A clock that went backwards
-    /// counts as no time at all.
-    fn waited(&self, now: SystemTime) -> Duration {
-        now.duration_since(self.waiting_since).unwrap_or_default()
     }
 
     /// Shows something this Session did. `on_screen` says whether the person can see it. What
@@ -237,21 +225,8 @@ impl Pane {
         let controller = self.controller.as_mut()?;
         let before = controller.state();
         let result = act(controller);
-        let after = controller.state();
-        self.moved(before, after);
+        self.waits.moved(before, controller.state());
         Some(result)
-    }
-
-    /// Times the waits that order the queue, now that the Session went from `before` to `after`.
-    fn moved(&mut self, before: SessionState, after: SessionState) {
-        if after == before {
-            return;
-        }
-        if after.is_waiting() {
-            self.waiting_since = SystemTime::now();
-        } else if before == SessionState::Idle {
-            self.working_since = SystemTime::now();
-        }
     }
 
     /// Returns every component, topmost first, which is the order key presses are offered in.

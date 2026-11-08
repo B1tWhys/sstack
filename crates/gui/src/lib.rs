@@ -1,4 +1,4 @@
-//! The windowed front end of sstack, which opens one Session in one window.
+//! The windowed front end of sstack, which opens the Sessions of one project in one window.
 //!
 //! Sessions, Providers, tools and the agent loop are in [`sstack`]. The window turns what the
 //! person does into calls on core and draws what core reports about the Session.
@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, bail};
 use clap::Parser;
 use iced::futures::future::{BoxFuture, FutureExt};
 use iced::{Application, Program};
@@ -22,9 +22,11 @@ use reports::Reports;
 use sstack::rebuild::{self, Binary};
 use sstack::sandbox::Containers;
 use sstack::session_report::ReportingApprover;
-use sstack::session_setup::{LATEST, Place, Start, prepare};
-use sstack::workspace;
-use window::{Message, Ready, Window};
+use sstack::session_setup::{
+    LATEST, Start, listed_sessions, main_checkout, prepare, sessions_directory, starting_session,
+};
+use sstack::{workspace, worktree};
+use window::{Message, Opened, Ready, Sessions, Window};
 
 // The flags match the TUI's, except `--prompt`, but are defined apart from the CLI's, because
 // the GUI is free to change them, for instance once it can choose a project or a Session itself.
@@ -45,14 +47,6 @@ struct Args {
 }
 
 impl Args {
-    /// Returns which Session to open: the one `--resume` names, or else a new one in its own
-    /// worktree.
-    fn start(&self) -> Start<'_> {
-        self.resume
-            .as_deref()
-            .map_or(Start::New(Place::Worktree), Start::Resume)
-    }
-
     /// Returns the arguments that bring a rebuilt `sstack-gui` back to the Session stored at
     /// `session`, with the same Connection and model as this run.
     ///
@@ -81,21 +75,21 @@ pub fn run_from_command_line() -> ExitCode {
     report(run(&Args::parse()))
 }
 
-/// Opens the Session the arguments ask for in a window, which stays open until the person
-/// closes it, quits or rebuilds. After a Rebuild, the process becomes the new `sstack-gui` on the
-/// same Session, once iced has torn down the window.
+/// Opens a window on the project of the current directory, showing the Session the arguments
+/// ask for, which stays open until the person closes it, quits or rebuilds. After a Rebuild, the
+/// process becomes the new `sstack-gui` on the Session that was on screen, once iced has torn
+/// down the window.
 ///
-/// A Session that cannot be opened fails here, before any window appears, so the person reads
-/// why in the terminal they started from. So does a relaunch that fails, since the window is
-/// gone by then.
+/// A first Session that cannot be opened fails here, before any window appears, so the person
+/// reads why in the terminal they started from. So does a relaunch that fails, since the window
+/// is gone by then.
 fn run(args: &Args) -> Result<()> {
     let ready = ready(args)?;
-    let relaunch_args = args.relaunch(&ready.run.session);
     let rebuilt = Arc::clone(&ready.relaunch);
     application(ready).run()?;
-    rebuilt
-        .get()
-        .map_or(Ok(()), |binary| Err(relaunch(binary, &relaunch_args)))
+    rebuilt.get().map_or(Ok(()), |rebuilt| {
+        Err(relaunch(&rebuilt.binary, &args.relaunch(&rebuilt.session)))
+    })
 }
 
 /// Replaces this process with `binary`, started with `args`, returning why it could not.
@@ -104,7 +98,7 @@ fn relaunch(binary: &Path, args: &[String]) -> anyhow::Error {
     anyhow!("could not relaunch into {}: {failure}", binary.display())
 }
 
-/// Returns the GUI as iced runs it, with one window on the readied Session. Closing the window
+/// Returns the GUI as iced runs it, with one window on the readied Sessions. Closing the window
 /// quits as `/quit` does, rather than ending a running Turn wherever it is.
 fn application(ready: Ready) -> Application<impl Program<State = Window, Message = Message>> {
     let unopened = Cell::new(Some(ready));
@@ -114,27 +108,84 @@ fn application(ready: Ready) -> Application<impl Program<State = Window, Message
         .exit_on_close_request(false)
 }
 
-/// Readies the Session the arguments ask for, in the project of the current directory.
-///
-/// Shell commands that the Sandbox cannot run are asked about in the window.
+/// Readies the window on the project of the current directory, with the Session the arguments
+/// ask for to show first and the project's stored Sessions to list.
 fn ready(args: &Args) -> Result<Ready> {
-    let (reports, sender) = Reports::new();
-    let approver = Arc::new(ReportingApprover::new(sender.clone()));
-    let run = prepare()
-        .start(args.start())
-        .directory(&std::env::current_dir()?)
-        .maybe_connection(args.connection.as_deref())
-        .maybe_model(args.model.as_deref())
-        .approver(|_| approver)
-        .containers(Arc::new(Containers::detect()))
-        .call()?;
+    let started_in = std::env::current_dir()?;
+    let main = main_checkout(&started_in)?;
+    let mut sessions = LiveSessions {
+        connection: args.connection.clone(),
+        model: args.model.clone(),
+        directory: sessions_directory(&started_in)?,
+        main,
+        started_in,
+        containers: Arc::new(Containers::detect()),
+    };
+    let stored = listed_sessions(&sessions.main, &sessions.directory)?;
+    let first = sessions.open(starting_session(args.resume.as_deref(), &stored))?;
     Ok(Ready {
-        run,
-        reports,
-        sender,
+        first,
+        stored,
+        sessions: Box::new(sessions),
         build: build_harness,
         relaunch: Arc::default(),
     })
+}
+
+/// Real Sessions of one project, opened, archived and renamed on behalf of the window.
+struct LiveSessions {
+    /// The Connection every Session uses, instead of the default in settings.
+    connection: Option<String>,
+    /// The model every Session uses, instead of the default in settings.
+    model: Option<String>,
+    /// The main checkout of the project.
+    main: PathBuf,
+    /// The directory the person started `sstack-gui` in, inside the project.
+    started_in: PathBuf,
+    /// Where the project's Sessions are stored.
+    directory: PathBuf,
+    /// The container runtime shared by every Session's Sandbox, so that the runtime is chosen and
+    /// the image built once.
+    containers: Arc<Containers>,
+}
+
+impl Sessions for LiveSessions {
+    /// Readies the Session `start` asks for. Shell commands that the Sandbox cannot run are asked
+    /// about in the window.
+    fn open(&mut self, start: Start<'_>) -> Result<Opened> {
+        let (reports, sender) = Reports::new();
+        let approver = Arc::new(ReportingApprover::new(sender.clone()));
+        let run = prepare()
+            .start(start)
+            .directory(&self.started_in)
+            .maybe_connection(self.connection.as_deref())
+            .maybe_model(self.model.as_deref())
+            .approver(|_| approver)
+            .containers(Arc::clone(&self.containers))
+            .call()?;
+        Ok(Opened {
+            run,
+            reports,
+            sender,
+        })
+    }
+
+    fn check_archive(&self, id: &str) -> Result<()> {
+        match worktree::unfinished_work(&self.main, id)? {
+            Some(reason) => bail!("{reason}: land it, or use /archive --force"),
+            None => Ok(()),
+        }
+    }
+
+    fn archive(&mut self, id: &str) -> Result<()> {
+        worktree::remove(&self.main, id)?;
+        workspace::archive_session(&self.directory, id)?;
+        Ok(())
+    }
+
+    fn rename(&mut self, id: &str, name: Option<&str>) -> Result<()> {
+        Ok(workspace::name_session(&self.directory, id, name)?)
+    }
 }
 
 /// Builds `sstack-gui` from the Harness Source for a Rebuild, ending in where the new binary is
@@ -143,11 +194,11 @@ fn build_harness() -> BoxFuture<'static, Result<PathBuf, String>> {
     rebuild::build(HARNESS).boxed()
 }
 
-/// Opens the window on the readied Session, which iced asks for once as it starts.
+/// Opens the window on the readied Sessions, which iced asks for once as it starts.
 ///
 /// # Panics
 ///
-/// Panics if asked a second time, since the Session can be opened only once.
+/// Panics if asked a second time, since the Sessions can be opened only once.
 fn open(unopened: &Cell<Option<Ready>>) -> Window {
     Window::open(unopened.take().expect("iced opens the window once"))
 }
@@ -208,13 +259,6 @@ mod tests {
     /// Parses `cli` as if it followed the program name on the command line.
     fn args(cli: &[&str]) -> Args {
         Args::parse_from(std::iter::once("sstack-gui").chain(cli.iter().copied()))
-    }
-
-    #[test]
-    fn a_new_session_gets_its_own_worktree_unless_one_is_resumed() {
-        assert_eq!(args(&[]).start(), Start::New(Place::Worktree));
-        assert_eq!(args(&["--resume"]).start(), Start::Resume(LATEST));
-        assert_eq!(args(&["--resume", "12"]).start(), Start::Resume("12"));
     }
 
     #[test]

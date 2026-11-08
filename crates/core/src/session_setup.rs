@@ -19,7 +19,7 @@ use crate::session::{Entry, SessionError, SessionLog};
 use crate::skills::{self, Skill};
 use crate::tools::project::Project;
 use crate::tools::{Approver, Land, ToolBox};
-use crate::workspace::{self, SkillListing};
+use crate::workspace::{self, SessionSummary, SkillListing};
 use crate::worktree;
 
 /// The Session id that asks to resume the newest Session, archived or not.
@@ -248,6 +248,36 @@ pub fn sessions_directory(directory: &Path) -> Result<PathBuf, SetupError> {
     project_sessions(&main_checkout(directory)?)
 }
 
+/// Describes the stored Sessions of the project whose main checkout is `main` that are worth
+/// listing, with the Sessions stored in `directory`: those with something in them, those the
+/// person named, and blank ones with a worktree, which would otherwise be left behind unnoticed.
+///
+/// # Errors
+/// Fails if `directory` exists but cannot be read.
+pub fn listed_sessions(main: &Path, directory: &Path) -> io::Result<Vec<SessionSummary>> {
+    let mut stored = workspace::list_sessions(directory)?;
+    stored.retain(|summary| {
+        let id = workspace::session_id(&summary.path);
+        let named = summary.first_prompt.is_some() || summary.name.is_some();
+        named || worktree::path(main, &id).exists()
+    });
+    Ok(stored)
+}
+
+/// Picks the Session to show first: the one `resume` names, or else a blank Session. One that an
+/// earlier run left unused and unnamed among `stored` is reused, so that merely launching does
+/// not pile up worktrees.
+#[must_use]
+pub fn starting_session<'a>(resume: Option<&'a str>, stored: &'a [SessionSummary]) -> Start<'a> {
+    let unused = stored
+        .iter()
+        .find(|summary| summary.first_prompt.is_none() && summary.name.is_none())
+        .and_then(|summary| summary.path.file_stem()?.to_str());
+    resume
+        .or(unused)
+        .map_or(Start::New(Place::Worktree), Start::Resume)
+}
+
 /// Returns where the Sessions of the project at `root` are stored.
 fn project_sessions(root: &Path) -> Result<PathBuf, SetupError> {
     Ok(workspace::sessions_dir(&app_dir(dirs::data_dir())?, root))
@@ -417,6 +447,56 @@ mod tests {
         std::fs::create_dir_all(&existing).unwrap();
         let found = workplace(main, "2", false);
         assert_eq!(found.worktree, Some(existing));
+    }
+
+    /// Describes the stored Session with id `id`, which the person started with `first_prompt`.
+    fn summary(id: &str, first_prompt: Option<&str>) -> SessionSummary {
+        SessionSummary {
+            path: PathBuf::from(format!("/s/{id}.jsonl")),
+            first_prompt: first_prompt.map(str::to_owned),
+            name: None,
+            modified: std::time::UNIX_EPOCH,
+            parked: false,
+        }
+    }
+
+    #[test]
+    fn launching_reuses_an_unused_session_unless_told_otherwise() {
+        let stored = [summary("1", Some("hello")), summary("2", None)];
+        let spoken = &stored[..1];
+        let fresh = Start::New(Place::Worktree);
+
+        assert_eq!(starting_session(None, &stored), Start::Resume("2"));
+        assert_eq!(starting_session(None, spoken), fresh);
+        assert_eq!(starting_session(Some("1"), &stored), Start::Resume("1"));
+
+        let mut named = summary("3", None);
+        named.name = Some("for later".into());
+        assert_eq!(starting_session(None, &[named]), fresh);
+    }
+
+    #[test]
+    fn blank_sessions_are_listed_only_with_a_worktree() {
+        let main = tempfile::tempdir().unwrap();
+        let sessions = tempfile::tempdir().unwrap();
+        for id in ["1", "2", "3"] {
+            SessionLog::create(&workspace::session_path(sessions.path(), id)).unwrap();
+        }
+        let mut spoken = SessionLog::open(&workspace::session_path(sessions.path(), "1"))
+            .unwrap()
+            .0;
+        spoken.append(&Entry::User { text: "hi".into() }).unwrap();
+        drop(spoken);
+        std::fs::create_dir_all(worktree::path(main.path(), "2")).unwrap();
+
+        let listed = listed_sessions(main.path(), sessions.path()).unwrap();
+
+        let mut ids: Vec<_> = listed
+            .iter()
+            .map(|s| workspace::session_id(&s.path))
+            .collect();
+        ids.sort();
+        assert_eq!(ids, ["1", "2"]);
     }
 
     #[test]

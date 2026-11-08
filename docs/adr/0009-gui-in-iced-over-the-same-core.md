@@ -10,6 +10,6 @@ Two kinds of state stay in an interface on purpose. Transient state that only on
 
 ## Consequences
 
-The first GUI opens one Session per window, and is started from a terminal inside the project, taking the TUI's flags except `--prompt`. Choosing a project, an app bundle and a list of Sessions come later. Its styling stays minimal until a session dedicated to the visual style.
+The GUI is started from a terminal inside the project, taking the TUI's flags except `--prompt`. Like the TUI, it lists the project's Sessions beside the one on screen, in the queue order core keeps, and the others carry on while the person looks at one. Choosing a project and an app bundle come later. Its styling stays minimal until a session dedicated to the visual style.
 
 A Running Harness holds an exclusive lock on its Session's log, so the TUI and the GUI cannot both write to one Session. The kernel releases the lock when the process exits, however it exits.

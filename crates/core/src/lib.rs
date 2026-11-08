@@ -8,6 +8,7 @@ pub mod config;
 pub mod credentials;
 pub mod human_command;
 pub mod provider;
+pub mod queue;
 pub mod rebuild;
 pub mod running_harness;
 pub mod sandbox;
