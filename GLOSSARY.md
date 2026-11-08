@@ -50,6 +50,20 @@ _Avoid_: The harness (when the Running Harness could be meant)
 The smallest Harness able to make a real change to its own Harness Source with no outside tool.
 _Avoid_: MVP, prototype
 
+### Tools
+
+**Workspace**:
+The directory the model works in during a Session: the main checkout, or the Session's own worktree.
+_Avoid_: Project root, workplace, working copy
+
+**Protected Path**:
+A path in the Workspace that the model can never see or change by any tool, such as a `.git` directory or a `.env` file.
+_Avoid_: Hidden file, secret file
+
+**Sandbox**:
+The container a Session's shell commands run in without asking the person. It sees only the Workspace, without its Protected Paths, and has no network.
+_Avoid_: Jail, container (when the Sandbox is meant)
+
 ### Input
 
 **Draft**:
