@@ -8,6 +8,7 @@ use crossterm::event::KeyEvent;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use sstack::agent::TurnEnd;
+use sstack::running_harness::{SessionEvent, SessionState};
 use sstack::session::Entry;
 use sstack::skills::Skill;
 use sstack::workspace::{self, SessionSummary};
@@ -15,7 +16,6 @@ use sstack::workspace::{self, SessionSummary};
 use super::component::{Component, KeyOutcome};
 use super::components::{Activity, Approval, Input, Row, Status, Transcript};
 use super::event::{Event, SessionSender};
-use super::lifecycle::{SessionEvent, SessionState};
 use super::worker::AgentHandle;
 
 /// The name of a Session the person has neither named nor said anything in yet.

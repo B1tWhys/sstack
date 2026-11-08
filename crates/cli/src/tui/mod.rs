@@ -15,7 +15,6 @@ mod components;
 mod editor;
 mod event;
 mod input;
-mod lifecycle;
 mod pane;
 #[cfg(test)]
 mod test_support;
@@ -36,8 +35,9 @@ use crossterm::event::{
 };
 use crossterm::execute;
 use event::{Event, EventReceiver, EventSender, SessionSender};
-use lifecycle::Exit;
 use pane::Opened;
+use sstack::rebuild;
+use sstack::running_harness::Exit;
 use sstack::sandbox::Containers;
 use sstack::tools::Approver;
 use sstack::workspace::SessionSummary;
@@ -47,12 +47,11 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use worker::AgentHandle;
 
-use crate::Args;
 use crate::describe;
-use crate::rebuild;
 use crate::setup::{
     Place, Start, installed_skills, main_checkout, prepare, relaunch_args, sessions_directory,
 };
+use crate::{Args, HARNESS};
 
 /// Runs the interactive harness until the person quits, rebuilding when asked.
 ///
@@ -174,7 +173,7 @@ impl Sessions for LiveSessions<'_> {
     fn start_build(&mut self) {
         let events = self.events.clone();
         self.build = Some(tokio::spawn(async move {
-            let _ = events.send(Event::BuildFinished(rebuild::build().await));
+            let _ = events.send(Event::BuildFinished(rebuild::build(HARNESS).await));
         }));
     }
 

@@ -1,8 +1,8 @@
-//! The rules for what a Session is doing and what stopping means, kept apart from the screen.
+//! The rules for what each Session is doing and what stopping means for the Running Harness,
+//! shared by every interface.
 //!
-//! Everything here is a pure function of its inputs, so each rule can be tested without a terminal
-//! or an agent. The [`App`](crate::tui::app::App) feeds in what happened and carries out what comes
-//! back.
+//! Everything here is a pure function of its inputs, so each rule can be tested without an
+//! interface or an agent. An interface feeds in what happened and carries out what comes back.
 
 use std::path::PathBuf;
 
@@ -31,7 +31,7 @@ pub enum SessionState {
     Working,
     /// A Turn cannot continue until the person answers about a shell command.
     AwaitingApproval,
-    /// A Turn stopped between Steps so that the harness could stop, and will carry on.
+    /// A Turn stopped between Steps so that the Running Harness could stop, and will carry on.
     Parked,
 }
 
@@ -113,7 +113,7 @@ impl SessionState {
     }
 }
 
-/// Whether the harness is carrying on or on its way out.
+/// Whether the Running Harness is carrying on or on its way out.
 ///
 /// Every Session's Turns stop at the end of their Step while draining, so that nothing is cut
 /// short. Parked Turns carry on afterwards, in this process if the drain is abandoned, or in the
@@ -123,14 +123,14 @@ impl SessionState {
 ///                     /quit
 ///        +--------------------------------+
 ///        |                                v
-///   +---------+   Alt-C, or           +----------------+  all settled,
+///   +---------+   interrupted, or     +----------------+  all settled,
 ///   |         | <-------------------- | DrainingToQuit |  or /quit again
 ///   |         |                       +----------------+ ---------------> exit
 ///   | Running |
 ///   |         |   /rebuild            +-------------------+  all settled,
 ///   |         | --------------------> | DrainingToRebuild |  and built
 ///   |         | <-------------------- +-------------------+ -----------> relaunch
-///   +---------+   Alt-C, or build failed
+///   +---------+   interrupted, or build failed
 /// ```
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum Phase {
@@ -139,7 +139,7 @@ pub enum Phase {
     Running,
     /// The person is quitting, once Turns reach the end of their Step.
     DrainingToQuit,
-    /// The Harness Source is building, and the harness relaunches once that has worked and Turns
+    /// The Harness Source is building, and the Running Harness relaunches once that has worked and Turns
     /// have reached the end of their Step.
     DrainingToRebuild {
         /// The new binary, once the build has finished.
@@ -147,7 +147,7 @@ pub enum Phase {
     },
 }
 
-/// Something that moves the harness between [`Phase`]s.
+/// Something that moves the Running Harness between [`Phase`]s.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Trigger {
     /// The person asked for a Rebuild.
@@ -158,11 +158,11 @@ pub enum Trigger {
     Settled,
     /// The build finished, with the new binary if it worked.
     BuildFinished(Option<PathBuf>),
-    /// The person asked to stop what the harness is doing.
+    /// The person asked to stop what the Running Harness is doing.
     Interrupted,
 }
 
-/// What the harness must do because of a change of [`Phase`].
+/// What the Running Harness must do because of a change of [`Phase`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Effect {
     /// Nothing.
@@ -173,22 +173,22 @@ pub enum Effect {
     DrainAndBuild,
     /// A return to normal work, in which Turns carry on and any build stops.
     Abandon,
-    /// The end of the harness.
+    /// The end of the Running Harness.
     Exit(Exit),
 }
 
-/// Why the interactive harness stopped.
+/// Why the Running Harness stopped.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Exit {
     /// The person is finished.
     Quit,
-    /// The Rebuild is ready: the harness should relaunch into this binary. The
-    /// [`App`](crate::tui::app::App) can be run again if that fails.
+    /// The Rebuild is ready: the Running Harness should relaunch into this binary. The interface
+    /// can carry on if that fails.
     Rebuild(PathBuf),
 }
 
 impl Phase {
-    /// Returns the phase after `trigger`, and what the harness must do about it. A trigger that
+    /// Returns the phase after `trigger`, and what the Running Harness must do about it. A trigger that
     /// means nothing in this phase changes nothing.
     #[must_use]
     pub fn after(self, trigger: Trigger) -> (Self, Effect) {
@@ -199,7 +199,7 @@ impl Phase {
         }
     }
 
-    /// Returns what a running harness does on `trigger`.
+    /// Returns what a Running Harness working as normal does on `trigger`.
     fn after_running(trigger: &Trigger) -> (Self, Effect) {
         match trigger {
             Trigger::RebuildAsked => (
@@ -211,7 +211,7 @@ impl Phase {
         }
     }
 
-    /// Returns what a harness on its way to quitting does on `trigger`. Asking to quit a second
+    /// Returns what a Running Harness on its way to quitting does on `trigger`. Asking to quit a second
     /// time means not waiting.
     fn after_draining_to_quit(trigger: &Trigger) -> (Self, Effect) {
         match trigger {
@@ -221,7 +221,7 @@ impl Phase {
         }
     }
 
-    /// Returns what a harness on its way to relaunching into `binary` does on `trigger`.
+    /// Returns what a Running Harness on its way to relaunching into `binary` does on `trigger`.
     fn after_draining_to_rebuild(binary: Option<PathBuf>, trigger: Trigger) -> (Self, Effect) {
         match (trigger, binary) {
             (Trigger::Settled, Some(binary)) => {
@@ -237,46 +237,33 @@ impl Phase {
         }
     }
 
-    /// Returns whether the harness is on its way out, so that nothing new should start.
+    /// Returns whether the Running Harness is on its way out, so that nothing new should start.
     #[must_use]
     pub fn is_draining(&self) -> bool {
         *self != Self::Running
     }
 
-    /// Returns whether the harness is on its way to relaunching.
+    /// Returns whether the Running Harness is on its way to relaunching.
     #[must_use]
     pub fn is_rebuilding(&self) -> bool {
         matches!(self, Self::DrainingToRebuild { .. })
     }
-
-    /// Returns what the harness is doing, with `waiting_for` Turns still running, if the person
-    /// should know.
-    #[must_use]
-    pub fn progress(&self, waiting_for: usize) -> Option<String> {
-        let doing = match self {
-            Self::Running => return None,
-            Self::DrainingToQuit => "quitting",
-            Self::DrainingToRebuild { binary: None } => "building",
-            Self::DrainingToRebuild { binary: Some(_) } => "built",
-        };
-        Some(format!("{doing}, {waiting_for} running, Alt-C stops"))
-    }
 }
 
-/// What Alt-C does right now.
+/// What the person's request to interrupt does right now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Interrupt {
-    /// Cancellation of the Turn on screen.
+    /// Cancellation of the Turn the person is looking at.
     CancelTurn,
-    /// The end of the harness.
+    /// The end of the Running Harness.
     Quit,
     /// A refusal that only says why, because quitting would stop work the person cannot see.
     RefuseToQuit,
 }
 
-/// Decides what Alt-C does. It only ever affects the Session on screen, whose state is `shown`,
-/// so that one stray press cannot stop work the person is not looking at. `others_in_turn` says
-/// whether any other Session has a Turn running.
+/// Decides what the person's request to interrupt does. It only ever affects the Session they are
+/// looking at, whose state is `shown`, so that one stray press cannot stop work they cannot see.
+/// `others_in_turn` says whether any other Session has a Turn running.
 #[must_use]
 pub fn interrupt(shown: SessionState, others_in_turn: bool) -> Interrupt {
     if shown.in_turn() {
@@ -452,17 +439,7 @@ mod tests {
     }
 
     #[test]
-    fn the_person_is_told_what_a_drain_is_waiting_on() {
-        assert_eq!(Phase::Running.progress(2), None);
-        let quitting = Phase::DrainingToQuit.progress(2).unwrap();
-        assert_eq!(quitting, "quitting, 2 running, Alt-C stops");
-        let building = Phase::DrainingToRebuild { binary: None }
-            .progress(1)
-            .unwrap();
-        assert!(building.starts_with("building, 1 running"), "{building}");
-        let binary = Some(PathBuf::from("/b"));
-        let built = Phase::DrainingToRebuild { binary }.progress(0).unwrap();
-        assert!(built.starts_with("built, 0 running"), "{built}");
+    fn only_a_drain_stops_new_work() {
         assert!(!Phase::Running.is_draining());
         assert!(Phase::DrainingToQuit.is_draining());
         assert!(!Phase::DrainingToQuit.is_rebuilding());

@@ -2,10 +2,8 @@
 //!
 //! Sessions, Providers, tools and the agent loop are in [`sstack`].
 
-mod command;
 mod describe;
 mod headless;
-mod rebuild;
 mod setup;
 mod tui;
 
@@ -13,6 +11,7 @@ use std::process::ExitCode;
 
 use anyhow::Result;
 use clap::Parser;
+use sstack::rebuild::Binary;
 
 /// A coding agent that improves itself.
 #[derive(Debug, Parser)]
@@ -34,6 +33,12 @@ struct Args {
 
 /// The `--resume` value that means the newest Session.
 const LATEST: &str = "latest";
+
+/// The binary a Rebuild builds and relaunches into, which is this one.
+const HARNESS: Binary = Binary {
+    package: env!("CARGO_PKG_NAME"),
+    name: "sstack",
+};
 
 /// Runs the mode the arguments ask for.
 async fn run(args: Args) -> Result<ExitCode> {

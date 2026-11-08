@@ -8,23 +8,34 @@ use std::process::{Command, Stdio};
 /// How many lines of a failed build to show the person.
 const MAX_ERROR_LINES: usize = 20;
 
-/// Returns the Harness Source this binary was built from.
+/// One of the binaries in the Harness Source, which a Rebuild builds and relaunches into. Each
+/// interface passes its own, so that a Rebuild relaunches the interface the person is using.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Binary {
+    /// The cargo package the binary belongs to, such as `sstack-cli`.
+    pub package: &'static str,
+    /// The name of the binary, which is also its file name in cargo's output directory, such as
+    /// `sstack`.
+    pub name: &'static str,
+}
+
+/// Returns the Harness Source this code was built from, which every binary in it shares.
 fn source_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-/// Builds the command that compiles the harness binary from `source`.
-fn build_command(source: &Path, profile: &str) -> Command {
+/// Builds the command that compiles `package` from `source`.
+fn build_command(source: &Path, package: &str, profile: &str) -> Command {
     let mut command = Command::new("cargo");
     command
-        .args(["build", "--package", "sstack-cli", "--profile", profile])
+        .args(["build", "--package", package, "--profile", profile])
         .current_dir(source);
     command
 }
 
-/// Returns where cargo puts the binary for a profile's output directory.
-fn binary_path(source: &Path, profile_dir: &str) -> PathBuf {
-    source.join("target").join(profile_dir).join("sstack")
+/// Returns where cargo puts the binary called `name` for a profile's output directory.
+fn binary_path(source: &Path, profile_dir: &str, name: &str) -> PathBuf {
+    source.join("target").join(profile_dir).join(name)
 }
 
 /// Runs `command` to its end, returning what went wrong if it fails. Stops the build if dropped,
@@ -59,15 +70,20 @@ fn profile() -> (&'static str, &'static str) {
     }
 }
 
-/// Builds the Harness Source, returning the new binary, or what went wrong.
-pub async fn build() -> Result<PathBuf, String> {
+/// Builds `binary` from the Harness Source with the profile the running code was built with,
+/// returning where the new binary is, or what went wrong.
+///
+/// # Errors
+/// Returns the end of cargo's output if the build fails, or why cargo could not start.
+pub async fn build(binary: Binary) -> Result<PathBuf, String> {
     let (profile, directory) = profile();
     let source = source_dir();
-    run_build(build_command(&source, profile)).await?;
-    Ok(binary_path(&source, directory))
+    run_build(build_command(&source, binary.package, profile)).await?;
+    Ok(binary_path(&source, directory, binary.name))
 }
 
 /// Replaces this process with `binary`. Only returns if that fails.
+#[must_use]
 pub fn relaunch(binary: &Path, args: &[String]) -> io::Error {
     Command::new(binary).args(args).exec()
 }
@@ -78,7 +94,7 @@ mod tests {
 
     #[test]
     fn the_build_targets_the_harness_binary() {
-        let command = build_command(Path::new("/src"), "dev");
+        let command = build_command(Path::new("/src"), "sstack-cli", "dev");
         let args: Vec<_> = command.get_args().collect();
         assert_eq!(
             args,
@@ -89,7 +105,7 @@ mod tests {
 
     #[test]
     fn the_binary_is_found_under_the_profile_directory() {
-        let path = binary_path(Path::new("/src"), "debug");
+        let path = binary_path(Path::new("/src"), "debug", "sstack");
         assert_eq!(path, Path::new("/src/target/debug/sstack"));
     }
 

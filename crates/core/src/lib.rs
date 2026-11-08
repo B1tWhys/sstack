@@ -5,7 +5,10 @@
 pub mod agent;
 pub mod config;
 pub mod credentials;
+pub mod human_command;
 pub mod provider;
+pub mod rebuild;
+pub mod running_harness;
 pub mod sandbox;
 pub mod session;
 pub mod skills;

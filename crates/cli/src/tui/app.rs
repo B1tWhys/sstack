@@ -14,6 +14,8 @@ use crossterm::execute;
 use ratatui::backend::Backend;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::{Frame, Terminal};
+use sstack::human_command::{Command, parse_command};
+use sstack::running_harness::{self, Effect, Exit, Interrupt, Phase, SessionState, Trigger};
 use sstack::skills::{self, Lookup};
 use sstack::vim::{VimEvent, VimFailure};
 use sstack::workspace::SessionSummary;
@@ -21,10 +23,8 @@ use sstack::workspace::SessionSummary;
 use super::component::{Component, KeyOutcome};
 use super::components::{Activity, Row, SIDEBAR_WIDTH, Sidebar};
 use super::event::{Action, Event, EventReceiver};
-use super::lifecycle::{self, Effect, Exit, Interrupt, Phase, SessionState, Trigger};
 use super::pane::{Opened, Pane};
 use super::theme::ColorDepth;
-use crate::command::{Command, parse_command};
 use crate::setup::{Place, Start};
 
 /// The reason given to the person when their input is not acted on.
@@ -354,7 +354,7 @@ impl App<'_> {
             return self.advance(Trigger::Interrupted);
         }
         let pane = &self.panes[self.shown];
-        match lifecycle::interrupt(pane.state(), self.others_in_turn()) {
+        match running_harness::interrupt(pane.state(), self.others_in_turn()) {
             Interrupt::CancelTurn => pane.cancel(),
             Interrupt::Quit => return Some(Exit::Quit),
             Interrupt::RefuseToQuit => self.notice(OTHERS_WORKING.to_owned()),
@@ -596,7 +596,7 @@ impl App<'_> {
             .collect();
         let on_screen = queue.iter().position(|index| *index == self.shown);
         let running = self.panes.iter().filter(|pane| pane.state().in_turn());
-        let progress = self.phase.progress(running.count());
+        let progress = progress(&self.phase, running.count());
         let others = (area.is_empty())
             .then(|| progress.clone().or_else(|| self.summary_of_others(&rows)))
             .flatten();
@@ -624,6 +624,18 @@ impl App<'_> {
         .collect();
         (!parts.is_empty()).then(|| parts.join(", "))
     }
+}
+
+/// Returns what the Running Harness is doing in `phase`, with `waiting_for` Turns still running,
+/// if the person should know.
+fn progress(phase: &Phase, waiting_for: usize) -> Option<String> {
+    let doing = match phase {
+        Phase::Running => return None,
+        Phase::DrainingToQuit => "quitting",
+        Phase::DrainingToRebuild { binary: None } => "building",
+        Phase::DrainingToRebuild { binary: Some(_) } => "built",
+    };
+    Some(format!("{doing}, {waiting_for} running, Alt-C stops"))
 }
 
 /// Returns what a key press does whatever is on screen, if anything.
@@ -1876,5 +1888,17 @@ mod tests {
         assert_eq!(h.app.panes[0].state(), SessionState::Working);
         h.until_turn_ends().await;
         assert_eq!(h.app.panes[0].state(), SessionState::Idle);
+    }
+
+    #[test]
+    fn the_person_is_told_what_a_drain_is_waiting_on() {
+        assert_eq!(progress(&Phase::Running, 2), None);
+        let quitting = progress(&Phase::DrainingToQuit, 2).unwrap();
+        assert_eq!(quitting, "quitting, 2 running, Alt-C stops");
+        let building = progress(&Phase::DrainingToRebuild { binary: None }, 1).unwrap();
+        assert!(building.starts_with("building, 1 running"), "{building}");
+        let binary = Some(PathBuf::from("/b"));
+        let built = progress(&Phase::DrainingToRebuild { binary }, 0).unwrap();
+        assert!(built.starts_with("built, 0 running"), "{built}");
     }
 }

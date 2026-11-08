@@ -31,7 +31,7 @@ pub enum Command<'a> {
 }
 
 impl Command<'_> {
-    /// Returns whether this starts or removes work, which has no place while the harness is on
+    /// Returns whether this starts or removes work, which has no place while the Running Harness is on
     /// its way out.
     #[must_use]
     pub fn changes_work(&self) -> bool {
