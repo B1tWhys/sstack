@@ -11,8 +11,8 @@ use super::vim_prompt::VimPrompt;
 use crate::tui::component::{Component, KeyOutcome};
 use crate::tui::event::{Event, SessionSender};
 
-/// Lets a Session switch how the person types without the rest of the screen noticing, and falls
-/// back to the plain prompt by itself if nvim is lost.
+/// The way the person types in a Session, which can switch without the rest of the screen
+/// noticing and falls back to the plain prompt by itself if nvim is lost.
 #[derive(Debug)]
 pub enum Input {
     /// The plain prompt, with shell-style editing keys.

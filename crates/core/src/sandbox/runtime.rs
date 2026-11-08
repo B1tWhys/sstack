@@ -1,4 +1,4 @@
-//! Driving a container runtime from its command line.
+//! Container runtimes, driven through their command lines.
 
 use std::ffi::OsString;
 use std::io;
@@ -19,7 +19,7 @@ pub(super) const IMAGE_LABEL: &str = "sstack.image";
 /// How long a runtime may take to say whether it works before it counts as missing.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Runs a Sandbox's containers, whichever program provides them.
+/// Whichever program runs a Sandbox's containers.
 #[cfg_attr(test, mockall::automock)]
 #[async_trait]
 pub trait ContainerRuntime: Send + Sync {
@@ -111,8 +111,8 @@ pub enum Mask {
 /// leave behind, and quitting at once when stopped.
 const IDLE: &str = "trap 'exit 0' TERM; while :; do sleep 3600 & wait; done";
 
-/// Drives any runtime whose command line takes Docker's arguments, such as Podman, Finch,
-/// nerdctl and Docker itself.
+/// Any runtime whose command line takes Docker's arguments, such as Podman, Finch, nerdctl and
+/// Docker itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DockerCli {
     /// The program to run, such as `podman`.

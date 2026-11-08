@@ -21,10 +21,10 @@ fn io_error(path: &str, error: &std::io::Error) -> ToolError {
     ToolError(format!("{path}: {error}"))
 }
 
-/// Remembers what the model last saw of each file, so that `edit` and `write` only change a file
-/// the model knows as it is now. Without it, an edit could land on a file that a command, a
-/// formatter or the person has changed since, and line numbers the model remembers would point
-/// at the wrong lines.
+/// What the model last saw of each file, so that `edit` and `write` only change a
+/// file the model knows as it is now. Without it, an edit could land on a file that a command, a
+/// formatter or the person has changed since, and line numbers the model remembers would point at
+/// the wrong lines.
 ///
 /// One Session's file tools share one, and it is kept only in memory, so after a Rebuild the
 /// model has to read a file again before changing it.
@@ -87,11 +87,11 @@ fn hash(contents: &str) -> u64 {
     hasher.finish()
 }
 
-/// Lets the model read text files in the project.
+/// The tool for reading text files in the project.
 pub(super) struct Read {
     /// The project files are read from.
     project: Arc<Project>,
-    /// Told about every file read, so that it can later be changed.
+    /// What the model has seen, told of every file read so that the file can later be changed.
     seen: Arc<Seen>,
 }
 
@@ -150,11 +150,12 @@ impl Tool for Read {
     }
 }
 
-/// Lets the model create files and replace their whole contents.
+/// The tool for creating files and replacing their whole contents.
 pub(super) struct Write {
     /// The project files are written to.
     project: Arc<Project>,
-    /// Decides whether the model knows an existing file well enough to replace it.
+    /// What the model has seen, which decides whether it knows an existing file well enough to
+    /// replace it.
     seen: Arc<Seen>,
 }
 
@@ -226,11 +227,11 @@ impl Tool for Write {
     }
 }
 
-/// Lets the model change part of a file without rewriting it.
+/// The tool for changing part of a file without rewriting it.
 pub(super) struct Edit {
     /// The project files are edited in.
     project: Arc<Project>,
-    /// Decides whether the model knows a file well enough to change it.
+    /// What the model has seen, which decides whether it knows a file well enough to change it.
     seen: Arc<Seen>,
 }
 
@@ -404,11 +405,11 @@ mod tests {
 
     /// The file tools of one Session, sharing what the model has seen.
     struct FileTools {
-        /// Reads files and records what the model saw.
+        /// The tool that reads files and records what the model saw.
         read: Read,
-        /// Replaces whole files.
+        /// The tool that replaces whole files.
         write: Write,
-        /// Changes parts of files.
+        /// The tool that changes parts of files.
         edit: Edit,
     }
 

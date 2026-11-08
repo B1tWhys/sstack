@@ -1,4 +1,4 @@
-//! Finding the secret a [`Connection`](crate::config::Connection) names.
+//! Where the secret a [`Connection`](crate::config::Connection) names comes from.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -19,7 +19,7 @@ pub trait SecretStore {
     fn get(&self, name: &str) -> Option<String>;
 }
 
-/// Keeps secrets in the operating system's credential store.
+/// Secret storage in the operating system's credential store.
 #[derive(Debug, Default)]
 pub struct SystemKeyring;
 

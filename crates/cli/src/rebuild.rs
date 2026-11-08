@@ -1,4 +1,4 @@
-//! Building the Harness Source and relaunching into the result.
+//! The work behind a Rebuild: building the Harness Source and relaunching into the result.
 
 use std::io;
 use std::os::unix::process::CommandExt;

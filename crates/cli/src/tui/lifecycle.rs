@@ -167,13 +167,13 @@ pub enum Trigger {
 pub enum Effect {
     /// Nothing.
     None,
-    /// Asks Turns to stop at the end of their Step.
+    /// A request for Turns to stop at the end of their Step.
     Drain,
-    /// Asks Turns to stop at the end of their Step, and starts building.
+    /// A request for Turns to stop at the end of their Step, and the start of a build.
     DrainAndBuild,
-    /// Lets Turns carry on, and stops any build.
+    /// A return to normal work, in which Turns carry on and any build stops.
     Abandon,
-    /// Stops the harness.
+    /// The end of the harness.
     Exit(Exit),
 }
 
@@ -266,11 +266,11 @@ impl Phase {
 /// What Alt-C does right now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Interrupt {
-    /// Cancels the Turn on screen.
+    /// Cancellation of the Turn on screen.
     CancelTurn,
-    /// Stops the harness.
+    /// The end of the harness.
     Quit,
-    /// Does nothing but say why, because quitting would stop work the person cannot see.
+    /// A refusal that only says why, because quitting would stop work the person cannot see.
     RefuseToQuit,
 }
 

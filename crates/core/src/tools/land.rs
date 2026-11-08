@@ -19,7 +19,8 @@ const HOOK_TIMEOUT: Duration = Duration::from_mins(30);
 /// The most check output to return to the model.
 const MAX_OUTPUT_CHARS: usize = 8_000;
 
-/// Moves a worktree Session's commits onto the main branch, once the person approves.
+/// The tool that moves a worktree Session's commits onto the main branch, once the person
+/// approves.
 ///
 /// Rebasing and fast-forwarding skip pre-commit hooks, so the checks run again on the rebased
 /// result. Otherwise two changes that each pass could land as one that does not.
@@ -30,7 +31,7 @@ pub struct Land {
     pub main: PathBuf,
     /// The Session's branch.
     pub branch: String,
-    /// Decides whether the landing may happen.
+    /// Who decides whether the landing may happen.
     pub approver: Arc<dyn Approver>,
     /// Environment variables withheld from the checks.
     pub secret_env: Vec<String>,

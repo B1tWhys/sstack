@@ -97,8 +97,7 @@ const BINDINGS: &[(KeyModifiers, KeyCode, Edit)] = &[
     (KeyModifiers::CONTROL, KeyCode::Char('y'), Editor::yank),
 ];
 
-/// Collects input from the person, with shell-style editing keys, and submits it when they
-/// press Enter.
+/// Where the person types, with shell-style editing keys, until they press Enter to submit.
 ///
 /// It submits whatever is typed, leaving the [`App`](crate::tui::app::App) to decide whether that
 /// can happen now. Long input wraps onto more rows, so the App should give it the height

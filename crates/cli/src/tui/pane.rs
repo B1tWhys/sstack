@@ -18,12 +18,12 @@ use super::event::{Event, SessionSender};
 use super::lifecycle::{SessionEvent, SessionState};
 use super::worker::AgentHandle;
 
-/// Names a Session the person has neither named nor said anything in yet.
+/// The name of a Session the person has neither named nor said anything in yet.
 const UNTITLED: &str = "new session";
 
 /// A Session the harness has started an agent for.
 pub struct Opened {
-    /// Runs the Session's Turns.
+    /// The agent that runs the Session's Turns.
     pub agent: AgentHandle,
     /// Where the Session is stored.
     pub path: PathBuf,
@@ -47,7 +47,7 @@ enum Unseen {
     Failed,
 }
 
-/// Keeps one Session's screen up to date while it runs in the background, so that switching to it
+/// One Session's screen, kept up to date while it runs in the background, so that switching to it
 /// finds everything as it should be, half-typed input and open questions included.
 pub struct Pane {
     /// The Session's id, which `--resume` accepts.
@@ -59,8 +59,8 @@ pub struct Pane {
     first_prompt: Option<String>,
     /// The name the person gave the Session, if they gave it one.
     name: Option<String>,
-    /// Starts and cancels Turns. Missing until the Session is first shown, because a Session the
-    /// person never opens needs no agent.
+    /// Control of the Session's Turns. Missing until the Session is first shown, because
+    /// a Session the person never opens needs no agent.
     agent: Option<AgentHandle>,
     /// Where the Session's input reports. Missing until the agent is.
     events: Option<SessionSender>,
@@ -72,7 +72,7 @@ pub struct Pane {
     working_since: SystemTime,
     /// What the person has not seen yet.
     unseen: Option<Unseen>,
-    /// Asks about shell commands, over everything else.
+    /// The questions about shell commands, shown over everything else.
     approval: Approval,
     /// Where the person types.
     input: Input,

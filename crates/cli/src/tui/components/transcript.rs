@@ -22,8 +22,8 @@ const PAGE: u16 = 10;
 /// stays small.
 const WHEEL: u16 = 3;
 
-/// Shows the Session as it unfolds: what the person asked, what the model thought and replied,
-/// and what its tools and the harness reported.
+/// The Session as it unfolds: what the person asked, what the model thought and replied, and
+/// what its tools and the harness reported.
 ///
 /// It follows new output unless the person has scrolled back with Page Up.
 #[derive(Debug, Default)]

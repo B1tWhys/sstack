@@ -1,4 +1,4 @@
-//! Readying an agent and its Session for either mode, as the run's arguments ask.
+//! The setup of an agent and its Session for either mode, as the run's arguments ask.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -18,7 +18,8 @@ use sstack::worktree;
 
 use crate::{Args, LATEST, describe};
 
-/// Keeps the harness's files apart from others in the user's shared directories.
+/// The name of the directory that keeps the harness's files apart from others in the user's
+/// shared directories.
 const DIRECTORY_NAME: &str = "sstack";
 
 /// Returns where the harness keeps its files within `base`, failing if `base` is unknown.
@@ -49,7 +50,7 @@ pub enum Start<'a> {
 struct OpenedLog {
     /// Where the Session is stored.
     path: PathBuf,
-    /// Records the Session.
+    /// The durable record of the Session.
     log: SessionLog,
     /// The Session so far.
     entries: Vec<Entry>,
@@ -145,10 +146,10 @@ pub fn prepare(
     args: &Args,
     /// Which Session to work on.
     start: Start<'_>,
-    /// Is given the Session's id and returns what decides whether each shell command the model
-    /// asks to run on the host may run.
+    /// Makes, from the Session's id, whoever decides whether each shell command the model asks to
+    /// run on the host may run.
     approver: impl FnOnce(&str) -> Arc<dyn Approver>,
-    /// Runs the Session's Sandbox, shared with every other Session of the run.
+    /// The runtime for the Session's Sandbox, shared with every other Session of the run.
     containers: Arc<Containers>,
 ) -> Result<Run> {
     let config = load_settings()?;
@@ -241,9 +242,9 @@ fn agent_config(
     id: &str,
     /// Where the Session works.
     place: &Workplace,
-    /// Decides on the Session's shell commands that would run on the host.
+    /// Who decides on the Session's shell commands that would run on the host.
     approver: Arc<dyn Approver>,
-    /// Runs the Session's Sandbox.
+    /// The runtime for the Session's Sandbox.
     containers: Arc<Containers>,
     /// Every Skill installed for the Session. The model may read the files of all of them, since
     /// a person may run any of them, but is offered only those it may load on its own.

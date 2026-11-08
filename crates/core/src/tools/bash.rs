@@ -21,15 +21,15 @@ const MAX_OUTPUT_CHARS: usize = 30_000;
 /// What the approval prompt says about a command the model chose to run outside the Sandbox.
 const ASKED_NOTE: &str = "The model asked to run this outside the Sandbox.";
 
-/// Lets the model run shell commands in the project: in the Sandbox without asking, or on the
-/// host once the person approves.
+/// The tool for running shell commands in the project: in the Sandbox without asking,
+/// or on the host once the person approves.
 #[derive(Builder)]
 pub(super) struct Bash {
     /// The project commands run in.
     project: Arc<Project>,
     /// Where commands run without asking.
     sandbox: Arc<Sandbox>,
-    /// Decides whether each command may run on the host.
+    /// Who decides whether each command may run on the host.
     approver: Arc<dyn Approver>,
     /// Environment variables withheld from commands run on the host.
     #[builder(default)]
@@ -187,7 +187,7 @@ mod tests {
             .build()
     }
 
-    /// Approves everything, remembering the note it was shown each time.
+    /// An approver of everything, which remembers the note it was shown each time.
     #[derive(Default)]
     struct Noting(Mutex<Vec<Option<String>>>);
 

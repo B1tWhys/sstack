@@ -1,4 +1,4 @@
-//! Telling Human Commands apart from input meant for the model.
+//! Human Commands, told apart from input meant for the model.
 
 /// What a line entered by the person asks for.
 #[derive(Debug, PartialEq, Eq)]

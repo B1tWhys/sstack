@@ -1,4 +1,4 @@
-//! Carries a Session forward, one Turn at a time.
+//! The agent loop, which carries a Session forward one Turn at a time.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -10,9 +10,10 @@ use crate::provider::{ModelRequest, Provider, ProviderError, StreamEvent, ToolSp
 use crate::session::{AssistantEntry, Entry, SessionError, SessionLog, StopReason, ToolCall};
 use crate::tools::ToolBox;
 
-/// Tells the model that a tool call was abandoned because its Turn was cut short.
+/// The tool result telling the model that a call was abandoned because its Turn was cut short.
 const INTERRUPTED: &str = "not run: the turn was interrupted";
-/// Tells the model that a tool call was ignored because its response ended abnormally.
+/// The tool result telling the model that a call was ignored because its response ended
+/// abnormally.
 const NOT_RUN: &str = "not run: the response ended before this call could be used";
 
 /// Something that happened during a Turn, reported as it happens.
@@ -40,7 +41,7 @@ pub enum AgentEvent {
     },
 }
 
-/// Describes a tool call to the person watching it run.
+/// A description of a tool call for the person watching it run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolCallSummary {
     /// The name of the tool being called.
@@ -89,7 +90,7 @@ pub struct AgentConfig {
     pub context_limit: u64,
 }
 
-/// Carries one Session forward, keeping every Turn durable and resumable.
+/// The agent loop for one Session, which keeps every Turn durable and resumable.
 pub struct Agent {
     /// What this agent runs on.
     config: AgentConfig,
@@ -104,14 +105,15 @@ pub struct Agent {
 /// A callback that receives [`AgentEvent`]s as a Turn progresses.
 pub type EventSink<'a> = &'a mut (dyn FnMut(AgentEvent) + Send);
 
-/// Lets the caller of a Turn watch it and stop it.
+/// The caller's controls for watching a Turn and stopping it.
 pub struct TurnContext<'a> {
-    /// Stops the Turn when cancelled, leaving the Session resumable.
+    /// Cancelling this stops the Turn and leaves the Session resumable.
     pub cancel: &'a CancellationToken,
-    /// Stops the Turn at the end of the current Step while set, unlike `cancel`, which abandons
-    /// the Step. A Turn that ends by itself in that Step simply ends. Can be cleared again.
+    /// Whether the Turn should stop at the end of the current Step, unlike `cancel`, which
+    /// abandons the Step. A Turn that ends by itself in that Step simply ends. Can be
+    /// cleared again.
     pub pause: &'a AtomicBool,
-    /// Receives each event as the Turn progresses.
+    /// Where each event goes as the Turn progresses.
     pub on_event: EventSink<'a>,
 }
 

@@ -1,4 +1,4 @@
-//! Asking the person whether a shell command may run.
+//! The panel that asks the person whether a shell command may run.
 
 use std::collections::VecDeque;
 
@@ -11,8 +11,8 @@ use crate::tui::component::{Component, KeyOutcome};
 use crate::tui::event::{Action, ApprovalRequest, Event};
 use crate::tui::theme;
 
-/// Asks the person about each shell command the model wants to run, holding the keyboard until
-/// they answer.
+/// The panel that asks the person about each shell command the model wants to run, holding the
+/// keyboard until they answer.
 ///
 /// Only `y` approves. Every unanswered question is denied when its Turn ends.
 #[derive(Debug, Default)]

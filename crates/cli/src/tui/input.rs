@@ -1,4 +1,4 @@
-//! Turning what the terminal reports into events for the [`App`](crate::tui::app::App).
+//! Events for the [`App`](crate::tui::app::App), made from what the terminal reports.
 
 use std::io;
 

@@ -1,4 +1,4 @@
-//! Running Turns in the background, so the screen stays live while the agent works.
+//! Turns run in the background, so the screen stays live while the agent works.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -9,8 +9,8 @@ use tokio_util::sync::CancellationToken;
 
 use super::event::{Event, SessionSender};
 
-/// Lets the [`App`](crate::tui::app::App) start and cancel Turns on an agent that runs on its own
-/// task.
+/// The [`App`](crate::tui::app::App)'s handle on an agent that runs on its own task, for starting
+/// and cancelling Turns.
 ///
 /// Everything comes back as events. First [`Event::Resumed`] tells what the Session already holds.
 /// Then each Turn sends [`Event::TurnStarted`] or [`Event::TurnContinued`], any number of
@@ -18,17 +18,17 @@ use super::event::{Event, SessionSender};
 pub struct AgentHandle {
     /// Where Turns are queued for the agent's task.
     prompts: mpsc::UnboundedSender<Prompt>,
-    /// Stops the most recently started Turn.
+    /// Cancelling this stops the most recently started Turn.
     cancel: CancellationToken,
-    /// Asks every Turn to stop at the end of its Step.
+    /// Whether every Turn should stop at the end of its Step.
     pause: Arc<AtomicBool>,
 }
 
 /// What a queued Turn does.
 enum Work {
-    /// Starts a Turn on this input from the person.
+    /// A new Turn on this input from the person.
     Start(String),
-    /// Carries on a Turn that paused.
+    /// More of a Turn that paused.
     Continue,
 }
 
@@ -36,9 +36,9 @@ enum Work {
 struct Prompt {
     /// What the Turn does.
     work: Work,
-    /// Stops this Turn, even before it starts.
+    /// Cancelling this stops this Turn, even before it starts.
     cancel: CancellationToken,
-    /// Asks this Turn to stop at the end of its Step.
+    /// Whether this Turn should stop at the end of its Step.
     pause: Arc<AtomicBool>,
 }
 

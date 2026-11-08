@@ -116,12 +116,13 @@ fn numbered(lead: String, row: Vec<Span<'static>>) -> Line<'static> {
     Line::from(spans)
 }
 
-/// Passes what the person types to a real nvim and draws what comes back, without knowing any
-/// vim behavior itself. Alt-Enter submits in any mode, and Enter submits in Normal mode, where
-/// nvim decides what Enter does so that it applies in the mode nvim is really in.
+/// The input line that passes what the person types to a real nvim and draws what comes back,
+/// without knowing any vim behavior itself. Alt-Enter submits in any mode, and Enter submits in
+/// Normal mode, where nvim decides what Enter does so that it applies in the mode nvim is really
+/// in.
 #[derive(Debug)]
 pub struct VimPrompt {
-    /// Does the editing.
+    /// The nvim that does the editing.
     vim: Vim,
     /// What nvim last reported, or the draft until it has.
     state: VimState,
@@ -501,7 +502,7 @@ mod tests {
         assert_eq!(prompt.state.mode, VimMode::Insert);
     }
 
-    /// Drives a real nvim through the prompt.
+    /// Tests that drive a real nvim through the prompt.
     #[cfg(feature = "nvim-tests")]
     mod real {
         use super::*;

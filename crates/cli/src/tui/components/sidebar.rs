@@ -19,7 +19,7 @@ const HEADING_ROWS: u16 = 1;
 /// How many columns of a row come before the Session Name: the mark for the Session on screen,
 /// the activity marker and a space.
 const PREFIX_COLUMNS: usize = 3;
-/// Replaces the end of a Session Name too long to show in full.
+/// The stand-in for the end of a Session Name too long to show in full.
 const ELLIPSIS: &str = "..";
 
 /// What a Session is doing, as far as the person needs to know at a glance.
@@ -112,8 +112,8 @@ impl Row {
     }
 }
 
-/// Lists the Sessions in the order the [`App`](crate::tui::app::App) gives them, keeping the one on
-/// screen in view.
+/// The list of Sessions in the order the [`App`](crate::tui::app::App) gives them, which keeps the
+/// one on screen in view.
 #[derive(Debug, Default)]
 pub struct Sidebar {
     /// What to show, in order.

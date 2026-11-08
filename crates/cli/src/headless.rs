@@ -1,4 +1,4 @@
-//! Running one prompt with nobody watching, as plain text on standard output.
+//! The headless mode: one prompt run with nobody watching, as plain text on standard output.
 
 use std::ffi::OsString;
 use std::io::{IsTerminal, Write, stdout};
@@ -62,9 +62,9 @@ fn exit_code(end: Option<TurnEnd>) -> ExitCode {
     }
 }
 
-/// Starts the look given to the model's reasoning: dim and italic.
+/// The escape sequence that starts the look given to the model's reasoning: dim and italic.
 const REASONING_STYLE: &str = "\x1b[2;3m";
-/// Returns the terminal to its normal look.
+/// The escape sequence that returns the terminal to its normal look.
 const RESET_STYLE: &str = "\x1b[0m";
 
 /// Returns whether output to `stream` may be styled.
@@ -79,7 +79,7 @@ fn style_allowed(is_terminal: bool, no_color: Option<OsString>) -> bool {
     is_terminal && no_color.is_none_or(|value| value.is_empty())
 }
 
-/// Shows a Turn's events as text, setting the model's reasoning apart from its reply.
+/// The text view of a Turn's events, which sets the model's reasoning apart from its reply.
 ///
 /// Use one for each Turn, because it remembers what was shown last. Write failures are ignored,
 /// because they must not stop a Turn.

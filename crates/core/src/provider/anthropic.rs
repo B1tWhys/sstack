@@ -1,4 +1,4 @@
-//! Lets Sessions run on Claude models.
+//! The Provider that runs Sessions on Claude models.
 
 use async_trait::async_trait;
 use futures::{Stream, StreamExt};
@@ -18,13 +18,14 @@ use crate::session::{AssistantEntry, Entry, ProviderPayload, StopReason, ToolCal
 const PROVIDER: &str = "anthropic";
 /// The most output tokens to allow in one response.
 const MAX_OUTPUT_TOKENS: u32 = 64_000;
-/// Turns on retrying refused requests on another model, and tolerating outdated thinking.
+/// The header that turns on retrying refused requests on another model, and tolerating outdated
+/// thinking.
 const BETA_FEATURES: (&str, &str) = (
     "anthropic-beta",
     "server-side-fallback-2026-07-01,thinking-binding-controls-2026-08-01",
 );
 
-/// Lets a Session be run by Claude models.
+/// The Provider for Claude models.
 pub struct AnthropicProvider {
     /// The underlying API client.
     client: Client,

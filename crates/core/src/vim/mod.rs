@@ -46,7 +46,7 @@ pub enum VimMode {
     Replace,
     /// Any kind of Visual or Select mode.
     Visual,
-    /// Typing on the command line, as after `:` or `/`.
+    /// Command-line mode, as after `:` or `/`.
     Command,
 }
 
@@ -158,12 +158,12 @@ enum Command {
         /// The width in columns.
         columns: u16,
     },
-    /// Hand over the text and start again with an empty buffer.
+    /// A request to hand over the text and start again with an empty buffer.
     Submit,
 }
 
-/// Edits one piece of text with a real nvim running behind the scenes, keeping the nvim alive for
-/// as long as this value exists.
+/// An editor for one piece of text, with a real nvim running behind the scenes that stays alive
+/// for as long as this value exists.
 ///
 /// Nothing here waits, so a front end can call it from its input handling. What happens comes back
 /// through the `on_event` callback, in order, from another task. Everything sent before nvim has

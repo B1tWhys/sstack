@@ -20,7 +20,7 @@ const DEFAULT_SECRET: &str = "ANTHROPIC_API_KEY";
 /// The context window assumed for a [`Connection`] that does not set one, in tokens.
 const DEFAULT_CONTEXT_LIMIT: u64 = 1_000_000;
 
-/// Identifies the kind of Provider a [`Connection`] talks to.
+/// The kind of Provider a [`Connection`] talks to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ProviderKind {
@@ -33,7 +33,7 @@ fn default_context_limit() -> u64 {
     DEFAULT_CONTEXT_LIMIT
 }
 
-/// Encapsulates everything you need to open a connection to a given Provider.
+/// Everything needed to open a connection to a given Provider.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Connection {
@@ -41,7 +41,7 @@ pub struct Connection {
     pub provider: ProviderKind,
     /// The name of the secret to look up, not the secret itself.
     pub secret: String,
-    /// Replaces the Provider's default API address.
+    /// The API address to use instead of the Provider's default.
     pub base_url: Option<String>,
     /// How much effort the model should spend on each response.
     #[serde(default)]

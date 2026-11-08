@@ -8,7 +8,8 @@ use crate::tui::component::Component;
 use crate::tui::event::Event;
 use crate::tui::theme;
 
-/// Tells the person which Session they are in, whether the agent is working, and how to stop.
+/// The line that tells the person which Session they are in, whether the agent is working, and
+/// how to stop.
 #[derive(Debug)]
 pub struct Status {
     /// The id of the Session, which `--resume` accepts.

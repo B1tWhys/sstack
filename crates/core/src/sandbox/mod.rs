@@ -1,5 +1,5 @@
-//! Running the model's shell commands where they can reach nothing but the Workspace, so that
-//! they need nobody's approval.
+//! A restricted environment for the model's shell commands, which can reach nothing but the
+//! Workspace, so they need nobody's approval.
 //!
 //! Each Session's Sandbox is a long-lived container, started by its first command and removed
 //! when the Session goes. Commands run in it one `exec` at a time. Which runtime runs the
@@ -61,8 +61,8 @@ pub enum Failure {
     TimedOut(Duration),
 }
 
-/// Finds the container runtime and the image every Sandbox in the Harness uses, the first time
-/// one is needed.
+/// The container runtime and the image every Sandbox in the Harness uses, found
+/// the first time one is needed.
 ///
 /// That first time also removes the containers that Harnesses which have since gone left
 /// behind.
@@ -239,8 +239,8 @@ fn bounded(script: &str, limit: Duration) -> Vec<String> {
     .to_vec()
 }
 
-/// Runs one Session's shell commands in a container that sees only its Workspace, without its
-/// Protected Paths, and has no network.
+/// The container one Session's shell commands run in, which sees only its Workspace, without
+/// its Protected Paths, and has no network.
 ///
 /// The container starts with the first command and is removed when the Sandbox is dropped. A
 /// command abandoned partway, as when its Turn is cancelled, takes the container with it,
@@ -256,7 +256,7 @@ pub struct Sandbox {
     session: String,
     /// The Workspace, with symlinks resolved.
     workspace: PathBuf,
-    /// Lets only one command at a time start the container.
+    /// Held while the container starts, so that only one command at a time starts it.
     starting: Mutex<()>,
     /// Whether this Sandbox's container is believed to be running.
     started: AtomicBool,
@@ -413,7 +413,8 @@ fn owner_verdict(owner: Option<u32>, person: u32) -> Result<(), String> {
     }
 }
 
-/// Removes a Sandbox's container if the command running in it is abandoned before it ends.
+/// A guard that removes a Sandbox's container if the command running in it is abandoned before
+/// it ends.
 struct Abandoned<'a> {
     /// The Sandbox the command runs in.
     sandbox: &'a Sandbox,

@@ -1,14 +1,14 @@
-//! Laying out text being typed, so that every way of typing looks the same.
+//! The layout of text being typed, so that every way of typing looks the same.
 
 use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthChar;
 
 use crate::tui::theme;
 
-/// Shown before the first row of what the person types.
+/// The marker shown before the first row of what the person types.
 const MARKER: &str = "> ";
 
-/// Shown before every later row, so wrapped text lines up after the marker.
+/// The indent shown before every later row, so wrapped text lines up after the marker.
 const INDENT: &str = "  ";
 
 /// How many columns the marker and indent take.
@@ -69,7 +69,7 @@ pub fn to_u16(count: usize) -> u16 {
     u16::try_from(count).unwrap_or(u16::MAX)
 }
 
-/// Lays out text into rows of a fixed width, one character at a time, breaking at newlines and
+/// A layout of text into rows of a fixed width, one character at a time, breaking at newlines and
 /// wherever the next character would not fit.
 struct Rows {
     /// The rows before the one being filled.

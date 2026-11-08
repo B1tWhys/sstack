@@ -75,12 +75,12 @@ async fn an_error_during_setup_is_reported() {
     assert!(matches!(failure, VimFailure::Rejected(_)), "{failure:?}");
 }
 
-/// Drives a real nvim, ignoring the person's config.
+/// Tests that drive a real nvim, ignoring the person's config.
 #[cfg(feature = "nvim-tests")]
 mod real {
     use super::*;
 
-    /// Runs a [`Vim`] and collects what it reports.
+    /// A [`Vim`] under test, with everything it reports collected.
     struct Harness {
         /// The nvim being driven.
         vim: Vim,

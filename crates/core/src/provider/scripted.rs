@@ -11,7 +11,7 @@ use crate::session::{AssistantEntry, Entry};
 /// One canned response: its text is streamed before the response is returned.
 pub type Scripted = Result<AssistantEntry, String>;
 
-/// Stands in for a real [`Provider`], so tests can script responses and inspect requests.
+/// A stand-in for a real [`Provider`], so tests can script responses and inspect requests.
 #[derive(Debug, Default)]
 pub struct ScriptedProvider {
     /// The responses not yet returned.

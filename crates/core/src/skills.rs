@@ -1,5 +1,5 @@
-//! Finding the [`Skill`]s that a project and a person keep in the `.agents/skills` directories
-//! sstack shares with other agent tools, such as Codex.
+//! The [`Skill`]s a project and a person keep in the `.agents/skills` directories that sstack
+//! shares with other agent tools, such as Codex, and how they are found.
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
@@ -147,7 +147,7 @@ fn name_clashes_by_scope(mut skills: Vec<Skill>) -> Vec<Skill> {
     skills
 }
 
-/// Remembers what a search has seen, so that nothing is kept twice.
+/// What a search has seen so far, so that nothing is kept twice.
 #[derive(Debug, Default)]
 struct Search {
     /// Every Skill directory kept so far, with symlinks resolved.

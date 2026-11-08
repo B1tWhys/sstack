@@ -9,11 +9,12 @@ use sstack::session::Entry;
 use sstack::vim::VimEvent;
 use tokio::sync::{mpsc, oneshot};
 
-/// Lets any task tell the [`App`](crate::tui::app::App) that something happened. Sending never
-/// blocks, so it is safe from inside a Turn's event callback.
+/// The channel any task uses to tell the [`App`](crate::tui::app::App) that something happened.
+/// Sending never blocks, so it is safe from inside a Turn's event callback.
 pub type EventSender = mpsc::UnboundedSender<Event>;
 
-/// Delivers what happened to the [`App`](crate::tui::app::App), in the order it was sent.
+/// The [`App`](crate::tui::app::App)'s end of the event channel, which delivers what happened in
+/// the order it was sent.
 pub type EventReceiver = mpsc::UnboundedReceiver<Event>;
 
 /// Something that happened, which the [`App`](crate::tui::app::App) passes on to its components.
@@ -64,8 +65,8 @@ pub enum Event {
     Vim(VimEvent),
 }
 
-/// Lets a Session's agent report to the [`App`](crate::tui::app::App), which keeps it apart from
-/// other Sessions' reports.
+/// The channel a Session's agent uses to report to the [`App`](crate::tui::app::App), which keeps
+/// it apart from other Sessions' reports.
 #[derive(Debug, Clone)]
 pub struct SessionSender {
     /// The id of the Session being reported on.
@@ -121,7 +122,7 @@ pub enum Action {
     Archive,
 }
 
-/// Asks the person whether a command may run on the host.
+/// A question asking the person whether a command may run on the host.
 #[derive(Debug, Clone)]
 pub struct ApprovalRequest {
     /// The command, exactly as it would run.
@@ -132,7 +133,7 @@ pub struct ApprovalRequest {
     pub reply: Reply<bool>,
 }
 
-/// Answers a question that another task is waiting on.
+/// A reply to a question that another task is waiting on.
 ///
 /// Clones share one answer, and only the first answer given counts. Once every clone is dropped
 /// unanswered, the waiting task sees that no answer will come.

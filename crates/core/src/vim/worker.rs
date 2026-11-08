@@ -1,4 +1,4 @@
-//! Keeping an nvim running on behalf of a [`Vim`](super::Vim).
+//! An nvim kept running on behalf of a [`Vim`](super::Vim).
 
 use std::io;
 use std::path::PathBuf;
@@ -17,8 +17,9 @@ use super::{Command, Draft, VimEvent, VimFailure};
 /// The script that prepares nvim to edit a [`Draft`].
 const BOOTSTRAP: &str = include_str!("bootstrap.lua");
 
-/// Goes to Normal mode whatever was half-typed, then hands over the text. It travels with the keys
-/// so that it lands after them, and cancelling frees nvim if it was waiting on a key.
+/// The command that goes to Normal mode whatever was half-typed, then hands over the text. It
+/// travels with the keys so that it lands after them, and cancelling frees nvim if it was waiting
+/// on a key.
 const SUBMIT_KEYS: &str = "<Esc><Cmd>lua sstack_submit()<CR>";
 
 /// Why one nvim stopped being used.
@@ -31,12 +32,12 @@ enum Ended {
     Failed(VimFailure),
 }
 
-/// Runs nvim until its front end goes away, replacing it if the person quits it.
+/// An nvim kept running until its front end goes away, and replaced if the person quits it.
 #[derive(Builder)]
 pub struct Worker {
     /// What the front end wants done.
     inbox: mpsc::UnboundedReceiver<Command>,
-    /// Tells the front end what happened.
+    /// How the front end hears what happened.
     report: Box<dyn FnMut(VimEvent) + Send>,
     /// The text as last reported, for the next nvim or for the front end to recover.
     draft: Draft,

@@ -26,7 +26,7 @@ use crate::skills::Skill;
 pub use land::Land;
 use project::Project;
 
-/// Decides whether the model may run a command on the host, outside the Sandbox.
+/// Someone who decides whether the model may run a command on the host, outside the Sandbox.
 #[async_trait]
 pub trait Approver: Send + Sync {
     /// Returns whether the model may run `command`. `note`, if given, tells the person why
@@ -34,7 +34,7 @@ pub trait Approver: Send + Sync {
     async fn approve(&self, command: &str, note: Option<&str>) -> bool;
 }
 
-/// Refuses everything, for runs with nobody to ask.
+/// An [`Approver`] that refuses everything, for runs with nobody to ask.
 #[derive(Debug, Default)]
 pub struct DenyAll;
 
@@ -87,7 +87,7 @@ impl ToolBox {
         project: Arc<Project>,
         /// Where shell commands run without asking.
         sandbox: Arc<Sandbox>,
-        /// Decides on shell commands that would run on the host.
+        /// Who decides on shell commands that would run on the host.
         approver: Arc<dyn Approver>,
         /// Environment variables withheld from shell commands run on the host.
         #[builder(default)]

@@ -100,7 +100,7 @@ fn starting_session<'a>(args: &'a Args, stored: &'a [SessionSummary]) -> Start<'
     wanted.map_or(Start::New(Place::Worktree), Start::Resume)
 }
 
-/// Opens and archives Sessions for real, on behalf of the [`App`].
+/// Real Sessions, opened and archived on behalf of the [`App`].
 struct LiveSessions<'a> {
     /// The arguments of this run.
     args: &'a Args,
@@ -110,7 +110,8 @@ struct LiveSessions<'a> {
     main: PathBuf,
     /// Where the project's Sessions are stored.
     directory: PathBuf,
-    /// Runs every Session's Sandbox, so that the runtime is chosen and the image built once.
+    /// The container runtime shared by every Session's Sandbox, so that the runtime is chosen and
+    /// the image built once.
     containers: Arc<Containers>,
     /// The build in progress. Aborting it stops the build.
     build: Option<JoinHandle<()>>,
@@ -203,7 +204,8 @@ async fn on_screen(app: &mut App<'_>, events: &mut EventReceiver) -> Result<Exit
     Ok(exit?)
 }
 
-/// Has the terminal report pastes in one piece and the mouse wheel, for as long as it lives.
+/// The terminal modes that report pastes in one piece and the mouse wheel, which stay on for as
+/// long as this value lives.
 ///
 /// Dropping it hands the terminal back as it was, including when the harness panics, so the
 /// person's shell is never left receiving mouse reports. While it lives, most terminals select

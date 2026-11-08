@@ -106,7 +106,7 @@ pub enum SessionError {
     Malformed(#[from] serde_json::Error),
 }
 
-/// Records a Session durably, so that it survives crashes and can be resumed.
+/// The durable record of a Session, which survives crashes and can be resumed.
 #[derive(Debug)]
 pub struct SessionLog {
     /// Where entries are stored.

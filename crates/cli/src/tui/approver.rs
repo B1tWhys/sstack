@@ -1,11 +1,12 @@
-//! Asking the person about shell commands from inside a running Turn.
+//! The way a running Turn asks the person about shell commands.
 
 use async_trait::async_trait;
 use sstack::tools::Approver;
 
 use super::event::{ApprovalRequest, Event, Reply, SessionSender};
 
-/// Lets the person decide on screen whether each shell command runs, while the Turn waits.
+/// The Approver that lets the person decide on screen whether each shell command runs, while the
+/// Turn waits.
 ///
 /// A command is denied if the interactive harness has gone or drops the question unanswered,
 /// such as when the Turn is cancelled.

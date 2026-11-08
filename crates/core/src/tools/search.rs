@@ -16,7 +16,7 @@ use crate::provider::ToolSpec;
 /// The most results returned from one search.
 const MAX_RESULTS: usize = 500;
 
-/// Lets the model find files and text in the project.
+/// The tool for finding files and text in the project.
 pub(super) struct Search {
     /// The project to search.
     project: Arc<Project>,

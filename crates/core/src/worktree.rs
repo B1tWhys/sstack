@@ -1,5 +1,5 @@
-//! Giving a Session its own copy of the project, so that parallel Sessions cannot disturb each
-//! other's half-finished work.
+//! A Session's own copy of the project, so that parallel Sessions cannot disturb each other's
+//! half-finished work.
 //!
 //! A Session has a worktree exactly when the directory [`path`] names exists. Any other Session
 //! works in the main checkout.

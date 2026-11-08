@@ -1,4 +1,4 @@
-//! Talking to one nvim process over msgpack-RPC.
+//! A msgpack-RPC connection to one nvim process.
 
 use std::io::{self, Cursor};
 use std::path::Path;
@@ -14,7 +14,8 @@ use super::VimState;
 /// How msgpack-RPC marks a message that expects no reply.
 const NOTIFICATION: u8 = 2;
 
-/// Set before the person's config runs, so that it can skip what does not belong in a prompt.
+/// The marker set before the person's config runs, so that it can skip what does not belong in a
+/// prompt.
 const MARK_AS_SSTACK: &str = "let g:sstack = 1";
 
 /// How many bytes to read from nvim at a time.
@@ -35,7 +36,7 @@ pub enum Inbound {
     Closed,
 }
 
-/// Lets the harness talk to a running nvim, killing it when dropped.
+/// A connection to a running nvim, which kills the nvim when dropped.
 ///
 /// Only notifications are ever sent. Nvim would not answer a request while it waits on a key, and
 /// the harness must stay free to send that key.

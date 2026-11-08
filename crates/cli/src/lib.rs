@@ -1,4 +1,4 @@
-//! Runs sstack from a terminal, interactively or for a single prompt.
+//! The terminal front end of sstack, run interactively or for a single prompt.
 //!
 //! Sessions, Providers, tools and the agent loop are in [`sstack`].
 

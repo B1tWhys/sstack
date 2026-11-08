@@ -1,9 +1,9 @@
-//! Editing text with a cursor, independent of which keys drive it.
+//! A text editor with a cursor, independent of which keys drive it.
 
 use std::ops::Range;
 
-/// Edits text the way a shell's command line does: moving by character, word and line, deleting,
-/// and killing text so it can be yanked back.
+/// A line editor that works the way a shell's command line does: moving by character, word and
+/// line, deleting, and killing text so it can be yanked back.
 ///
 /// It knows nothing of keys, so different key schemes can drive the same edits. A line is the text
 /// between newlines, not a row on screen.

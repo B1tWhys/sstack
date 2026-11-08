@@ -6,8 +6,9 @@ use super::{Tool, ToolError, parse_input};
 use crate::provider::ToolSpec;
 use crate::skills::{self, Skill};
 
-/// Lets the model load the instructions of an installed [`Skill`], which may live outside the
-/// project, and learn which files sit beside them, without opening anything else out there.
+/// The tool for loading the instructions of an installed [`Skill`], which may live outside the
+/// project. It also lists the files beside the instructions, without opening anything else out
+/// there.
 pub(super) struct UseSkill {
     /// The only Skills the model can ask for.
     skills: Vec<Skill>,

@@ -23,13 +23,13 @@ const SESSION_EXTENSION: &str = "jsonl";
 const NAME_EXTENSION: &str = "name";
 /// The directory, among a project's Sessions, of the ones the person has put away.
 const ARCHIVE_DIR: &str = "archived";
-/// Tells the model how to work in a Session that has its own worktree.
+/// The model's instructions for working in a Session that has its own worktree.
 const WORKTREE_PROMPT: &str = "This Session has its own git worktree on its own branch. Other \
 Sessions work in parallel in their own worktrees. Commit here, then call the `land` tool to move \
 each working change onto the main branch. Do not change the main branch any other way. Before \
 each `land` call, give the person a summary to approve it against: what changed, any side effects \
 or limits, and how you verified it.";
-/// Tells the model what the listed Skills are and when to use them.
+/// The model's instructions on what the listed Skills are and when to use them.
 const SKILLS_PROMPT: &str = "These Skills hold instructions for particular kinds of work. When \
 one fits what you are about to do, call the `skill` tool with its name first and follow what it \
 says.";

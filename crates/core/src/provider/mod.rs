@@ -15,7 +15,7 @@ use crate::session::{AssistantEntry, Entry};
 pub enum Effort {
     /// The least effort, for simple work.
     Low,
-    /// Balances thoroughness against cost.
+    /// A balance between thoroughness and cost.
     Medium,
     /// Thorough effort, and the default.
     #[default]

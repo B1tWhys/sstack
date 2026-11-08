@@ -1,4 +1,4 @@
-//! Runs the real binary against a local stand-in for the Claude API.
+//! End-to-end tests of the real binary against a local stand-in for the Claude API.
 
 use std::fs;
 use std::io::{Read, Write};
@@ -93,7 +93,7 @@ fn tool_call(name: &str, input: &serde_json::Value) -> String {
     stream(&blocks, "tool_use")
 }
 
-/// Stands in for the Claude API, so tests can script replies and inspect requests.
+/// A stand-in for the Claude API, so tests can script replies and inspect requests.
 struct FakeApi {
     url: String,
     requests: Arc<Mutex<Vec<String>>>,

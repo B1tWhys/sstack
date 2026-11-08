@@ -27,11 +27,11 @@ use super::theme::ColorDepth;
 use crate::command::{Command, parse_command};
 use crate::setup::{Place, Start};
 
-/// Tells the person why their input was not acted on.
+/// The reason given to the person when their input is not acted on.
 const BUSY: &str = "a Turn is running: wait for it to end, or press Alt-C to cancel it";
-/// Tells the person why nothing new started.
+/// The reason given to the person when nothing new starts.
 const DRAINING: &str = "the harness is stopping: press Alt-C to stay";
-/// Tells the person why Alt-C did not quit.
+/// The reason given to the person when Alt-C does not quit.
 const OTHERS_WORKING: &str = "other Sessions are working: use /quit to stop them too";
 /// The narrowest screen that shows the sidebar, which would otherwise crowd out the Session.
 const SIDEBAR_MIN_SCREEN_WIDTH: u16 = 80;
@@ -83,7 +83,7 @@ pub trait Sessions {
     fn cancel_build(&mut self);
 }
 
-/// Runs the interactive harness: the one place that knows every Session and what each [`Action`]
+/// The interactive harness: the one place that knows every Session and what each [`Action`]
 /// means.
 pub struct App<'a> {
     /// Every Session the person can switch to, in no meaningful order.
@@ -92,9 +92,9 @@ pub struct App<'a> {
     shown: usize,
     /// Whether the harness is carrying on or on its way out.
     phase: Phase,
-    /// Lists the Sessions.
+    /// The list of Sessions.
     sidebar: Sidebar,
-    /// Opens and archives Sessions as the person asks.
+    /// Where Sessions are opened and archived as the person asks.
     sessions: Box<dyn Sessions + 'a>,
     /// How many colors the terminal can show, which the theme's colors are fitted to.
     colors: ColorDepth,
@@ -689,7 +689,7 @@ mod tests {
     struct TestSessions {
         /// Where Sessions are stored.
         root: PathBuf,
-        /// Runs every Session's Turns.
+        /// The Provider that runs every Session's Turns.
         provider: Arc<dyn Provider>,
         /// Where every Session reports.
         sender: EventSender,
@@ -1026,7 +1026,7 @@ mod tests {
         assert_snapshot!(h.drawn_at(NARROW));
     }
 
-    /// Never answers, so that a Turn stays running until it is cancelled.
+    /// A Provider that never answers, so that a Turn stays running until it is cancelled.
     struct NeverResponds;
 
     #[async_trait]
