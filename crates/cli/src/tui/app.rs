@@ -68,6 +68,13 @@ pub trait Sessions {
     /// Returns an error if the Session could not be put away.
     fn archive(&mut self, id: &str) -> Result<()>;
 
+    /// Stores `name` as the Session Name of the Session with id `id`, so that it lasts beyond this
+    /// run. With `None`, the Session is known by its first prompt again.
+    ///
+    /// # Errors
+    /// Returns an error if the name could not be stored.
+    fn rename(&mut self, id: &str, name: Option<&str>) -> Result<()>;
+
     /// Starts building the Harness Source in the background, which ends in an
     /// [`Event::BuildFinished`].
     fn start_build(&mut self);
@@ -426,6 +433,7 @@ impl App<'_> {
             Command::NewMain => self.open_new(Place::MainCheckout),
             Command::Archive { force } => self.archive(force),
             Command::Vim => self.panes[self.shown].toggle_vim(),
+            Command::Rename(name) => self.rename(name),
             Command::Quit => return self.quit(),
             Command::Unknown(line) => self.run_skill(line),
             Command::Empty => {}
@@ -482,6 +490,16 @@ impl App<'_> {
             self.notice(BUSY.to_owned());
         } else {
             self.panes[self.shown].start_turn(text);
+        }
+    }
+
+    /// Makes `name` the Session Name of the Session on screen, or with `None` goes back to its first
+    /// prompt. If the name cannot be stored, nothing changes and the person is told why.
+    fn rename(&mut self, name: Option<&str>) {
+        let pane = &mut self.panes[self.shown];
+        match self.sessions.rename(pane.id(), name) {
+            Ok(()) => pane.rename(name),
+            Err(error) => self.notice(format!("not renamed: {error}")),
         }
     }
 
@@ -632,6 +650,7 @@ mod tests {
     use sstack::provider::{ModelRequest, Provider, ProviderError, StreamEvent};
     use sstack::session::{AssistantEntry, Entry, SessionLog};
     use sstack::vim::Draft;
+    use sstack::workspace;
     use std::cell::RefCell;
     use std::fs;
     use std::path::PathBuf;
@@ -687,6 +706,8 @@ mod tests {
         refusal: Option<&'static str>,
         /// Why archiving fails, if it does.
         archive_failure: Option<&'static str>,
+        /// Why storing a Session Name fails, if it does.
+        rename_failure: Option<&'static str>,
     }
 
     impl Sessions for TestSessions {
@@ -716,6 +737,13 @@ mod tests {
             }
             self.archived.borrow_mut().push(id.to_owned());
             Ok(())
+        }
+
+        fn rename(&mut self, id: &str, name: Option<&str>) -> Result<()> {
+            if let Some(failure) = self.rename_failure {
+                bail!(failure);
+            }
+            Ok(workspace::name_session(&self.root, id, name)?)
         }
 
         fn start_build(&mut self) {
@@ -770,6 +798,7 @@ mod tests {
             open_failure: None,
             refusal: None,
             archive_failure: None,
+            rename_failure: None,
         };
         adjust(&mut sessions);
         let app = App::builder()
@@ -1098,6 +1127,7 @@ mod tests {
         SessionSummary {
             path,
             first_prompt: Some(text),
+            name: None,
             modified: SystemTime::now() - Duration::from_secs(age),
             parked: false,
         }
@@ -1460,6 +1490,70 @@ mod tests {
         assert_eq!(fs::read(path_of(&h.dir, "older")).unwrap(), before);
     }
 
+    /// Returns the name the person gave the Session with id `id`, as stored in `dir`.
+    fn stored_name(dir: &TempDir, id: &str) -> Option<String> {
+        let listed = workspace::list_sessions(dir.path()).unwrap();
+        let found = listed
+            .into_iter()
+            .find(|summary| summary.path == path_of(dir, id));
+        found.unwrap().name
+    }
+
+    #[tokio::test]
+    async fn rename_lists_the_session_by_its_new_name_until_it_is_taken_away() {
+        let mut h = with_stored(Arc::new(NeverResponds));
+
+        assert_eq!(h.enter("/rename fix the sidebar"), None);
+        assert_eq!(
+            sidebar_order(&mut h),
+            ["older", "younger", "fix the sidebar"]
+        );
+        assert_eq!(
+            stored_name(&h.dir, "first").as_deref(),
+            Some("fix the sidebar")
+        );
+
+        h.enter("/rename");
+        assert_eq!(sidebar_order(&mut h), ["older", "younger", "new session"]);
+        assert_eq!(stored_name(&h.dir, "first"), None);
+    }
+
+    #[tokio::test]
+    async fn a_name_outlasts_the_first_prompt_and_gives_way_back_to_it() {
+        let mut h = harness(Arc::new(NeverResponds));
+        h.enter("/rename planning");
+        h.enter("hello");
+        let screen = h.screen_of(WIDE);
+        assert!(screen.contains("planning"), "{screen}");
+        assert!(!screen.contains("hello  "), "{screen}");
+
+        h.enter("/rename");
+        assert!(h.screen_of(WIDE).contains("* hello"));
+    }
+
+    #[tokio::test]
+    async fn a_stored_session_is_listed_by_its_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut named = summary(&dir, "older", 100);
+        named.name = Some("named".into());
+        let mut h = start(dir, Arc::new(NeverResponds), vec![named]);
+        assert_eq!(sidebar_order(&mut h), ["named", "new session"]);
+    }
+
+    #[tokio::test]
+    async fn a_name_that_cannot_be_stored_changes_nothing() {
+        let mut h = start_with()
+            .dir(tempfile::tempdir().unwrap())
+            .provider(Arc::new(NeverResponds))
+            .adjust(|sessions| sessions.rename_failure = Some("disk full"))
+            .call();
+
+        h.enter("/rename lost");
+
+        assert_eq!(sidebar_order(&mut h), ["new session"]);
+        assert!(h.screen().contains("not renamed: disk full"));
+    }
+
     #[tokio::test]
     async fn new_sessions_get_a_worktree_unless_the_main_checkout_is_asked_for() {
         let mut h = harness(Arc::new(NeverResponds));
@@ -1627,6 +1721,7 @@ mod tests {
         let stored = SessionSummary {
             path: path_of(&h.dir, "first"),
             first_prompt: Some("go".into()),
+            name: None,
             modified: SystemTime::now(),
             parked: true,
         };

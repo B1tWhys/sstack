@@ -88,11 +88,11 @@ pub async fn run(args: &Args) -> Result<ExitCode> {
 }
 
 /// Picks what to show first: what the arguments ask for, or else a blank Session. One left unused
-/// by an earlier run is reused, so that merely launching does not pile up worktrees.
+/// and unnamed by an earlier run is reused, so that merely launching does not pile up worktrees.
 fn starting_session<'a>(args: &'a Args, stored: &'a [SessionSummary]) -> Start<'a> {
     let unused = stored
         .iter()
-        .find(|summary| summary.first_prompt.is_none())
+        .find(|summary| summary.first_prompt.is_none() && summary.name.is_none())
         .and_then(|summary| summary.path.file_stem()?.to_str());
     let wanted = args.resume.as_deref().or(unused);
     wanted.map_or(Start::New(Place::Worktree), Start::Resume)
@@ -113,13 +113,14 @@ struct LiveSessions<'a> {
 }
 
 impl LiveSessions<'_> {
-    /// Describes the Sessions worth listing: those with something in them, and blank ones with a
-    /// worktree, which would otherwise be left behind unnoticed.
+    /// Describes the Sessions worth listing: those with something in them, those the person
+    /// named, and blank ones with a worktree, which would otherwise be left behind unnoticed.
     fn stored(&self) -> Result<Vec<SessionSummary>> {
         let mut stored = workspace::list_sessions(&self.directory)?;
         stored.retain(|summary| {
             let id = workspace::session_id(&summary.path);
-            summary.first_prompt.is_some() || worktree::path(&self.main, &id).exists()
+            let named = summary.first_prompt.is_some() || summary.name.is_some();
+            named || worktree::path(&self.main, &id).exists()
         });
         Ok(stored)
     }
@@ -154,6 +155,10 @@ impl Sessions for LiveSessions<'_> {
         worktree::remove(&self.main, id)?;
         workspace::archive_session(&self.directory, id)?;
         Ok(())
+    }
+
+    fn rename(&mut self, id: &str, name: Option<&str>) -> Result<()> {
+        Ok(workspace::name_session(&self.directory, id, name)?)
     }
 
     fn start_build(&mut self) {
@@ -224,6 +229,7 @@ mod tests {
         let summary = |id: &str, first_prompt: Option<&str>| SessionSummary {
             path: PathBuf::from(format!("/s/{id}.jsonl")),
             first_prompt: first_prompt.map(str::to_owned),
+            name: None,
             modified: std::time::UNIX_EPOCH,
             parked: false,
         };
@@ -236,6 +242,10 @@ mod tests {
         assert_eq!(starting_session(&plain, spoken), fresh);
         let chosen = crate::tests::args(&["--resume", "1"]);
         assert_eq!(starting_session(&chosen, &stored), Start::Resume("1"));
+
+        let mut named = summary("3", None);
+        named.name = Some("for later".into());
+        assert_eq!(starting_session(&plain, &[named]), fresh);
     }
 
     #[test]

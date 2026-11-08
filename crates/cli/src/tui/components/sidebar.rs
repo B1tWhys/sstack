@@ -16,9 +16,9 @@ use crate::tui::theme;
 pub const WIDTH: u16 = 34;
 /// How many rows sit above the first Session.
 const HEADING_ROWS: u16 = 1;
-/// How many columns of a row a Session's title can use.
-const TITLE_COLUMNS: usize = 17;
-/// Replaces the end of a title too long to show in full.
+/// How many columns of a row a Session Name can use.
+const NAME_COLUMNS: usize = 17;
+/// Replaces the end of a Session Name too long to show in full.
 const ELLIPSIS: &str = "..";
 
 /// What a Session is doing, as far as the person needs to know at a glance.
@@ -78,8 +78,8 @@ impl Activity {
 pub struct Row {
     /// The Session's id, which identifies it when clicked.
     pub id: String,
-    /// Tells the Session apart from the others. May be any length.
-    pub title: String,
+    /// The Session Name. May be any length.
+    pub name: String,
     /// What the Session is doing.
     pub activity: Activity,
     /// How long the Session has been waiting for the person, if it is.
@@ -94,9 +94,9 @@ impl Row {
         let text = format!(
             "{} {:<width$} {:<7} {age:>3}",
             self.activity.marker(),
-            fit(&self.title, TITLE_COLUMNS),
+            fit(&self.name, NAME_COLUMNS),
             self.activity.label(),
-            width = TITLE_COLUMNS,
+            width = NAME_COLUMNS,
         );
         Line::from(vec![
             Span::styled(format!("{cursor} "), theme::MARKER),
@@ -188,9 +188,9 @@ fn age(age: Duration) -> String {
     }
 }
 
-/// Returns the first line of `title`, shortened to fit in `columns`.
-fn fit(title: &str, columns: usize) -> String {
-    let line = title.lines().next().unwrap_or_default();
+/// Returns the first line of `name`, shortened to fit in `columns`.
+fn fit(name: &str, columns: usize) -> String {
+    let line = name.lines().next().unwrap_or_default();
     let mut fitted = String::new();
     let mut used = 0;
     for character in line.chars() {
@@ -222,10 +222,10 @@ mod tests {
     use super::*;
     use crate::tui::test_support::screen;
 
-    fn row(id: &str, title: &str, activity: Activity) -> Row {
+    fn row(id: &str, name: &str, activity: Activity) -> Row {
         Row {
             id: id.into(),
-            title: title.into(),
+            name: name.into(),
             activity,
             waiting: None,
         }
@@ -326,7 +326,7 @@ mod tests {
     }
 
     #[test]
-    fn long_titles_are_shortened_by_display_width() {
+    fn long_names_are_shortened_by_display_width() {
         assert_eq!(fit("short", 10), "short");
         assert_eq!(fit("exactly 10", 10), "exactly 10");
         assert_eq!(fit("one more than 10", 10), "one more..");

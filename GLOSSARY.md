@@ -10,6 +10,10 @@ A native agent harness that starts minimal and is improved by using it to work o
 One durable conversation between a person and the agent, recorded as an append-only log.
 _Avoid_: Chat, thread, conversation
 
+**Session Name**:
+What a Session is called in the list of Sessions: the name the person gave it with `/rename`, or else the first thing they said in it.
+_Avoid_: Title, label
+
 **Turn**:
 One drain of admitted input in a Session, ending when the model and its tools have stopped. A Turn contains zero or more Steps.
 _Avoid_: Round, exchange

@@ -18,6 +18,9 @@ const INSTRUCTIONS_FILE: &str = "AGENTS.md";
 const USER_INSTRUCTIONS_FILE: &str = "CLAUDE.md";
 /// The file extension of Session logs.
 const SESSION_EXTENSION: &str = "jsonl";
+/// The file extension of the file beside a Session log that holds the name the person gave the
+/// Session, if they gave it one.
+const NAME_EXTENSION: &str = "name";
 /// The directory, among a project's Sessions, of the ones the person has put away.
 const ARCHIVE_DIR: &str = "archived";
 /// Tells the model how to work in a Session that has its own worktree.
@@ -77,7 +80,10 @@ pub struct SessionSummary {
     pub path: PathBuf,
     /// The first thing the person said in it. Missing if they have not said anything yet.
     pub first_prompt: Option<String>,
-    /// The last time anything was recorded in it.
+    /// The name the person gave it, which is its Session Name in place of its first prompt.
+    /// Missing if they have not named it.
+    pub name: Option<String>,
+    /// The last time anything was recorded in it. Naming it does not count.
     pub modified: SystemTime,
     /// Whether it stopped between Steps and should carry on.
     pub parked: bool,
@@ -97,12 +103,57 @@ fn summarize(path: PathBuf) -> Option<SessionSummary> {
     let first_prompt = session::first_prompt(&path).ok()?;
     let modified = fs::metadata(&path).and_then(|file| file.modified()).ok()?;
     let parked = session::is_parked(&path).ok()?;
+    let name = read_name(&name_path(&path));
     Some(SessionSummary {
         path,
         first_prompt,
+        name,
         modified,
         parked,
     })
+}
+
+/// Returns where the name the person gave the Session logged at `log` is kept.
+fn name_path(log: &Path) -> PathBuf {
+    log.with_extension(NAME_EXTENSION)
+}
+
+/// Returns the name the person gave a Session, kept at `path`. Returns nothing if they gave none
+/// or it cannot be read, which leaves the first prompt as the Session Name.
+fn read_name(path: &Path) -> Option<String> {
+    fs::read_to_string(path).ok()
+}
+
+/// Makes `name` the Session Name of the Session with id `id`. With `None`, takes the name away, so
+/// that the Session goes back to being known by what the person said first.
+///
+/// # Errors
+/// Returns an error if the name cannot be stored or removed.
+pub fn name_session(sessions_dir: &Path, id: &str, name: Option<&str>) -> io::Result<()> {
+    let path = name_path(&session_path(sessions_dir, id));
+    match name {
+        Some(name) => fs::write(path, name),
+        None => remove_if_present(&path),
+    }
+}
+
+/// Deletes the file at `path`, which need not exist.
+fn remove_if_present(path: &Path) -> io::Result<()> {
+    match fs::remove_file(path) {
+        Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
+        _ => Ok(()),
+    }
+}
+
+/// Moves the Session logged at `from` to `to`, along with any name the person gave it. The
+/// log moves last, so that a failure partway at worst leaves the Session where it was, without its
+/// name.
+fn move_session(from: &Path, to: &Path) -> io::Result<()> {
+    let name = name_path(from);
+    if name.exists() {
+        fs::rename(name, name_path(to))?;
+    }
+    fs::rename(from, to)
 }
 
 /// Returns the path of every Session log in `sessions_dir`, which need not exist.
@@ -132,7 +183,7 @@ pub fn archive_session(sessions_dir: &Path, id: &str) -> io::Result<()> {
     if let Some(parent) = archived.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::rename(session_path(sessions_dir, id), archived)
+    move_session(&session_path(sessions_dir, id), &archived)
 }
 
 /// Brings the Session with id `id` back from the archive, returning whether it was there.
@@ -144,7 +195,7 @@ pub fn restore_session(sessions_dir: &Path, id: &str) -> io::Result<bool> {
     if !archived.exists() {
         return Ok(false);
     }
-    fs::rename(archived, session_path(sessions_dir, id))?;
+    move_session(&archived, &session_path(sessions_dir, id))?;
     Ok(true)
 }
 
@@ -292,6 +343,46 @@ mod tests {
         assert_eq!(list_sessions(dir.path()).unwrap().len(), 1);
         assert!(!restore_session(dir.path(), "1").unwrap());
         assert!(archive_session(&dir.path().join("none"), "1").is_err());
+    }
+
+    #[test]
+    fn a_session_is_listed_by_the_name_it_was_given_until_that_is_taken_away() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(session_path(dir.path(), "1"), "").unwrap();
+        let listed_name = || list_sessions(dir.path()).unwrap()[0].name.clone();
+        assert_eq!(listed_name(), None);
+
+        name_session(dir.path(), "1", Some("first")).unwrap();
+        name_session(dir.path(), "1", Some("fix the sidebar")).unwrap();
+        assert_eq!(listed_name().as_deref(), Some("fix the sidebar"));
+
+        name_session(dir.path(), "1", None).unwrap();
+        assert_eq!(listed_name(), None);
+        name_session(dir.path(), "1", None).unwrap();
+    }
+
+    #[test]
+    fn a_session_keeps_its_name_through_the_archive() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(session_path(dir.path(), "1"), "").unwrap();
+        name_session(dir.path(), "1", Some("kept")).unwrap();
+
+        archive_session(dir.path(), "1").unwrap();
+        assert_eq!(list_sessions(dir.path()).unwrap(), vec![]);
+        assert!(restore_session(dir.path(), "1").unwrap());
+
+        let listed = list_sessions(dir.path()).unwrap();
+        assert_eq!(listed[0].name.as_deref(), Some("kept"));
+    }
+
+    #[test]
+    fn a_name_that_cannot_be_read_is_no_name_and_cannot_be_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(session_path(dir.path(), "1"), "").unwrap();
+        fs::create_dir(name_path(&session_path(dir.path(), "1"))).unwrap();
+        assert_eq!(list_sessions(dir.path()).unwrap()[0].name, None);
+        assert!(name_session(dir.path(), "1", None).is_err());
+        assert!(name_session(dir.path(), "1", Some("x")).is_err());
     }
 
     #[test]

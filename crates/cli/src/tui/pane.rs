@@ -18,7 +18,7 @@ use super::event::{Event, SessionSender};
 use super::lifecycle::{SessionEvent, SessionState};
 use super::worker::AgentHandle;
 
-/// Titles a Session the person has not said anything in yet.
+/// Names a Session the person has neither named nor said anything in yet.
 const UNTITLED: &str = "new session";
 
 /// A Session the harness has started an agent for.
@@ -54,8 +54,11 @@ pub struct Pane {
     id: String,
     /// Where the Session is stored.
     path: PathBuf,
-    /// The first thing the person said in the Session.
-    title: Option<String>,
+    /// The first thing the person said in the Session, which is its Session Name until they give
+    /// it one.
+    first_prompt: Option<String>,
+    /// The name the person gave the Session, if they gave it one.
+    name: Option<String>,
     /// Starts and cancels Turns. Missing until the Session is first shown, because a Session the
     /// person never opens needs no agent.
     agent: Option<AgentHandle>,
@@ -85,7 +88,8 @@ impl Pane {
     /// Creates the pane for a Session on disk, with no agent yet.
     pub fn stored(summary: SessionSummary) -> Self {
         let mut pane = Self::blank(summary.path, summary.modified);
-        pane.title = summary.first_prompt;
+        pane.first_prompt = summary.first_prompt;
+        pane.name = summary.name;
         if summary.parked {
             pane.state = SessionState::Parked;
         }
@@ -106,7 +110,8 @@ impl Pane {
             status: Status::new(id.clone()),
             id,
             path,
-            title: None,
+            first_prompt: None,
+            name: None,
             agent: None,
             events: None,
             state: SessionState::Idle,
@@ -128,6 +133,12 @@ impl Pane {
     /// Returns where the Session is stored.
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Lists the Session under `name`, or under its first prompt again if `name` is `None`. Only
+    /// changes the screen, so the caller stores the name.
+    pub fn rename(&mut self, name: Option<&str>) {
+        self.name = name.map(str::to_owned);
     }
 
     /// Returns the Skills the person can run by name in the Session.
@@ -178,7 +189,8 @@ impl Pane {
     pub fn row(&self, now: SystemTime) -> Row {
         Row {
             id: self.id.clone(),
-            title: self.title.clone().unwrap_or_else(|| UNTITLED.to_owned()),
+            name: (self.name.as_ref().or(self.first_prompt.as_ref()))
+                .map_or_else(|| UNTITLED.to_owned(), String::clone),
             activity: self.activity(),
             waiting: self.state.is_waiting().then(|| self.waited(now)),
         }
@@ -205,7 +217,9 @@ impl Pane {
     /// Reacts to something this Session did. `on_screen` says whether the person can see it.
     pub fn observe(&mut self, event: &Event, on_screen: bool) {
         match event {
-            Event::Resumed(entries) => self.title = self.title.take().or(first_prompt(entries)),
+            Event::Resumed(entries) => {
+                self.first_prompt = self.first_prompt.take().or(first_prompt(entries));
+            }
             Event::Approval(_) => self.moved(SessionEvent::ApprovalRequested),
             Event::TurnEnded(Ok(TurnEnd::Paused)) => self.moved(SessionEvent::Parked),
             Event::TurnEnded(outcome) => {
@@ -278,13 +292,14 @@ impl Pane {
         self.moved(SessionEvent::ApprovalAnswered);
     }
 
-    /// Asks the agent to run a Turn on `text`. The person's first input also titles the Session.
+    /// Asks the agent to run a Turn on `text`. The person's first input also names the Session,
+    /// unless they have named it themselves.
     pub fn start_turn(&mut self, text: &str) {
         let Some(agent) = &mut self.agent else {
             return;
         };
         agent.prompt(text.to_owned());
-        self.title.get_or_insert_with(|| text.to_owned());
+        self.first_prompt.get_or_insert_with(|| text.to_owned());
         self.moved(SessionEvent::TurnStarted);
     }
 
