@@ -8,8 +8,9 @@ use crossterm::event::KeyEvent;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use sstack::agent::TurnEnd;
-use sstack::running_harness::{SessionEvent, SessionState};
+use sstack::running_harness::SessionState;
 use sstack::session::Entry;
+use sstack::session_controller::SessionController;
 use sstack::session_report::SessionReport;
 use sstack::skills::Skill;
 use sstack::turn_runner::AgentHandle;
@@ -62,11 +63,12 @@ pub struct Pane {
     name: Option<String>,
     /// Control of the Session's Turns. Missing until the Session is first shown, because
     /// a Session the person never opens needs no agent.
-    agent: Option<AgentHandle>,
-    /// Where the Session's input reports. Missing until the agent is.
+    controller: Option<SessionController>,
+    /// Where the Session's input reports. Missing until the controller is.
     events: Option<SessionSender>,
-    /// What the Session is doing.
-    state: SessionState,
+    /// What the Session is doing until it has a controller, which then keeps track instead:
+    /// parked if an earlier run left a Turn parked in it, and otherwise idle.
+    stored: SessionState,
     /// When the Session last started waiting for the person, which orders the queue.
     waiting_since: SystemTime,
     /// When the running Turn started.
@@ -79,8 +81,6 @@ pub struct Pane {
     input: Input,
     /// The Session so far.
     transcript: Transcript,
-    /// The Skills the person can run by name in the Session. Empty until the agent starts.
-    skills: Vec<Skill>,
     /// The Session id and what the agent is doing.
     status: Status,
 }
@@ -92,7 +92,7 @@ impl Pane {
         pane.first_prompt = summary.first_prompt;
         pane.name = summary.name;
         if summary.parked {
-            pane.state = SessionState::Parked;
+            pane.stored = SessionState::Parked;
         }
         pane
     }
@@ -113,16 +113,15 @@ impl Pane {
             path,
             first_prompt: None,
             name: None,
-            agent: None,
+            controller: None,
             events: None,
-            state: SessionState::Idle,
+            stored: SessionState::Idle,
             waiting_since,
             working_since: waiting_since,
             unseen: None,
             approval: Approval::default(),
             input: Input::default(),
             transcript: Transcript::default(),
-            skills: Vec::new(),
         }
     }
 
@@ -142,30 +141,27 @@ impl Pane {
         self.name = name.map(str::to_owned);
     }
 
-    /// Returns the Skills the person can run by name in the Session.
-    pub fn skills(&self) -> &[Skill] {
-        &self.skills
-    }
-
     /// Returns what the Session is doing.
     pub fn state(&self) -> SessionState {
-        self.state
+        self.controller
+            .as_ref()
+            .map_or(self.stored, SessionController::state)
     }
 
     /// Returns whether the Session can run Turns yet.
     pub fn has_agent(&self) -> bool {
-        self.agent.is_some()
+        self.controller.is_some()
     }
 
     /// Gives the Session the agent it was missing, and starts nvim if the person wants it, which
     /// spares a Session never opened from running one.
     pub fn attach(&mut self, opened: Opened) {
-        self.agent = Some(opened.agent);
+        let parked = self.stored == SessionState::Parked;
+        self.controller = Some(SessionController::new(opened.agent, opened.skills, parked));
         if opened.vim {
             self.input.start_vim(&opened.events);
         }
         self.events = Some(opened.events);
-        self.skills = opened.skills;
         for notice in opened.notices {
             self.update(&Event::Report(SessionReport::Notice(notice)));
         }
@@ -174,7 +170,7 @@ impl Pane {
     /// Returns a value that sorts this Session into its place in the sidebar: waiting Sessions
     /// first and the longest wait first among them, then working Sessions, longest-running first.
     pub fn queue_position(&self) -> (bool, SystemTime) {
-        if self.state.is_waiting() {
+        if self.state().is_waiting() {
             (false, self.waiting_since)
         } else {
             (true, self.working_since)
@@ -193,13 +189,13 @@ impl Pane {
             name: (self.name.as_ref().or(self.first_prompt.as_ref()))
                 .map_or_else(|| UNTITLED.to_owned(), String::clone),
             activity: self.activity(),
-            waiting: self.state.is_waiting().then(|| self.waited(now)),
+            waiting: self.state().is_waiting().then(|| self.waited(now)),
         }
     }
 
     /// Returns what to tell the person about this Session at a glance.
     fn activity(&self) -> Activity {
-        match (self.state, self.unseen) {
+        match (self.state(), self.unseen) {
             (SessionState::Working, _) => Activity::Working,
             (SessionState::AwaitingApproval, _) => Activity::Blocked,
             (SessionState::Idle, Some(Unseen::Failed)) => Activity::Failed,
@@ -215,20 +211,15 @@ impl Pane {
         now.duration_since(self.waiting_since).unwrap_or_default()
     }
 
-    /// Reacts to something this Session did. `on_screen` says whether the person can see it.
+    /// Shows something this Session did. `on_screen` says whether the person can see it. What
+    /// it means for the Session's Turns is for the Running Harness to work out.
     pub fn observe(&mut self, event: &Event, on_screen: bool) {
         match event {
             Event::Report(SessionReport::Resumed(entries)) => {
                 self.first_prompt = self.first_prompt.take().or(first_prompt(entries));
             }
-            Event::Report(SessionReport::Approval(_)) => {
-                self.moved(SessionEvent::ApprovalRequested);
-            }
-            Event::Report(SessionReport::TurnEnded(Ok(TurnEnd::Paused))) => {
-                self.moved(SessionEvent::Parked);
-            }
+            Event::Report(SessionReport::TurnEnded(Ok(TurnEnd::Paused))) => {}
             Event::Report(SessionReport::TurnEnded(outcome)) => {
-                self.moved(SessionEvent::TurnEnded);
                 self.unseen = (!on_screen).then_some(if outcome.is_ok() {
                     Unseen::Finished
                 } else {
@@ -240,18 +231,27 @@ impl Pane {
         self.update(event);
     }
 
-    /// Keeps the Session's state machine current, timing the waits that order the queue.
-    fn moved(&mut self, event: SessionEvent) {
-        let next = self.state.after(event);
-        if next == self.state {
+    /// Runs `act` on the Session's controller, if it has one yet, timing the waits that order
+    /// the queue by what `act` changed.
+    pub fn control<R>(&mut self, act: impl FnOnce(&mut SessionController) -> R) -> Option<R> {
+        let controller = self.controller.as_mut()?;
+        let before = controller.state();
+        let result = act(controller);
+        let after = controller.state();
+        self.moved(before, after);
+        Some(result)
+    }
+
+    /// Times the waits that order the queue, now that the Session went from `before` to `after`.
+    fn moved(&mut self, before: SessionState, after: SessionState) {
+        if after == before {
             return;
         }
-        if next.is_waiting() {
+        if after.is_waiting() {
             self.waiting_since = SystemTime::now();
-        } else if self.state == SessionState::Idle {
+        } else if before == SessionState::Idle {
             self.working_since = SystemTime::now();
         }
-        self.state = next;
     }
 
     /// Returns every component, topmost first, which is the order key presses are offered in.
@@ -294,42 +294,25 @@ impl Pane {
 
     /// Notes that the person answered about a shell command.
     pub fn answered(&mut self) {
-        self.moved(SessionEvent::ApprovalAnswered);
+        self.control(SessionController::answered);
     }
 
-    /// Asks the agent to run a Turn on `text`. The person's first input also names the Session,
+    /// Notes that a Turn started on `text`. The person's first input also names the Session,
     /// unless they have named it themselves.
-    pub fn start_turn(&mut self, text: &str) {
-        let Some(agent) = &mut self.agent else {
-            return;
-        };
-        agent.prompt(text.to_owned());
+    pub fn turn_started(&mut self, text: &str) {
         self.first_prompt.get_or_insert_with(|| text.to_owned());
-        self.moved(SessionEvent::TurnStarted);
     }
 
     /// Carries on the Turn that parked, if the Session has one and an agent to run it.
     pub fn continue_turn(&mut self) {
-        if self.state != SessionState::Parked {
-            return;
-        }
-        if let Some(agent) = &mut self.agent {
-            agent.continue_turn();
-            self.moved(SessionEvent::Continued);
-        }
+        self.control(SessionController::continue_parked);
     }
 
     /// Asks the Session's Turns to stop at the end of their Step, or stops asking.
+    #[cfg(test)]
     pub fn set_paused(&self, paused: bool) {
-        if let Some(agent) = &self.agent {
-            agent.set_paused(paused);
-        }
-    }
-
-    /// Cancels the running Turn, if there is one.
-    pub fn cancel(&self) {
-        if let Some(agent) = &self.agent {
-            agent.cancel();
+        if let Some(controller) = &self.controller {
+            controller.set_paused(paused);
         }
     }
 

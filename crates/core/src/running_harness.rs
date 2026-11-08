@@ -1,10 +1,16 @@
 //! The rules for what each Session is doing and what stopping means for the Running Harness,
 //! shared by every interface.
 //!
-//! Everything here is a pure function of its inputs, so each rule can be tested without an
-//! interface or an agent. An interface feeds in what happened and carries out what comes back.
+//! The rules themselves are pure functions of their inputs, so each can be tested without an
+//! interface or an agent. [`RunningHarness`] applies them to the Sessions an interface has open:
+//! the interface feeds in what happened and carries out the [`Outcome`] that comes back.
 
+use std::mem;
 use std::path::PathBuf;
+
+use crate::human_command::{Command, parse_command};
+use crate::session_controller::{OpenSessions, SessionController};
+use crate::session_report::SessionReport;
 
 /// What a Session is doing, which decides how the person can interact with it.
 ///
@@ -273,6 +279,257 @@ pub fn interrupt(shown: SessionState, others_in_turn: bool) -> Interrupt {
     } else {
         Interrupt::Quit
     }
+}
+
+/// The Running Harness as an interface drives it, which keeps its [`Phase`] and applies every
+/// rule that spans the open Sessions.
+///
+/// An interface keeps one for the whole process, however many Sessions it has open. What happened
+/// in one Session goes through [`Self::in_session`], which names that Session and reaches the
+/// rest through [`OpenSessions`]. What happened to the whole Running Harness reaches every open
+/// Session the same way. Whatever only the interface can do comes back as an [`Outcome`].
+#[derive(Debug, Default)]
+pub struct RunningHarness {
+    /// Whether the Running Harness is carrying on or on its way out.
+    phase: Phase,
+}
+
+/// What the interface has to do after the [`RunningHarness`] has acted, or may want to know.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Outcome<'a> {
+    /// A Turn started in the focused Session on this text. The interface can use it at once, for
+    /// instance to name the Session, before the Turn itself reports.
+    TurnStarted(String),
+    /// Nothing happened, for this reason, which the interface tells the person in its own words.
+    Refused(Refusal),
+    /// A Human Command that only the interface can carry out, because it is about how the
+    /// interface keeps its Sessions: [`Command::New`], [`Command::NewMain`],
+    /// [`Command::Archive`], [`Command::Vim`] or [`Command::Rename`]. No other comes back.
+    Command(Command<'a>),
+    /// A request to start building the Harness Source for a Rebuild, whose result the interface
+    /// passes to [`RunningHarness::build_finished`].
+    StartBuild,
+    /// A request to stop the build, if one is running.
+    CancelBuild,
+    /// The end of the Running Harness.
+    Exit(Exit),
+}
+
+/// Why the [`RunningHarness`] did not do what the person asked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Refusal {
+    /// A Turn is running in the Session, and it runs one Turn at a time.
+    Busy,
+    /// The Running Harness is on its way out, so nothing new starts.
+    Draining,
+    /// Quitting would stop Turns in other Sessions, which the person cannot see.
+    OthersWorking,
+    /// This slash-prefixed line names neither a Human Command nor a Skill.
+    UnknownCommand(String),
+    /// A Skill was asked for by a bare name that several Skills share.
+    AmbiguousSkill {
+        /// The name asked for.
+        name: String,
+        /// The full names of the Skills it could mean.
+        names: Vec<String>,
+    },
+    /// A Skill was found but could not be read.
+    UnreadableSkill {
+        /// The name asked for.
+        name: String,
+        /// What went wrong.
+        error: String,
+    },
+}
+
+impl RunningHarness {
+    /// Returns whether the Running Harness is carrying on or on its way out.
+    #[must_use]
+    pub fn phase(&self) -> &Phase {
+        &self.phase
+    }
+
+    /// Returns the Running Harness ready to act on something that happened in the `focus`
+    /// Session, with `others` as every other open Session.
+    #[must_use]
+    pub fn in_session<'a>(
+        &'a mut self,
+        focus: &'a mut SessionController,
+        others: &'a mut dyn OpenSessions,
+    ) -> InSession<'a> {
+        InSession {
+            harness: self,
+            sessions: Every { focus, others },
+        }
+    }
+
+    /// Acts on the end of the build that [`Outcome::StartBuild`] asked for, which produced
+    /// `built` if it worked. The interface tells the person why it failed, if it did.
+    #[must_use]
+    pub fn build_finished(
+        &mut self,
+        built: Option<PathBuf>,
+        sessions: &mut dyn OpenSessions,
+    ) -> Option<Outcome<'static>> {
+        self.advance(Trigger::BuildFinished(built), sessions)
+            .or_else(|| self.settle(sessions))
+    }
+
+    /// Lets every Session carry on in this process after [`Exit::Rebuild`] could not relaunch.
+    pub fn relaunch_failed(&mut self, sessions: &mut dyn OpenSessions) {
+        self.phase = Phase::Running;
+        resume(sessions);
+    }
+
+    /// Starts a Turn on the Skill that the slash-prefixed `line` names in the `focus` Session, or
+    /// says why it cannot.
+    fn run_skill(&self, line: &str, focus: &mut SessionController) -> Outcome<'static> {
+        match focus.skill_prompt(line) {
+            Ok(_) if self.phase.is_draining() => Outcome::Refused(Refusal::Draining),
+            Ok(text) => focus.start_turn(text),
+            Err(refusal) => Outcome::Refused(refusal),
+        }
+    }
+
+    /// Moves to the next phase and does what that takes to `sessions`.
+    fn advance(
+        &mut self,
+        trigger: Trigger,
+        sessions: &mut dyn OpenSessions,
+    ) -> Option<Outcome<'static>> {
+        let (phase, effect) = mem::take(&mut self.phase).after(trigger);
+        self.phase = phase;
+        match effect {
+            Effect::None => None,
+            Effect::Drain => {
+                set_paused(sessions, true);
+                self.settle(sessions)
+            }
+            Effect::DrainAndBuild => {
+                set_paused(sessions, true);
+                Some(Outcome::StartBuild)
+            }
+            Effect::Abandon => {
+                resume(sessions);
+                Some(Outcome::CancelBuild)
+            }
+            Effect::Exit(exit) => Some(Outcome::Exit(exit)),
+        }
+    }
+
+    /// Moves on if the phase is waiting for no Session to have a Turn running, and none has.
+    fn settle(&mut self, sessions: &mut dyn OpenSessions) -> Option<Outcome<'static>> {
+        (self.phase.is_draining() && !any_in_turn(sessions))
+            .then(|| self.advance(Trigger::Settled, sessions))
+            .flatten()
+    }
+}
+
+/// The [`RunningHarness`] about to act on something that happened in one Session, from
+/// [`RunningHarness::in_session`].
+pub struct InSession<'a> {
+    /// The Running Harness that acts.
+    harness: &'a mut RunningHarness,
+    /// The Session it acts on, and every other open one.
+    sessions: Every<'a>,
+}
+
+impl InSession<'_> {
+    /// Acts on a line the person entered in the Session: a Human Command, a Skill to run, or a
+    /// prompt that starts a Turn.
+    #[must_use]
+    pub fn submit(self, line: &str) -> Option<Outcome<'_>> {
+        let command = parse_command(line);
+        if self.harness.phase.is_draining() && command.changes_work() {
+            return Some(Outcome::Refused(Refusal::Draining));
+        }
+        match command {
+            Command::Prompt(text) => Some(self.sessions.focus.start_turn(text.to_owned())),
+            Command::Unknown(line) => Some(self.harness.run_skill(line, self.sessions.focus)),
+            Command::Rebuild => self.advance(Trigger::RebuildAsked),
+            Command::Quit => self.quit(),
+            Command::Empty => None,
+            command => Some(Outcome::Command(command)),
+        }
+    }
+
+    /// Acts on what core reported about the Session.
+    #[must_use]
+    pub fn report(mut self, report: &SessionReport) -> Option<Outcome<'static>> {
+        self.sessions.focus.report(report);
+        if matches!(report, SessionReport::TurnEnded(_)) && !self.harness.phase.is_draining() {
+            self.sessions.focus.continue_parked();
+        }
+        self.harness.settle(&mut self.sessions)
+    }
+
+    /// Acts on the person's request to interrupt while looking at the Session. During a drain
+    /// it backs out of the drain and does nothing else.
+    #[must_use]
+    pub fn interrupt(self) -> Option<Outcome<'static>> {
+        if self.harness.phase.is_draining() {
+            return self.advance(Trigger::Interrupted);
+        }
+        let Every { focus, others } = self.sessions;
+        match interrupt(focus.state(), any_in_turn(others)) {
+            Interrupt::CancelTurn => {
+                focus.cancel();
+                None
+            }
+            Interrupt::Quit => Some(Outcome::Exit(Exit::Quit)),
+            Interrupt::RefuseToQuit => Some(Outcome::Refused(Refusal::OthersWorking)),
+        }
+    }
+
+    /// Starts to quit, or stops waiting if already quitting. A Rebuild has to be backed out of
+    /// first, because it would otherwise end in a relaunch.
+    fn quit(self) -> Option<Outcome<'static>> {
+        if self.harness.phase.is_rebuilding() {
+            return Some(Outcome::Refused(Refusal::Draining));
+        }
+        self.advance(Trigger::QuitAsked)
+    }
+
+    /// Moves the Running Harness to its next phase and does what that takes to every open
+    /// Session.
+    fn advance(mut self, trigger: Trigger) -> Option<Outcome<'static>> {
+        self.harness.advance(trigger, &mut self.sessions)
+    }
+}
+
+/// The Session the person acted in together with every other open one.
+struct Every<'a> {
+    /// The Session the person acted in, or that core reported on.
+    focus: &'a mut SessionController,
+    /// Every other open Session.
+    others: &'a mut dyn OpenSessions,
+}
+
+impl OpenSessions for Every<'_> {
+    fn visit(&mut self, visit: &mut dyn FnMut(&mut SessionController)) {
+        visit(self.focus);
+        self.others.visit(visit);
+    }
+}
+
+/// Returns whether any of `sessions` has a Turn running.
+fn any_in_turn(sessions: &mut dyn OpenSessions) -> bool {
+    let mut found = false;
+    sessions.visit(&mut |session| found |= session.state().in_turn());
+    found
+}
+
+/// Asks every Turn in `sessions` to stop at the end of its Step, or stops asking.
+fn set_paused(sessions: &mut dyn OpenSessions, paused: bool) {
+    sessions.visit(&mut |session| session.set_paused(paused));
+}
+
+/// Lets every one of `sessions` carry on, including any Turn that has already parked.
+fn resume(sessions: &mut dyn OpenSessions) {
+    sessions.visit(&mut |session| {
+        session.set_paused(false);
+        session.continue_parked();
+    });
 }
 
 #[cfg(test)]

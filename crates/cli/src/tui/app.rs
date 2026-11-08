@@ -2,7 +2,6 @@
 //! out what they ask for.
 
 use std::io;
-use std::mem;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -14,9 +13,11 @@ use crossterm::execute;
 use ratatui::backend::Backend;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::{Frame, Terminal};
-use sstack::human_command::{Command, parse_command};
-use sstack::running_harness::{self, Effect, Exit, Interrupt, Phase, SessionState, Trigger};
-use sstack::skills::{self, Lookup};
+use sstack::human_command::Command;
+use sstack::running_harness::{
+    Exit, InSession, Outcome, Phase, Refusal, RunningHarness, SessionState,
+};
+use sstack::session_controller::{OpenSessions, SessionController};
 use sstack::vim::{VimEvent, VimFailure};
 use sstack::workspace::SessionSummary;
 
@@ -92,8 +93,8 @@ pub struct App<'a> {
     panes: Vec<Pane>,
     /// The position in `panes` of the Session on screen.
     shown: usize,
-    /// Whether the harness is carrying on or on its way out.
-    phase: Phase,
+    /// The rules every open Session follows together, such as on the way to a Rebuild.
+    harness: RunningHarness,
     /// The list of Sessions.
     sidebar: Sidebar,
     /// Where Sessions are opened and archived as the person asks.
@@ -131,7 +132,7 @@ impl<'a> App<'a> {
         Self {
             panes,
             shown,
-            phase: Phase::Running,
+            harness: RunningHarness::default(),
             sidebar: Sidebar::default(),
             sessions,
             colors,
@@ -216,54 +217,45 @@ impl App<'_> {
         match event {
             Event::Vim(VimEvent::Submitted(line)) => return self.vim_submitted(index, line),
             Event::Vim(VimEvent::Lost { failure, .. }) => self.vim_lost(index, failure),
-            Event::Report(SessionReport::TurnEnded(_)) if !self.phase.is_draining() => {
-                self.panes[index].continue_turn();
-            }
+            Event::Report(report) => return self.drive(index, Happened::Reported(report)),
             _ => {}
         }
-        self.check_settled()
+        None
     }
 
-    /// Reports that no Turn is running, if that is news the current phase is waiting for.
-    fn check_settled(&mut self) -> Option<Exit> {
-        let settled = !self.panes.iter().any(|pane| pane.state().in_turn());
-        (self.phase.is_draining() && settled)
-            .then(|| self.advance(Trigger::Settled))
-            .flatten()
+    /// Has the Running Harness act on what `happened` in the Session at position `index`, and
+    /// carries out what comes of it. Does nothing to a Session with no agent yet.
+    fn drive(&mut self, index: usize, happened: Happened<'_>) -> Option<Exit> {
+        let (before, rest) = self.panes.split_at_mut(index);
+        let (pane, after) = rest.split_first_mut()?;
+        let harness = &mut self.harness;
+        let mut others = Panes(before, after);
+        let outcome = pane.control(|focus| happened.act(harness.in_session(focus, &mut others)));
+        self.carry_out(index, outcome.flatten()?)
     }
 
-    /// Moves the harness to its next phase and does what that takes.
-    fn advance(&mut self, trigger: Trigger) -> Option<Exit> {
-        let (phase, effect) = mem::take(&mut self.phase).after(trigger);
-        self.phase = phase;
-        match effect {
-            Effect::None => return None,
-            Effect::Drain => self.set_paused(true),
-            Effect::DrainAndBuild => {
-                self.set_paused(true);
-                self.sessions.start_build();
-            }
-            Effect::Abandon => {
-                self.sessions.cancel_build();
-                self.resume_parked();
-            }
-            Effect::Exit(exit) => return Some(exit),
+    /// Does what the Running Harness asked for after acting on the Session at position `index`.
+    fn carry_out(&mut self, index: usize, outcome: Outcome<'_>) -> Option<Exit> {
+        match outcome {
+            Outcome::TurnStarted(text) => self.panes[index].turn_started(&text),
+            Outcome::Refused(refusal) => self.notice(refusal_text(&refusal)),
+            Outcome::Command(command) => self.command(&command),
+            Outcome::StartBuild => self.sessions.start_build(),
+            Outcome::CancelBuild => self.sessions.cancel_build(),
+            Outcome::Exit(exit) => return Some(exit),
         }
-        self.check_settled()
+        None
     }
 
-    /// Asks every Session's Turns to stop at the end of their Step, or stops asking.
-    fn set_paused(&self, paused: bool) {
-        for pane in &self.panes {
-            pane.set_paused(paused);
-        }
-    }
-
-    /// Lets every Session carry on, including any Turn that has already parked.
-    fn resume_parked(&mut self) {
-        self.set_paused(false);
-        for pane in &mut self.panes {
-            pane.continue_turn();
+    /// Carries out a Human Command that is about how the harness keeps its Sessions.
+    fn command(&mut self, command: &Command<'_>) {
+        match *command {
+            Command::New => self.open_new(Place::Worktree),
+            Command::NewMain => self.open_new(Place::MainCheckout),
+            Command::Archive { force } => self.archive(force),
+            Command::Vim => self.panes[self.shown].toggle_vim(),
+            Command::Rename(name) => self.rename(name),
+            _ => {}
         }
     }
 
@@ -284,14 +276,16 @@ impl App<'_> {
     /// Acts on the end of the build.
     fn build_finished(&mut self, outcome: Result<PathBuf, String>) -> Option<Exit> {
         let binary = outcome.map_err(|failure| self.notice(failure)).ok();
-        self.advance(Trigger::BuildFinished(binary))
-            .or_else(|| self.check_settled())
+        let all = &mut Panes(&mut self.panes, &mut []);
+        let outcome = self.harness.build_finished(binary, all)?;
+        self.carry_out(self.shown, outcome)
     }
 
     /// Tells the person that the relaunch failed, and lets every Session carry on here.
     pub fn relaunch_failed(&mut self, failure: &str) {
         self.notice(format!("rebuild failed: {failure}"));
-        self.resume_parked();
+        let all = &mut Panes(&mut self.panes, &mut []);
+        self.harness.relaunch_failed(all);
     }
 
     /// Acts on a line the Session at position `index` submitted through nvim. The person may have
@@ -342,7 +336,7 @@ impl App<'_> {
     fn act(&mut self, action: Action) -> Option<Exit> {
         match action {
             Action::Submit(line) => return self.submit(&line),
-            Action::Interrupt => return self.interrupt(),
+            Action::Interrupt => return self.drive(self.shown, Happened::Interrupted),
             Action::ApprovalAnswered => self.panes[self.shown].answered(),
             Action::NextSession => self.step(1),
             Action::PreviousSession => self.step(-1),
@@ -350,28 +344,6 @@ impl App<'_> {
             Action::Archive => self.archive(false),
         }
         None
-    }
-
-    /// Acts on Alt-C, which backs out of a drain before it does anything else.
-    fn interrupt(&mut self) -> Option<Exit> {
-        if self.phase.is_draining() {
-            return self.advance(Trigger::Interrupted);
-        }
-        let pane = &self.panes[self.shown];
-        match running_harness::interrupt(pane.state(), self.others_in_turn()) {
-            Interrupt::CancelTurn => pane.cancel(),
-            Interrupt::Quit => return Some(Exit::Quit),
-            Interrupt::RefuseToQuit => self.notice(OTHERS_WORKING.to_owned()),
-        }
-        None
-    }
-
-    /// Returns whether any Session but the one on screen has a Turn running.
-    fn others_in_turn(&self) -> bool {
-        let others = self.panes.iter().enumerate();
-        others
-            .filter(|(index, _)| *index != self.shown)
-            .any(|(_, pane)| pane.state().in_turn())
     }
 
     /// Returns the position in `panes` of each Session, in the order the sidebar lists them.
@@ -425,76 +397,7 @@ impl App<'_> {
 
     /// Acts on a line the person entered.
     fn submit(&mut self, line: &str) -> Option<Exit> {
-        let command = parse_command(line);
-        if self.phase.is_draining() && command.changes_work() {
-            self.notice(DRAINING.to_owned());
-            return None;
-        }
-        match command {
-            Command::Prompt(text) => self.prompt(text),
-            Command::Rebuild => return self.advance(Trigger::RebuildAsked),
-            Command::New => self.open_new(Place::Worktree),
-            Command::NewMain => self.open_new(Place::MainCheckout),
-            Command::Archive { force } => self.archive(force),
-            Command::Vim => self.panes[self.shown].toggle_vim(),
-            Command::Rename(name) => self.rename(name),
-            Command::Quit => return self.quit(),
-            Command::Unknown(line) => self.run_skill(line),
-            Command::Empty => {}
-        }
-        None
-    }
-
-    /// Starts a Turn on the Skill that the slash-prefixed `line` names, with the rest of the line
-    /// added after its instructions, or tells the person why it cannot.
-    fn run_skill(&mut self, line: &str) {
-        match self.skill_prompt(line) {
-            Ok(_) if self.phase.is_draining() => self.notice(DRAINING.to_owned()),
-            Ok(text) => self.prompt(&text),
-            Err(notice) => self.notice(notice),
-        }
-    }
-
-    /// Returns the prompt that runs the Skill the slash-prefixed `line` names in the Session on
-    /// screen, or what to tell the person instead.
-    fn skill_prompt(&self, line: &str) -> Result<String, String> {
-        let request = line.trim_start_matches('/');
-        let (name, added) = request
-            .split_once(char::is_whitespace)
-            .unwrap_or((request, ""));
-        match skills::find(self.panes[self.shown].skills(), name) {
-            Lookup::Found(skill) => {
-                let loaded = skills::load(skill)
-                    .map_err(|error| format!("could not load the Skill {name}: {error}"))?;
-                Ok(format!("{loaded}\n\n{}", added.trim())
-                    .trim_end()
-                    .to_owned())
-            }
-            Lookup::Ambiguous(names) => Err(format!(
-                "/{name} could mean {}: type the full name",
-                names.join(" or ")
-            )),
-            Lookup::Missing => Err(format!("unknown command: {line}")),
-        }
-    }
-
-    /// Starts to quit, or stops waiting if already quitting. A Rebuild has to be backed out of
-    /// first, because it would otherwise end in a relaunch.
-    fn quit(&mut self) -> Option<Exit> {
-        if self.phase.is_rebuilding() {
-            self.notice(DRAINING.to_owned());
-            return None;
-        }
-        self.advance(Trigger::QuitAsked)
-    }
-
-    /// Starts a Turn on `text` in the Session on screen, if it is free to run one.
-    fn prompt(&mut self, text: &str) {
-        if self.panes[self.shown].state().in_turn() {
-            self.notice(BUSY.to_owned());
-        } else {
-            self.panes[self.shown].start_turn(text);
-        }
+        self.drive(self.shown, Happened::Entered(line))
     }
 
     /// Makes `name` the Session Name of the Session on screen, or with `None` goes back to its first
@@ -521,7 +424,7 @@ impl App<'_> {
     /// Puts the Session on screen away and moves on to the next one, unless `force` is false and
     /// that would lose work.
     fn archive(&mut self, force: bool) {
-        if self.phase.is_draining() {
+        if self.harness.phase().is_draining() {
             self.notice(DRAINING.to_owned());
             return;
         }
@@ -600,7 +503,7 @@ impl App<'_> {
             .collect();
         let on_screen = queue.iter().position(|index| *index == self.shown);
         let running = self.panes.iter().filter(|pane| pane.state().in_turn());
-        let progress = progress(&self.phase, running.count());
+        let progress = progress(self.harness.phase(), running.count());
         let others = (area.is_empty())
             .then(|| progress.clone().or_else(|| self.summary_of_others(&rows)))
             .flatten();
@@ -627,6 +530,58 @@ impl App<'_> {
         .map(|(count, name)| format!("{count} {name}"))
         .collect();
         (!parts.is_empty()).then(|| parts.join(", "))
+    }
+}
+
+/// Something that happened in one Session, which the Running Harness acts on.
+enum Happened<'a> {
+    /// The person entered this line.
+    Entered(&'a str),
+    /// Core reported this about the Session.
+    Reported(&'a SessionReport),
+    /// The person asked to interrupt while looking at the Session.
+    Interrupted,
+}
+
+impl<'a> Happened<'a> {
+    /// Has `harness` act on what happened, returning what the App has to do about it.
+    fn act(self, harness: InSession<'_>) -> Option<Outcome<'a>> {
+        match self {
+            Self::Entered(line) => harness.submit(line),
+            Self::Reported(report) => harness.report(report),
+            Self::Interrupted => harness.interrupt(),
+        }
+    }
+}
+
+/// The open Sessions among two runs of panes, which the Running Harness reaches through
+/// [`OpenSessions`].
+struct Panes<'p>(&'p mut [Pane], &'p mut [Pane]);
+
+impl OpenSessions for Panes<'_> {
+    fn visit(&mut self, visit: &mut dyn FnMut(&mut SessionController)) {
+        for pane in self.0.iter_mut().chain(self.1.iter_mut()) {
+            pane.control(&mut *visit);
+        }
+    }
+}
+
+/// Returns what to tell the person when the Running Harness refused to act, and why.
+fn refusal_text(refusal: &Refusal) -> String {
+    match refusal {
+        Refusal::Busy => BUSY.to_owned(),
+        Refusal::Draining => DRAINING.to_owned(),
+        Refusal::OthersWorking => OTHERS_WORKING.to_owned(),
+        Refusal::UnknownCommand(line) => format!("unknown command: {line}"),
+        Refusal::AmbiguousSkill { name, names } => {
+            format!(
+                "/{name} could mean {}: type the full name",
+                names.join(" or ")
+            )
+        }
+        Refusal::UnreadableSkill { name, error } => {
+            format!("could not load the Skill {name}: {error}")
+        }
     }
 }
 
@@ -1793,7 +1748,7 @@ mod tests {
         )));
         assert_eq!(h.app.handle(failed), None);
 
-        assert!(!h.app.phase.is_draining());
+        assert!(!h.app.harness.phase().is_draining());
         assert!(h.screen().contains("the build did not succeed"));
         assert_eq!(h.app.panes[0].state(), SessionState::Working);
         h.until_turn_ends().await;
@@ -1808,7 +1763,7 @@ mod tests {
 
         assert_eq!(h.app.handle(Event::Key(alt('c'))), None);
 
-        assert!(!h.app.phase.is_draining());
+        assert!(!h.app.harness.phase().is_draining());
         assert_eq!(*h.builds.borrow(), ["started", "cancelled"]);
         assert_eq!(h.app.panes[0].state(), SessionState::AwaitingApproval);
         h.approve();
@@ -1886,7 +1841,7 @@ mod tests {
         let mut h = two_steps();
         h.drain_with_a_question_open("/quit").await;
         assert_eq!(h.app.handle(Event::Key(alt('c'))), None);
-        assert!(!h.app.phase.is_draining());
+        assert!(!h.app.harness.phase().is_draining());
     }
 
     #[tokio::test]
