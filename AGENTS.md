@@ -26,4 +26,4 @@ TUI tests check what is drawn with insta snapshots, kept in a `snapshots` direct
 - Write doc comments on every item, private ones and fields included. They will be parsed later, so this overrides any general advice to keep comments minimal. Lints enforce it. Before writing or changing one, read `.agents/skills/writing-docs/SKILL.md`.
 - Never bypass the hooks. Every function must have a CRAP score of 6 or less.
 - Reach for a common, well-scoped crate before writing the same thing by hand: the bar for adding one is low, and a small dependency beats code we have to own.
-- Give a function that outgrows the argument limit a builder with `bon`; each parameter stays a parameter of its own, never grouped into a tuple.
+- Give a function that outgrows the argument limit a builder with `bon`, or group parameters that belong together into a named struct. Prefer the struct when several functions take the same group. Never group parameters into a tuple.
