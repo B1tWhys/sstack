@@ -7,7 +7,7 @@ use ratatui::layout::{Position, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
-use unicode_width::UnicodeWidthChar;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::tui::component::Component;
 use crate::tui::theme;
@@ -16,8 +16,9 @@ use crate::tui::theme;
 pub const WIDTH: u16 = 34;
 /// How many rows sit above the first Session.
 const HEADING_ROWS: u16 = 1;
-/// How many columns of a row a Session Name can use.
-const NAME_COLUMNS: usize = 17;
+/// How many columns of a row come before the Session Name: the mark for the Session on screen,
+/// the activity marker and a space.
+const PREFIX_COLUMNS: usize = 3;
 /// Replaces the end of a Session Name too long to show in full.
 const ELLIPSIS: &str = "..";
 
@@ -87,19 +88,25 @@ pub struct Row {
 }
 
 impl Row {
-    /// Returns the row as drawn, marking it if it is the one on `screen`.
-    fn line(&self, on_screen: bool) -> Line<'_> {
+    /// Returns the row as drawn in `columns`, marking it if it is the one on screen. What the
+    /// Session is doing sits at the right edge, and the Session Name gets every column up to it.
+    fn line(&self, on_screen: bool, columns: usize) -> Line<'_> {
         let cursor = if on_screen { ">" } else { " " };
-        let age = self.waiting.map_or_else(String::new, age);
+        let status = match self.waiting {
+            Some(waited) => format!("{} {}", self.activity.label(), age(waited)),
+            None => self.activity.label().to_owned(),
+        };
+        let room = columns.saturating_sub(PREFIX_COLUMNS + 1 + status.width());
+        let name = fit(&self.name, room);
+        let gap = columns.saturating_sub(PREFIX_COLUMNS + name.width() + status.width());
         let text = format!(
-            "{} {:<width$} {:<7} {age:>3}",
+            "{} {name}{:gap$}{status}",
             self.activity.marker(),
-            fit(&self.name, NAME_COLUMNS),
-            self.activity.label(),
-            width = NAME_COLUMNS,
+            "",
+            gap = gap.max(1),
         );
         Line::from(vec![
-            Span::styled(format!("{cursor} "), theme::MARKER),
+            Span::styled(cursor, theme::MARKER),
             Span::styled(text, self.activity.style()),
         ])
     }
@@ -167,12 +174,13 @@ impl Component for Sidebar {
             Some(progress) => Line::styled(progress.as_str(), theme::ATTENTION),
             None => Line::styled("sessions", theme::NOTE),
         };
-        let shown = self.rows.iter().enumerate().skip(self.first_shown());
-        let rows = shown.map(|(index, row)| row.line(index == self.on_screen));
-        let lines: Vec<Line> = std::iter::once(heading).chain(rows).collect();
         let border = Block::new()
             .borders(Borders::RIGHT)
             .border_style(theme::BORDER);
+        let columns = usize::from(border.inner(area).width);
+        let shown = self.rows.iter().enumerate().skip(self.first_shown());
+        let rows = shown.map(|(index, row)| row.line(index == self.on_screen, columns));
+        let lines: Vec<Line> = std::iter::once(heading).chain(rows).collect();
         frame.render_widget(Paragraph::new(lines).block(border), area);
     }
 }
@@ -257,11 +265,23 @@ mod tests {
         let shown = drawn(&sidebar(rows, 1, 6), 6);
 
         assert_eq!(shown[0], "sessions                         \u{2502}");
-        assert_eq!(shown[1], "  ! add land tool     blocked 14m\u{2502}");
-        assert_eq!(shown[2], "> + scroll transcript done       \u{2502}");
-        assert_eq!(shown[3], "  x update docs       failed     \u{2502}");
-        assert_eq!(shown[4], "  * fix the approva.. working    \u{2502}");
-        assert_eq!(shown[5], "    old               idle       \u{2502}");
+        assert_eq!(shown[1], " ! add land tool      blocked 14m\u{2502}");
+        assert_eq!(shown[2], ">+ scroll transcript         done\u{2502}");
+        assert_eq!(shown[3], " x update docs             failed\u{2502}");
+        assert_eq!(shown[4], " * fix the approval box.. working\u{2502}");
+        assert_eq!(shown[5], "   old                       idle\u{2502}");
+    }
+
+    #[test]
+    fn a_name_fills_every_column_up_to_what_the_session_is_doing() {
+        let long = "a name long enough to need shortening";
+        let rows = vec![
+            row("1", long, Activity::Idle),
+            row("2", long, Activity::Working),
+        ];
+        let shown = drawn(&sidebar(rows, 0, 3), 3);
+        assert_eq!(shown[1], ">  a name long enough to n.. idle\u{2502}");
+        assert_eq!(shown[2], " * a name long enough t.. working\u{2502}");
     }
 
     #[test]
@@ -281,8 +301,8 @@ mod tests {
             .collect();
         let sidebar = sidebar(rows, 4, 3);
         let shown = drawn(&sidebar, 3);
-        assert!(shown[1].starts_with("    t"), "{shown:#?}");
-        assert!(shown[2].starts_with(">   t"), "{shown:#?}");
+        assert!(shown[1].starts_with("   t "), "{shown:#?}");
+        assert!(shown[2].starts_with(">  t "), "{shown:#?}");
         assert_eq!(sidebar.session_at(0, 1), Some("3"));
         assert_eq!(sidebar.session_at(0, 2), Some("4"));
     }

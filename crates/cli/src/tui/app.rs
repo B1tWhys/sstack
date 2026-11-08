@@ -1140,13 +1140,15 @@ mod tests {
         start(dir, provider, stored)
     }
 
+    /// Returns the Session Names in the sidebar, top to bottom. Each must be short enough to leave
+    /// two spaces before what its Session is doing.
     fn sidebar_order(h: &mut Harness) -> Vec<String> {
         let screen = h.screen_of(WIDE);
         let rows = screen.lines().skip(1);
-        let titles = rows.map(|row| row.chars().skip(4).take(17).collect::<String>());
-        titles
-            .map(|title| title.trim().to_owned())
-            .take_while(|title| !title.is_empty())
+        let names = rows.map(|row| row.chars().skip(3).collect::<String>());
+        names
+            .map(|row| row.split("  ").next().unwrap_or_default().to_owned())
+            .take_while(|name| !name.is_empty())
             .collect()
     }
 
