@@ -172,6 +172,9 @@ pub enum Message {
     Show(String),
     /// The person asked for a new Session in its own worktree, as `/new` does.
     NewSession,
+    /// The person asked to put the Session on screen away, as `/archive` does, which refuses if
+    /// that would lose work.
+    Archive,
     /// The person asked for the Session after the one on screen in the sidebar.
     NextSession,
     /// The person asked for the Session before the one on screen in the sidebar.
@@ -257,6 +260,7 @@ impl Window {
         match message {
             Message::Show(id) => self.show_id(&id),
             Message::NewSession => self.command("/new"),
+            Message::Archive => self.command("/archive"),
             Message::NextSession => self.step(1),
             Message::PreviousSession => self.step(-1),
             Message::LongestWaiting => self.show_longest_waiting(),
@@ -281,7 +285,8 @@ impl Window {
     }
 
     /// Draws the Session on screen: its transcript, any question for the person, what the
-    /// Running Harness is doing on its way out, and the prompt with its buttons.
+    /// Running Harness is doing on its way out, and the prompt with its buttons. The button that
+    /// archives the Session does nothing while a Turn runs in it.
     fn session_view(&self) -> Element<'_, Message> {
         let view = self.view_ref();
         let transcript = scrollable(view.transcript.view())
@@ -306,12 +311,14 @@ impl Window {
         let interrupt =
             button("Interrupt").on_press_maybe(interruptible.then_some(Message::Interrupt));
         let rebuild = button("Rebuild").on_press_maybe((!draining).then_some(Message::Rebuild));
+        let archive =
+            button("Archive").on_press_maybe((!view.state().in_turn()).then_some(Message::Archive));
         let question = view.question().map(question);
         let progress = progress(self.harness.phase()).map(text);
         column![transcript]
             .push(question)
             .push(progress)
-            .push(row![prompt, send, interrupt, rebuild].spacing(SPACING))
+            .push(row![prompt, send, interrupt, rebuild, archive].spacing(SPACING))
             .spacing(SPACING)
             .width(Fill)
             .into()

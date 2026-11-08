@@ -375,6 +375,30 @@ async fn work_that_would_be_lost_stops_archiving_unless_forced() {
 }
 
 #[tokio::test]
+async fn pressing_archive_puts_the_session_away_and_moves_on() {
+    let (_dir, mut window, done) = window_with(vec![], |_, _| {});
+    let _ = send(&mut window, "/new");
+
+    interact(&mut window, |ui| {
+        let _ = ui.click("Archive").unwrap();
+    });
+
+    assert_eq!(done.borrow().archived, ["2"]);
+    assert_eq!(listed(&window), ["1"]);
+}
+
+#[tokio::test]
+async fn the_archive_button_does_nothing_while_a_turn_runs() {
+    let (_dir, mut window) = window(vec![Ok(reply("busy"))]);
+    let _ = send(&mut window, "go");
+
+    let mut ui = simulator(window.view());
+    let _ = ui.click("Archive").unwrap();
+
+    assert_eq!(ui.into_messages().count(), 0);
+}
+
+#[tokio::test]
 async fn being_unable_to_move_on_keeps_the_session_on_screen() {
     let (_dir, mut window, done) = window_with(vec![], |_, sessions| sessions.broken = true);
 
