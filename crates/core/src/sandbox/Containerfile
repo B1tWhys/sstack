@@ -1,0 +1,6 @@
+FROM ubuntu:latest
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        bc file fd-find jq less patch python3 ripgrep tree xxd \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -s /usr/bin/fdfind /usr/local/bin/fd

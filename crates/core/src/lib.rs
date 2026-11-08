@@ -6,6 +6,7 @@ pub mod agent;
 pub mod config;
 pub mod credentials;
 pub mod provider;
+pub mod sandbox;
 pub mod session;
 pub mod skills;
 pub mod tools;

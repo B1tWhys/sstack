@@ -10,6 +10,8 @@ The Sandbox cannot see Protected Paths, `.git` included, so git fails inside it 
 
 sstack drives the container through the runtime's CLI. It tries `podman`, `finch`, `nerdctl` and `docker` in that order, which all take Docker's arguments. A runtime that does not, such as Apple's `container`, needs an implementation of its own. With no runtime available, or an image that fails to build, every command falls back to asking the person, and the question says why.
 
+A headless run has no Sandbox and still denies every shell command, so that it never depends on a container runtime.
+
 A Rebuild replaces the process in place, so the Sandbox survives it. A container is labelled with its Session and the Harness's process id, and the next Harness to start removes any whose process has gone.
 
 Only the files the Sandbox could see when it started are protected. A `.env` created on the host later, or one inside a directory git ignores, stays visible until the Sandbox restarts. Files git ignores are otherwise visible in the Sandbox, though the file tools hide them.

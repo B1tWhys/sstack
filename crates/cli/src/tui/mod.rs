@@ -38,6 +38,7 @@ use crossterm::execute;
 use event::{Event, EventReceiver, EventSender, SessionSender};
 use lifecycle::Exit;
 use pane::Opened;
+use sstack::sandbox::Containers;
 use sstack::tools::Approver;
 use sstack::workspace::SessionSummary;
 use sstack::{workspace, worktree};
@@ -67,6 +68,7 @@ pub async fn run(args: &Args) -> Result<ExitCode> {
         main: main_checkout()?,
         directory: sessions_directory()?,
         build: None,
+        containers: Arc::new(Containers::detect()),
     };
     let stored = sessions.stored()?;
     let first = sessions.open(starting_session(args, &stored))?;
@@ -108,6 +110,8 @@ struct LiveSessions<'a> {
     main: PathBuf,
     /// Where the project's Sessions are stored.
     directory: PathBuf,
+    /// Runs every Session's Sandbox, so that the runtime is chosen and the image built once.
+    containers: Arc<Containers>,
     /// The build in progress. Aborting it stops the build.
     build: Option<JoinHandle<()>>,
 }
@@ -132,7 +136,12 @@ impl Sessions for LiveSessions<'_> {
         let report_to = |id: &str| SessionSender::new(id, events.clone());
         let approver =
             |id: &str| -> Arc<dyn Approver> { Arc::new(EventApprover::new(report_to(id))) };
-        let run = prepare(self.args, start, approver)?;
+        let run = prepare()
+            .args(self.args)
+            .start(start)
+            .approver(approver)
+            .containers(self.containers.clone())
+            .call()?;
         let id = workspace::session_id(&run.session);
         Ok(Opened {
             agent: AgentHandle::spawn(run.agent, report_to(&id)),

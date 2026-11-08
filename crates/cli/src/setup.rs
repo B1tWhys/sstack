@@ -8,6 +8,7 @@ use bon::builder;
 use sstack::agent::{Agent, AgentConfig};
 use sstack::config::{Config, Connection};
 use sstack::credentials::{SystemKeyring, resolve_secret};
+use sstack::sandbox::{Containers, Sandbox};
 use sstack::session::{Entry, SessionLog};
 use sstack::skills::{self, Skill};
 use sstack::tools::project::Project;
@@ -138,13 +139,17 @@ fn workplace(main: &Path, id: &str, wants_worktree: bool) -> Workplace {
 
 /// Readies a harness for the current directory, with the [`Connection`] and model the run's
 /// arguments ask for.
-///
-/// `start` says which Session to work on. `approver` is given the Session's id and returns what
-/// decides whether each shell command the model asks for may run.
+#[builder]
 pub fn prepare(
+    /// The arguments of the run.
     args: &Args,
+    /// Which Session to work on.
     start: Start<'_>,
+    /// Is given the Session's id and returns what decides whether each shell command the model
+    /// asks to run on the host may run.
     approver: impl FnOnce(&str) -> Arc<dyn Approver>,
+    /// Runs the Session's Sandbox, shared with every other Session of the run.
+    containers: Arc<Containers>,
 ) -> Result<Run> {
     let config = load_settings()?;
     let connection = config.connection(args.connection.as_deref())?;
@@ -164,6 +169,7 @@ pub fn prepare(
         .id(&id)
         .place(&place)
         .approver(approver(&id))
+        .containers(containers)
         .skills(&installed)
         .listing(&listing)
         .call()?;
@@ -235,8 +241,10 @@ fn agent_config(
     id: &str,
     /// Where the Session works.
     place: &Workplace,
-    /// Decides on the Session's shell commands.
+    /// Decides on the Session's shell commands that would run on the host.
     approver: Arc<dyn Approver>,
+    /// Runs the Session's Sandbox.
+    containers: Arc<Containers>,
     /// Every Skill installed for the Session. The model may read the files of all of them, since
     /// a person may run any of them, but is offered only those it may load on its own.
     skills: &[Skill],
@@ -252,7 +260,13 @@ fn agent_config(
         .filter_map(|s| s.path.parent().map(Path::to_owned));
     let project = Arc::new(Project::new(root)?.with_readable(skill_directories));
     let secret_env = vec![connection.secret.clone()];
-    let tools = ToolBox::standard(project.clone(), approver.clone(), secret_env.clone())
+    let sandbox = Sandbox::new(containers, id, project.root());
+    let tools = ToolBox::standard()
+        .project(project.clone())
+        .sandbox(Arc::new(sandbox))
+        .approver(approver.clone())
+        .secret_env(secret_env.clone())
+        .call()
         .with_skills(offered_skills(skills));
     let home = dirs::home_dir();
     let claude = skills::claude_directory(home.as_deref(), |name| std::env::var_os(name));

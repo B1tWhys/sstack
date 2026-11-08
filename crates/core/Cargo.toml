@@ -7,6 +7,8 @@ edition.workspace = true
 default = ["nvim-tests"]
 # Runs the tests that need a real nvim. Turn off where nvim is not installed.
 nvim-tests = []
+# Runs the Sandbox tests that need a real Podman, installed and running.
+podman-tests = []
 
 [dependencies]
 async-trait = "0.1"
@@ -16,10 +18,12 @@ futures = "0.3"
 genai = "0.7"
 ignore = "0.4"
 keyring-core = "1"
+nix = { version = "0.31.3", features = ["signal", "user"] }
 regex = "1"
 rmpv = { version = "1", features = ["with-serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.11.1"
 thiserror = "2"
 tokio = { version = "1", features = ["io-util", "macros", "process", "rt", "sync", "time"] }
 tokio-util = "0.7"
@@ -33,6 +37,7 @@ apple-native-keyring-store = { version = "1", features = ["keychain"] }
 zbus-secret-service-keyring-store = { version = "1", features = ["rt-tokio-crypto-rust"] }
 
 [dev-dependencies]
+mockall = "0.15.0"
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 

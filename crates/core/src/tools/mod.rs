@@ -15,20 +15,23 @@ mod skill;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use bon::bon;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use crate::provider::ToolSpec;
+use crate::sandbox::Sandbox;
 use crate::session::ToolCall;
 use crate::skills::Skill;
 pub use land::Land;
 use project::Project;
 
-/// Decides whether the model may run a shell command.
+/// Decides whether the model may run a command on the host, outside the Sandbox.
 #[async_trait]
 pub trait Approver: Send + Sync {
-    /// Returns whether the model may run `command`.
-    async fn approve(&self, command: &str) -> bool;
+    /// Returns whether the model may run `command`. `note`, if given, tells the person why
+    /// they are being asked.
+    async fn approve(&self, command: &str, note: Option<&str>) -> bool;
 }
 
 /// Refuses everything, for runs with nobody to ask.
@@ -37,7 +40,7 @@ pub struct DenyAll;
 
 #[async_trait]
 impl Approver for DenyAll {
-    async fn approve(&self, _command: &str) -> bool {
+    async fn approve(&self, _command: &str, _note: Option<&str>) -> bool {
         false
     }
 }
@@ -75,27 +78,41 @@ pub struct ToolBox {
     tools: Vec<Box<dyn Tool>>,
 }
 
+#[bon]
 impl ToolBox {
-    /// Builds the standard tools for `project`. Variables named in `secret_env` are withheld
-    /// from shell commands.
-    #[must_use]
+    /// Builds the standard tools for a project.
+    #[builder]
     pub fn standard(
+        /// The project the tools work on.
         project: Arc<Project>,
+        /// Where shell commands run without asking.
+        sandbox: Arc<Sandbox>,
+        /// Decides on shell commands that would run on the host.
         approver: Arc<dyn Approver>,
+        /// Environment variables withheld from shell commands run on the host.
+        #[builder(default)]
         secret_env: Vec<String>,
     ) -> Self {
         let seen = Arc::new(files::Seen::default());
+        let bash = bash::Bash::builder()
+            .project(project.clone())
+            .sandbox(sandbox)
+            .approver(approver)
+            .secret_env(secret_env)
+            .build();
         Self {
             tools: vec![
                 Box::new(files::Read::new(project.clone(), seen.clone())),
                 Box::new(files::Write::new(project.clone(), seen.clone())),
                 Box::new(files::Edit::new(project.clone(), seen)),
-                Box::new(search::Search::new(project.clone())),
-                Box::new(bash::Bash::new(project, approver, secret_env)),
+                Box::new(search::Search::new(project)),
+                Box::new(bash),
             ],
         }
     }
+}
 
+impl ToolBox {
     /// Adds the ability to land commits, for a Session that works in a worktree.
     #[must_use]
     pub fn with_land(mut self, land: Land) -> Self {
@@ -149,11 +166,18 @@ pub(crate) mod test_support {
     use super::Approver;
     use super::project::Project;
 
+    use crate::sandbox::Sandbox;
+
+    /// A Sandbox that never runs anything, so every shell command asks.
+    pub fn disabled() -> Arc<Sandbox> {
+        Arc::new(Sandbox::disabled())
+    }
+
     pub struct AllowAll;
 
     #[async_trait]
     impl Approver for AllowAll {
-        async fn approve(&self, _command: &str) -> bool {
+        async fn approve(&self, _command: &str, _note: Option<&str>) -> bool {
             true
         }
     }
@@ -179,7 +203,7 @@ pub(crate) mod test_support {
 
 #[cfg(test)]
 mod tests {
-    use super::test_support::git_project;
+    use super::test_support::{disabled, git_project};
     use super::*;
     use crate::skills::Scope;
     use serde_json::json;
@@ -196,7 +220,11 @@ mod tests {
     async fn dispatches_by_name_and_reports_failures_as_results() {
         let (dir, project) = git_project();
         std::fs::write(dir.path().join("a.txt"), "hello").unwrap();
-        let tools = ToolBox::standard(project, Arc::new(DenyAll), vec![]);
+        let tools = ToolBox::standard()
+            .project(project)
+            .sandbox(disabled())
+            .approver(Arc::new(DenyAll))
+            .call();
 
         let read = tools.run(&call("read", json!({"path": "a.txt"}))).await;
         let unknown = tools.run(&call("nope", json!({}))).await;
@@ -214,7 +242,11 @@ mod tests {
     #[test]
     fn offers_the_standard_tools() {
         let (_dir, project) = git_project();
-        let tools = ToolBox::standard(project, Arc::new(DenyAll), vec![]);
+        let tools = ToolBox::standard()
+            .project(project)
+            .sandbox(disabled())
+            .approver(Arc::new(DenyAll))
+            .call();
         let names: Vec<_> = tools.specs().into_iter().map(|spec| spec.name).collect();
         assert_eq!(names, ["read", "write", "edit", "search", "bash"]);
     }
@@ -222,7 +254,12 @@ mod tests {
     #[test]
     fn offers_the_skill_tool_only_when_there_are_skills() {
         let (_dir, project) = git_project();
-        let tools = ToolBox::standard(project, Arc::new(DenyAll), vec![]).with_skills(vec![]);
+        let tools = ToolBox::standard()
+            .project(project)
+            .sandbox(disabled())
+            .approver(Arc::new(DenyAll))
+            .call()
+            .with_skills(vec![]);
         assert!(!tools.specs().iter().any(|spec| spec.name == "skill"));
 
         let skill = Skill {

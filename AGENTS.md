@@ -14,6 +14,8 @@ Run tests with `cargo nextest run --workspace`. Nextest stops any test after 3 s
 
 Tests that need a real nvim sit behind the `nvim-tests` feature, on by default. `cargo nextest run --workspace --no-default-features` skips them where nvim is not installed.
 
+Tests that need a real Podman sit behind the `podman-tests` feature, off by default. The hooks run with `--all-features`, so committing needs Podman running, and the first run builds the Sandbox image.
+
 TUI tests check what is drawn with insta snapshots, kept in a `snapshots` directory beside each module. To write or update them, run `INSTA_FORCE_PASS=1 cargo nextest run --workspace`, then `cargo insta review`. Without `INSTA_FORCE_PASS`, a test stops at its first changed snapshot and leaves the rest unwritten.
 
 ## Rules

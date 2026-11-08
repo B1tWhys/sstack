@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// The directory under the main checkout where sstack keeps its files.
-const DATA_DIR: &str = ".sstack";
+pub(crate) const DATA_DIR: &str = ".sstack";
 /// The line that keeps `DATA_DIR` out of git, wherever a project's ignore rules live.
 const EXCLUDE_LINE: &str = ".sstack/";
 

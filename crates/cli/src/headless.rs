@@ -8,6 +8,7 @@ use std::sync::atomic::AtomicBool;
 
 use anyhow::Result;
 use sstack::agent::{AgentEvent, TurnContext, TurnEnd};
+use sstack::sandbox::Containers;
 use sstack::tools::DenyAll;
 use sstack::workspace;
 use tokio_util::sync::CancellationToken;
@@ -16,7 +17,8 @@ use crate::Args;
 use crate::describe;
 use crate::setup::{Place, Run, Start, prepare};
 
-/// Runs one prompt with no interaction, denying all shell commands.
+/// Runs one prompt with no interaction, denying all shell commands. With nobody to watch, it
+/// has no Sandbox either.
 ///
 /// Succeeds only if the Turn finished normally, so scripts can tell when it did not.
 pub async fn run(args: &Args, prompt: &str) -> Result<ExitCode> {
@@ -26,7 +28,12 @@ pub async fn run(args: &Args, prompt: &str) -> Result<ExitCode> {
         .map_or(Start::New(Place::MainCheckout), Start::Resume);
     let Run {
         mut agent, session, ..
-    } = prepare(args, start, |_| Arc::new(DenyAll))?;
+    } = prepare()
+        .args(args)
+        .start(start)
+        .approver(|_| Arc::new(DenyAll))
+        .containers(Arc::new(Containers::new(Vec::new())))
+        .call()?;
     let cancel = CancellationToken::new();
     let out = stdout();
     let mut view = EventView::new(&out, wants_style(&out));

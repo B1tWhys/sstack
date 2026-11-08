@@ -46,12 +46,17 @@ impl Component for Approval {
         let Some(request) = self.waiting.front() else {
             return;
         };
+        let question = format!("Run `{}`? [y/N]", request.command);
+        let question = match &request.note {
+            Some(note) => format!("{note}\n\n{question}"),
+            None => question,
+        };
         let block = Block::bordered()
             .title(" Approve shell command ")
             .border_style(theme::ATTENTION)
             .title_style(theme::ATTENTION);
         let text_width = block.inner(area.centered_horizontally(WIDTH)).width;
-        let question = Paragraph::new(format!("Run `{}`? [y/N]", request.command))
+        let question = Paragraph::new(question)
             .style(theme::TEXT)
             .wrap(Wrap { trim: false })
             .block(block);
@@ -86,9 +91,23 @@ mod tests {
     use tokio::sync::oneshot;
 
     fn ask(approval: &mut Approval, command: &str) -> oneshot::Receiver<bool> {
+        asked(approval, command, None)
+    }
+
+    fn asked(
+        approval: &mut Approval,
+        command: &str,
+        note: Option<&str>,
+    ) -> oneshot::Receiver<bool> {
         let (reply, answer) = Reply::new();
         let command = command.to_owned();
-        approval.update(&Event::Approval(ApprovalRequest { command, reply }));
+        let note = note.map(str::to_owned);
+        let request = ApprovalRequest {
+            command,
+            note,
+            reply,
+        };
+        approval.update(&Event::Approval(request));
         answer
     }
 
@@ -161,5 +180,15 @@ mod tests {
         let _answer = ask(&mut approval, &"x ".repeat(200));
         let shown = drawn(30, 6, |frame| approval.render(frame, frame.area()));
         assert_snapshot!(shown.backend());
+    }
+
+    #[test]
+    fn the_reason_for_asking_is_shown_above_the_question() {
+        let mut approval = Approval::default();
+        let _answer = asked(&mut approval, "ls", Some("Outside the Sandbox."));
+        let shown = screen(40, 9, |frame| approval.render(frame, frame.area()));
+        let text = shown.join("\n");
+        let note = text.find("Outside the Sandbox.").unwrap();
+        assert!(note < text.find("Run `ls`?").unwrap(), "{shown:#?}");
     }
 }

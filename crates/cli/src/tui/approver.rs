@@ -24,10 +24,11 @@ impl EventApprover {
 
 #[async_trait]
 impl Approver for EventApprover {
-    async fn approve(&self, command: &str) -> bool {
+    async fn approve(&self, command: &str, note: Option<&str>) -> bool {
         let (reply, answer) = Reply::new();
         let request = ApprovalRequest {
             command: command.to_owned(),
+            note: note.map(str::to_owned),
             reply,
         };
         self.events.send(Event::Approval(request));
@@ -44,7 +45,7 @@ mod tests {
     async fn the_answer_given_on_screen_decides() {
         let (sender, mut events) = mpsc::unbounded_channel();
         let approver = EventApprover::new(SessionSender::new("7", sender));
-        let asking = tokio::spawn(async move { approver.approve("ls").await });
+        let asking = tokio::spawn(async move { approver.approve("ls", Some("why")).await });
 
         let Some(Event::Session(session, inner)) = events.recv().await else {
             panic!("expected an event from a Session");
@@ -54,6 +55,7 @@ mod tests {
             panic!("expected an approval request");
         };
         assert_eq!(request.command, "ls");
+        assert_eq!(request.note.as_deref(), Some("why"));
         request.reply.send(true);
 
         assert!(asking.await.unwrap());
@@ -64,6 +66,6 @@ mod tests {
         let (sender, events) = mpsc::unbounded_channel();
         drop(events);
         let approver = EventApprover::new(SessionSender::new("7", sender));
-        assert!(!approver.approve("ls").await);
+        assert!(!approver.approve("ls", None).await);
     }
 }

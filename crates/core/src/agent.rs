@@ -406,7 +406,11 @@ mod tests {
             provider,
             model: "scripted".into(),
             system: "system".into(),
-            tools: ToolBox::standard(project, approver, vec![]),
+            tools: ToolBox::standard()
+                .project(project)
+                .sandbox(crate::tools::test_support::disabled())
+                .approver(approver)
+                .call(),
             context_limit: LIMIT,
         }
     }

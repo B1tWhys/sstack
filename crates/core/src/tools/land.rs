@@ -188,7 +188,7 @@ impl Tool for Land {
             return Ok(format!("nothing to land: {target} has everything"));
         }
         let request = format!("land {} onto {target}", self.branch);
-        if !self.approver.approve(&request).await {
+        if !self.approver.approve(&request, None).await {
             return Err(ToolError("the user denied this landing".to_owned()));
         }
         self.land_on(&target).await
@@ -382,7 +382,12 @@ mod tests {
     fn the_tool_is_offered_alongside_the_standard_ones() {
         let f = fixture(Arc::new(DenyAll));
         let project = f.land.worktree.clone();
-        let tools = ToolBox::standard(project, Arc::new(DenyAll), vec![]).with_land(f.land);
+        let tools = ToolBox::standard()
+            .project(project)
+            .sandbox(crate::tools::test_support::disabled())
+            .approver(Arc::new(DenyAll))
+            .call()
+            .with_land(f.land);
         let last = tools.specs().pop().unwrap();
         assert_eq!(last.name, "land");
     }

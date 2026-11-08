@@ -121,11 +121,13 @@ pub enum Action {
     Archive,
 }
 
-/// Asks the person whether a shell command may run.
+/// Asks the person whether a command may run on the host.
 #[derive(Debug, Clone)]
 pub struct ApprovalRequest {
     /// The command, exactly as it would run.
     pub command: String,
+    /// Why the person is being asked, if the asker says.
+    pub note: Option<String>,
     /// Where the person's decision goes. Dropping it unanswered denies the command.
     pub reply: Reply<bool>,
 }

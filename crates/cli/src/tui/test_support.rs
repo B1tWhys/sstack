@@ -8,6 +8,7 @@ use ratatui::backend::TestBackend;
 use ratatui::{Frame, Terminal};
 use sstack::agent::{Agent, AgentConfig};
 use sstack::provider::Provider;
+use sstack::sandbox::Sandbox;
 use sstack::session::{AssistantEntry, SessionLog, StopReason, ToolCall, Usage};
 use sstack::skills::{self, Location, Scope};
 use sstack::tools::project::Project;
@@ -129,7 +130,11 @@ fn agent_config(
         provider,
         model: "scripted".into(),
         system: String::new(),
-        tools: ToolBox::standard(project, approver, vec![]),
+        tools: ToolBox::standard()
+            .project(project)
+            .sandbox(Arc::new(Sandbox::disabled()))
+            .approver(approver)
+            .call(),
         context_limit: 1000,
     }
 }
