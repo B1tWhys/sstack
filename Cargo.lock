@@ -5352,6 +5352,7 @@ dependencies = [
  "clap",
  "iced",
  "iced_test",
+ "serde_json",
  "sstack",
  "tempfile",
  "tokio",

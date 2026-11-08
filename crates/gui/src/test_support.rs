@@ -1,18 +1,21 @@
 //! Helpers for testing the GUI with a scripted model and no real settings, Provider or Sandbox.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use iced::futures::future::{self, BoxFuture, FutureExt};
 use iced::widget::text_editor::{Action, Edit};
 use sstack::agent::{Agent, AgentConfig};
 use sstack::provider::scripted::{Scripted, ScriptedProvider};
 use sstack::sandbox::Sandbox;
-use sstack::session::{AssistantEntry, Entry, SessionLog, StopReason, Usage};
+use sstack::session::{AssistantEntry, Entry, SessionLog, StopReason, ToolCall, Usage};
+use sstack::session_report::ReportingApprover;
 use sstack::session_setup::Run;
+use sstack::tools::ToolBox;
 use sstack::tools::project::Project;
-use sstack::tools::{DenyAll, ToolBox};
 
-use crate::window::Message;
+use crate::reports::Reports;
+use crate::window::{Message, Ready};
 
 /// Returns a model response that ends the Turn with `text`.
 pub fn reply(text: &str) -> AssistantEntry {
@@ -25,9 +28,24 @@ pub fn reply(text: &str) -> AssistantEntry {
     }
 }
 
+/// Returns a model response that asks to run `command` in the shell. The Sandbox is off in
+/// tests, so the person is asked whether it may run on the host.
+pub fn bash_call(command: &str) -> AssistantEntry {
+    AssistantEntry {
+        tool_calls: vec![ToolCall {
+            id: "1".into(),
+            name: "bash".into(),
+            input: serde_json::json!({ "command": command }),
+        }],
+        stop: StopReason::ToolUse,
+        ..reply("")
+    }
+}
+
 /// Returns a Session readied in `dir`, with id 1, whose model gives the `script`ed responses in
-/// order. `entries` are already in the Session's log.
-pub fn readied(dir: &Path, script: Vec<Scripted>, entries: &[Entry]) -> Run {
+/// order. `entries` are already in the Session's log. Shell commands are asked about through the
+/// Session's reports, as they are outside tests.
+pub fn readied(dir: &Path, script: Vec<Scripted>, entries: &[Entry]) -> Ready {
     let path = dir.join("1").with_extension("jsonl");
     let mut log = SessionLog::create(&path).unwrap();
     for entry in entries {
@@ -35,6 +53,7 @@ pub fn readied(dir: &Path, script: Vec<Scripted>, entries: &[Entry]) -> Run {
     }
     drop(log);
     let (log, entries) = SessionLog::open(&path).unwrap();
+    let (reports, sender) = Reports::new();
     let config = AgentConfig {
         provider: Arc::new(ScriptedProvider::new(script)),
         model: "scripted".into(),
@@ -42,18 +61,31 @@ pub fn readied(dir: &Path, script: Vec<Scripted>, entries: &[Entry]) -> Run {
         tools: ToolBox::standard()
             .project(Arc::new(Project::new(dir).unwrap()))
             .sandbox(Arc::new(Sandbox::disabled()))
-            .approver(Arc::new(DenyAll))
+            .approver(Arc::new(ReportingApprover::new(sender.clone())))
             .call(),
         context_limit: 1000,
     };
-    Run {
+    let run = Run {
         agent: Agent::new(config, log, entries).unwrap(),
         session: path,
         notices: Vec::new(),
         descriptions_left_out: 0,
         vim: false,
         skills: Vec::new(),
+    };
+    Ready {
+        run,
+        reports,
+        sender,
+        build: never_built,
+        relaunch: Arc::default(),
     }
+}
+
+/// A build that never ends and never runs cargo, so that a test decides how a Rebuild's build
+/// ends by sending [`Message::Built`] itself.
+fn never_built() -> BoxFuture<'static, Result<PathBuf, String>> {
+    future::pending().boxed()
 }
 
 /// Returns the messages that replace whatever is in the prompt with `text`.

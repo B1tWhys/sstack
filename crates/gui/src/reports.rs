@@ -10,23 +10,22 @@ use sstack::session_report::{ReportSender, SessionReport};
 
 /// The reports of one Session as they arrive, waiting for the window that shows it to read them.
 ///
-/// Clones read the same reports, and only the first stream taken from them gets any.
+/// Clones read the same reports, and only the first stream taken from them gets any. They can be
+/// made before the Session has an id, so that the Session's Approver can ask through them.
 #[derive(Clone)]
 pub struct Reports {
-    /// The id of the Session, which tells iced that the subscription is the same one from one
-    /// call of `subscription` to the next, so that it keeps reading rather than starting over.
-    session: String,
-    /// The reports not yet read, until a stream takes them.
+    /// The reports not yet read, until a stream takes them. Where it sits in memory also tells
+    /// iced that the subscription is the same one from one call of `subscription` to the next,
+    /// so that it keeps reading rather than starting over.
     unread: Arc<Mutex<Option<UnboundedReceiver<SessionReport>>>>,
 }
 
 impl Reports {
-    /// Creates the reports of the Session with id `session`, returning them with the sender
-    /// that core reports through.
-    pub fn new(session: &str) -> (Self, ReportSender) {
+    /// Creates the reports of one Session, returning them with the sender that core reports
+    /// through.
+    pub fn new() -> (Self, ReportSender) {
         let (sender, unread) = mpsc::unbounded();
         let reports = Self {
-            session: session.to_owned(),
             unread: Arc::new(Mutex::new(Some(unread))),
         };
         let deliver = move |report| {
@@ -50,7 +49,7 @@ impl Reports {
 
 impl Hash for Reports {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.session.hash(state);
+        Arc::as_ptr(&self.unread).hash(state);
     }
 }
 
@@ -61,7 +60,7 @@ mod tests {
 
     #[test]
     fn reports_arrive_in_order_on_the_first_stream_taken() {
-        let (reports, sender) = Reports::new("1");
+        let (reports, sender) = Reports::new();
         sender.send(SessionReport::TurnContinued);
         sender.send(SessionReport::Notice("hi".into()));
         drop(sender);
@@ -77,7 +76,7 @@ mod tests {
 
     #[test]
     fn reporting_after_the_window_has_gone_is_harmless() {
-        let (reports, sender) = Reports::new("1");
+        let (reports, sender) = Reports::new();
         drop(reports);
         sender.send(SessionReport::TurnContinued);
     }
