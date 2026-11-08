@@ -5,6 +5,8 @@ use ratatui::layout::Rect;
 use ratatui::text::Line;
 
 use crate::tui::component::Component;
+use sstack::session_report::SessionReport;
+
 use crate::tui::event::Event;
 use crate::tui::theme;
 
@@ -57,8 +59,10 @@ impl Status {
 impl Component for Status {
     fn update(&mut self, event: &Event) {
         match event {
-            Event::TurnStarted(_) | Event::TurnContinued => self.working = true,
-            Event::TurnEnded(_) => self.working = false,
+            Event::Report(SessionReport::TurnStarted(_) | SessionReport::TurnContinued) => {
+                self.working = true;
+            }
+            Event::Report(SessionReport::TurnEnded(_)) => self.working = false,
             _ => {}
         }
     }
@@ -80,7 +84,7 @@ mod tests {
         let mut status = Status::new("42".into());
         assert_snapshot!(status.text());
 
-        status.update(&Event::TurnStarted("go".into()));
+        status.update(&Event::Report(SessionReport::TurnStarted("go".into())));
         assert_snapshot!(status.text());
 
         status.set_others(Some("1 blocked".into()));
@@ -88,7 +92,9 @@ mod tests {
         status.set_others(None);
 
         status.update(&Event::Resize);
-        status.update(&Event::TurnEnded(Ok(TurnEnd::Finished)));
+        status.update(&Event::Report(SessionReport::TurnEnded(Ok(
+            TurnEnd::Finished,
+        ))));
         let shown = drawn(30, 1, |frame| status.render(frame, frame.area()));
         assert_snapshot!(shown.backend());
     }

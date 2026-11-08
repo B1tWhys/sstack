@@ -10,16 +10,16 @@ use sstack::agent::{Agent, AgentConfig};
 use sstack::provider::Provider;
 use sstack::sandbox::Sandbox;
 use sstack::session::{AssistantEntry, SessionLog, StopReason, ToolCall, Usage};
+use sstack::session_report::ReportingApprover;
 use sstack::skills::{self, Location, Scope};
 use sstack::tools::project::Project;
 use sstack::tools::{Approver, ToolBox};
+use sstack::turn_runner::AgentHandle;
 use sstack::workspace;
 
-use super::approver::EventApprover;
 use super::component::{Component, KeyOutcome};
 use super::event::{EventSender, SessionSender};
 use super::pane::Opened;
-use super::worker::AgentHandle;
 
 /// Returns a press of `code` with no modifiers.
 pub fn key(code: KeyCode) -> KeyEvent {
@@ -98,7 +98,9 @@ pub fn bash_call(command: &str) -> AssistantEntry {
 /// and reporting to `events`.
 pub fn opened(path: &Path, provider: Arc<dyn Provider>, events: &EventSender) -> Opened {
     let id = workspace::session_id(path);
-    let approver = Arc::new(EventApprover::new(SessionSender::new(&id, events.clone())));
+    let approver = Arc::new(ReportingApprover::new(
+        SessionSender::new(&id, events.clone()).reporter(),
+    ));
     let (log, entries) = if path.exists() {
         SessionLog::open(path).unwrap()
     } else {
@@ -107,7 +109,7 @@ pub fn opened(path: &Path, provider: Arc<dyn Provider>, events: &EventSender) ->
     let config = agent_config(path.parent().unwrap(), provider, approver);
     let agent = Agent::new(config, log, entries).unwrap();
     Opened {
-        agent: AgentHandle::spawn(agent, SessionSender::new(&id, events.clone())),
+        agent: AgentHandle::spawn(agent, SessionSender::new(&id, events.clone()).reporter()),
         path: path.to_owned(),
         notices: Vec::new(),
         events: SessionSender::new(&id, events.clone()),

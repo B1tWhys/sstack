@@ -9,7 +9,6 @@
 //! [`event::EventSender`].
 
 mod app;
-mod approver;
 mod component;
 mod components;
 mod editor;
@@ -19,7 +18,6 @@ mod pane;
 #[cfg(test)]
 mod test_support;
 mod theme;
-mod worker;
 
 use std::io::{self, IsTerminal};
 use std::path::PathBuf;
@@ -28,7 +26,6 @@ use std::sync::Arc;
 
 use anyhow::{Result, bail, ensure};
 use app::{App, Sessions};
-use approver::EventApprover;
 use crossterm::cursor::SetCursorStyle;
 use crossterm::event::{
     DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
@@ -39,13 +36,14 @@ use pane::Opened;
 use sstack::rebuild;
 use sstack::running_harness::Exit;
 use sstack::sandbox::Containers;
+use sstack::session_report::{ReportingApprover, SessionReport};
 use sstack::tools::Approver;
+use sstack::turn_runner::AgentHandle;
 use sstack::workspace::SessionSummary;
 use sstack::{workspace, worktree};
 use theme::ColorDepth;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
-use worker::AgentHandle;
 
 use crate::describe;
 use crate::setup::{
@@ -134,8 +132,9 @@ impl Sessions for LiveSessions<'_> {
     fn open(&mut self, start: Start<'_>) -> Result<Opened> {
         let events = &self.events;
         let report_to = |id: &str| SessionSender::new(id, events.clone());
-        let approver =
-            |id: &str| -> Arc<dyn Approver> { Arc::new(EventApprover::new(report_to(id))) };
+        let approver = |id: &str| -> Arc<dyn Approver> {
+            Arc::new(ReportingApprover::new(report_to(id).reporter()))
+        };
         let run = prepare()
             .args(self.args)
             .start(start)
@@ -144,7 +143,7 @@ impl Sessions for LiveSessions<'_> {
             .call()?;
         let id = workspace::session_id(&run.session);
         Ok(Opened {
-            agent: AgentHandle::spawn(run.agent, report_to(&id)),
+            agent: AgentHandle::spawn(run.agent, report_to(&id).reporter()),
             path: run.session,
             notices: run.notices,
             events: report_to(&id),
@@ -173,7 +172,9 @@ impl Sessions for LiveSessions<'_> {
     fn start_build(&mut self) {
         let events = self.events.clone();
         self.build = Some(tokio::spawn(async move {
-            let _ = events.send(Event::BuildFinished(rebuild::build(HARNESS).await));
+            let _ = events.send(Event::Report(SessionReport::BuildFinished(
+                rebuild::build(HARNESS).await,
+            )));
         }));
     }
 

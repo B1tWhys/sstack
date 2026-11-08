@@ -10,13 +10,14 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use sstack::agent::TurnEnd;
 use sstack::running_harness::{SessionEvent, SessionState};
 use sstack::session::Entry;
+use sstack::session_report::SessionReport;
 use sstack::skills::Skill;
+use sstack::turn_runner::AgentHandle;
 use sstack::workspace::{self, SessionSummary};
 
 use super::component::{Component, KeyOutcome};
 use super::components::{Activity, Approval, Input, Row, Status, Transcript};
 use super::event::{Event, SessionSender};
-use super::worker::AgentHandle;
 
 /// The name of a Session the person has neither named nor said anything in yet.
 const UNTITLED: &str = "new session";
@@ -166,7 +167,7 @@ impl Pane {
         self.events = Some(opened.events);
         self.skills = opened.skills;
         for notice in opened.notices {
-            self.update(&Event::Notice(notice));
+            self.update(&Event::Report(SessionReport::Notice(notice)));
         }
     }
 
@@ -217,12 +218,16 @@ impl Pane {
     /// Reacts to something this Session did. `on_screen` says whether the person can see it.
     pub fn observe(&mut self, event: &Event, on_screen: bool) {
         match event {
-            Event::Resumed(entries) => {
+            Event::Report(SessionReport::Resumed(entries)) => {
                 self.first_prompt = self.first_prompt.take().or(first_prompt(entries));
             }
-            Event::Approval(_) => self.moved(SessionEvent::ApprovalRequested),
-            Event::TurnEnded(Ok(TurnEnd::Paused)) => self.moved(SessionEvent::Parked),
-            Event::TurnEnded(outcome) => {
+            Event::Report(SessionReport::Approval(_)) => {
+                self.moved(SessionEvent::ApprovalRequested);
+            }
+            Event::Report(SessionReport::TurnEnded(Ok(TurnEnd::Paused))) => {
+                self.moved(SessionEvent::Parked);
+            }
+            Event::Report(SessionReport::TurnEnded(outcome)) => {
                 self.moved(SessionEvent::TurnEnded);
                 self.unseen = (!on_screen).then_some(if outcome.is_ok() {
                     Unseen::Finished

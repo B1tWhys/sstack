@@ -1,13 +1,9 @@
 //! The messages that drive the interactive harness.
 
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
-
 use crossterm::event::KeyEvent;
-use sstack::agent::{AgentEvent, TurnEnd};
-use sstack::session::Entry;
+use sstack::session_report::{ReportSender, SessionReport};
 use sstack::vim::VimEvent;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
 
 /// The channel any task uses to tell the [`App`](crate::tui::app::App) that something happened.
 /// Sending never blocks, so it is safe from inside a Turn's event callback.
@@ -44,23 +40,9 @@ pub enum Event {
     /// The Session with this id did what the inner event says. The [`App`](crate::tui::app::App)
     /// unwraps these, so components never see one.
     Session(String, Box<Event>),
-    /// The agent picked up a Session that already has these entries, oldest first, such as after
-    /// a Rebuild. Comes before any Turn, and holds nothing for a new Session.
-    Resumed(Vec<Entry>),
-    /// The agent started a Turn on this input from the person.
-    TurnStarted(String),
-    /// The agent carried on a Turn that had paused.
-    TurnContinued,
-    /// Something happened during the running Turn.
-    Agent(AgentEvent),
-    /// The running Turn ended, either normally or with the error that stopped it.
-    TurnEnded(Result<TurnEnd, String>),
-    /// The model wants to run a shell command, and the Turn is waiting for the person to decide.
-    Approval(ApprovalRequest),
-    /// The Rebuild's build finished, with the new binary or what went wrong.
-    BuildFinished(Result<PathBuf, String>),
-    /// The harness has something to tell the person, such as a mistyped Human Command.
-    Notice(String),
+    /// Core reported something the person should see: what a Session's Turns did, a question
+    /// about a shell command, a notice, or the end of the Rebuild's build.
+    Report(SessionReport),
     /// The nvim behind the Session's input reported something.
     Vim(VimEvent),
 }
@@ -90,6 +72,13 @@ impl SessionSender {
         let _ = self
             .events
             .send(Event::Session(self.session.clone(), Box::new(event)));
+    }
+
+    /// Returns a way for core to report on the Session, whose reports reach the
+    /// [`App`](crate::tui::app::App) as [`Event::Report`]s from this Session.
+    pub fn reporter(&self) -> ReportSender {
+        let sender = self.clone();
+        ReportSender::new(move |report| sender.send(Event::Report(report)))
     }
 }
 
@@ -122,65 +111,23 @@ pub enum Action {
     Archive,
 }
 
-/// A question asking the person whether a command may run on the host.
-#[derive(Debug, Clone)]
-pub struct ApprovalRequest {
-    /// The command, exactly as it would run.
-    pub command: String,
-    /// Why the person is being asked, if the asker says.
-    pub note: Option<String>,
-    /// Where the person's decision goes. Dropping it unanswered denies the command.
-    pub reply: Reply<bool>,
-}
-
-/// A reply to a question that another task is waiting on.
-///
-/// Clones share one answer, and only the first answer given counts. Once every clone is dropped
-/// unanswered, the waiting task sees that no answer will come.
-#[derive(Debug, Clone)]
-pub struct Reply<T>(Arc<Mutex<Option<oneshot::Sender<T>>>>);
-
-impl<T> Reply<T> {
-    /// Creates a question, returning the way to answer it and the way to wait for the answer.
-    pub fn new() -> (Self, oneshot::Receiver<T>) {
-        let (sender, receiver) = oneshot::channel();
-        (Self(Arc::new(Mutex::new(Some(sender)))), receiver)
-    }
-
-    /// Gives the answer, unless one was already given or nobody is waiting any more.
-    pub fn send(&self, answer: T) {
-        let sender = self.0.lock().ok().and_then(|mut sender| sender.take());
-        if let Some(sender) = sender {
-            let _ = sender.send(answer);
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn only_the_first_answer_counts() {
-        let (reply, answer) = Reply::new();
-        let copy = reply.clone();
-        copy.send(true);
-        reply.send(false);
-        assert_eq!(answer.await, Ok(true));
-    }
-
-    #[tokio::test]
-    async fn dropping_every_copy_unanswered_closes_the_question() {
-        let (reply, answer) = Reply::<bool>::new();
-        drop(reply.clone());
-        drop(reply);
-        assert!(answer.await.is_err());
-    }
-
     #[test]
-    fn answering_when_nobody_waits_is_harmless() {
-        let (reply, answer) = Reply::new();
-        drop(answer);
-        reply.send(1);
+    fn reports_arrive_from_their_session() {
+        let (sender, mut events) = mpsc::unbounded_channel();
+        let reporter = SessionSender::new("7", sender).reporter();
+        reporter.send(SessionReport::TurnContinued);
+
+        let Ok(Event::Session(session, inner)) = events.try_recv() else {
+            panic!("expected an event from a Session");
+        };
+        assert_eq!(session, "7");
+        assert!(matches!(
+            *inner,
+            Event::Report(SessionReport::TurnContinued)
+        ));
     }
 }

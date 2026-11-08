@@ -1,20 +1,20 @@
-//! Turns run in the background, so the screen stays live while the agent works.
+//! Turns run in the background, so the interface stays live while the agent works.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use sstack::agent::{Agent, TurnContext, TurnEnd};
+use crate::agent::{Agent, TurnContext, TurnEnd};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use super::event::{Event, SessionSender};
+use crate::session_report::{ReportSender, SessionReport};
 
-/// The [`App`](crate::tui::app::App)'s handle on an agent that runs on its own task, for starting
-/// and cancelling Turns.
+/// An interface's handle on an agent that runs on its own task, for starting and cancelling Turns.
 ///
-/// Everything comes back as events. First [`Event::Resumed`] tells what the Session already holds.
-/// Then each Turn sends [`Event::TurnStarted`] or [`Event::TurnContinued`], any number of
-/// [`Event::Agent`], and [`Event::TurnEnded`].
+/// Everything comes back as [`SessionReport`]s. First [`SessionReport::Resumed`] tells what the
+/// Session already holds. Then each Turn sends [`SessionReport::TurnStarted`] or
+/// [`SessionReport::TurnContinued`], any number of [`SessionReport::Agent`], and
+/// [`SessionReport::TurnEnded`].
 pub struct AgentHandle {
     /// Where Turns are queued for the agent's task.
     prompts: mpsc::UnboundedSender<Prompt>,
@@ -43,13 +43,14 @@ struct Prompt {
 }
 
 impl AgentHandle {
-    /// Moves `agent` onto its own task, which reports what its Turns do to `events`.
+    /// Moves `agent` onto its own task, which reports what its Turns do to `reports`.
     ///
     /// The task ends once this handle is dropped and any queued Turns have finished.
-    pub fn spawn(agent: Agent, events: SessionSender) -> Self {
-        events.send(Event::Resumed(agent.entries().to_vec()));
+    #[must_use]
+    pub fn spawn(agent: Agent, reports: ReportSender) -> Self {
+        reports.send(SessionReport::Resumed(agent.entries().to_vec()));
         let (prompts, queued) = mpsc::unbounded_channel();
-        tokio::spawn(serve(agent, queued, events));
+        tokio::spawn(serve(agent, queued, reports));
         Self {
             prompts,
             cancel: CancellationToken::new(),
@@ -94,15 +95,15 @@ impl AgentHandle {
 async fn serve(
     mut agent: Agent,
     mut prompts: mpsc::UnboundedReceiver<Prompt>,
-    events: SessionSender,
+    reports: ReportSender,
 ) {
     while let Some(prompt) = prompts.recv().await {
-        events.send(match &prompt.work {
-            Work::Start(text) => Event::TurnStarted(text.clone()),
-            Work::Continue => Event::TurnContinued,
+        reports.send(match &prompt.work {
+            Work::Start(text) => SessionReport::TurnStarted(text.clone()),
+            Work::Continue => SessionReport::TurnContinued,
         });
-        let ended = run_turn(&mut agent, &prompt, &events).await;
-        events.send(Event::TurnEnded(ended));
+        let ended = run_turn(&mut agent, &prompt, &reports).await;
+        reports.send(SessionReport::TurnEnded(ended));
     }
 }
 
@@ -110,9 +111,9 @@ async fn serve(
 async fn run_turn(
     agent: &mut Agent,
     prompt: &Prompt,
-    events: &SessionSender,
+    reports: &ReportSender,
 ) -> Result<TurnEnd, String> {
-    let mut forward = |event| events.send(Event::Agent(event));
+    let mut forward = |event| reports.send(SessionReport::Agent(event));
     let mut context = TurnContext {
         cancel: &prompt.cancel,
         pause: &prompt.pause,

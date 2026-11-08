@@ -8,7 +8,9 @@ use ratatui::layout::{Constraint, Rect};
 use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
 
 use crate::tui::component::{Component, KeyOutcome};
-use crate::tui::event::{Action, ApprovalRequest, Event};
+use sstack::session_report::{ApprovalRequest, SessionReport};
+
+use crate::tui::event::{Action, Event};
 use crate::tui::theme;
 
 /// The panel that asks the person about each shell command the model wants to run, holding the
@@ -24,8 +26,10 @@ pub struct Approval {
 impl Component for Approval {
     fn update(&mut self, event: &Event) {
         match event {
-            Event::Approval(request) => self.waiting.push_back(request.clone()),
-            Event::TurnEnded(_) => self.waiting.clear(),
+            Event::Report(SessionReport::Approval(request)) => {
+                self.waiting.push_back(request.clone());
+            }
+            Event::Report(SessionReport::TurnEnded(_)) => self.waiting.clear(),
             _ => {}
         }
     }
@@ -84,10 +88,10 @@ fn answer(code: KeyCode) -> Option<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::event::Reply;
     use crate::tui::test_support::{drawn, key, screen};
     use insta::assert_snapshot;
     use sstack::agent::TurnEnd;
+    use sstack::session_report::Reply;
     use tokio::sync::oneshot;
 
     fn ask(approval: &mut Approval, command: &str) -> oneshot::Receiver<bool> {
@@ -107,7 +111,7 @@ mod tests {
             note,
             reply,
         };
-        approval.update(&Event::Approval(request));
+        approval.update(&Event::Report(SessionReport::Approval(request)));
         answer
     }
 
@@ -147,7 +151,9 @@ mod tests {
         let mut approval = Approval::default();
         let mut asked = ask(&mut approval, "ls");
         approval.update(&Event::Resize);
-        approval.update(&Event::TurnEnded(Ok(TurnEnd::Cancelled)));
+        approval.update(&Event::Report(SessionReport::TurnEnded(Ok(
+            TurnEnd::Cancelled,
+        ))));
         assert!(asked.try_recv().is_err());
         assert_eq!(approval.key(key(KeyCode::Char('y'))), KeyOutcome::Ignored);
     }

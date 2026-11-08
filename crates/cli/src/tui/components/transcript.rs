@@ -13,6 +13,8 @@ use sstack::session::{AssistantEntry, Entry};
 
 use crate::describe;
 use crate::tui::component::{Component, KeyOutcome};
+use sstack::session_report::SessionReport;
+
 use crate::tui::event::{Event, Scroll};
 use crate::tui::theme;
 
@@ -185,15 +187,17 @@ fn style(kind: Kind) -> Style {
 impl Component for Transcript {
     fn update(&mut self, event: &Event) {
         match event {
-            Event::Resumed(entries) => self.resume(entries),
-            Event::TurnStarted(text) => self.push(Kind::Prompt, text.clone()),
-            Event::Agent(event) => self.agent(event),
-            Event::TurnEnded(outcome) => {
+            Event::Report(SessionReport::Resumed(entries)) => self.resume(entries),
+            Event::Report(SessionReport::TurnStarted(text)) => {
+                self.push(Kind::Prompt, text.clone());
+            }
+            Event::Report(SessionReport::Agent(event)) => self.agent(event),
+            Event::Report(SessionReport::TurnEnded(outcome)) => {
                 if let Some(text) = describe::outcome_text(outcome.clone()) {
                     self.push(Kind::Note, text);
                 }
             }
-            Event::Notice(text) => self.push(Kind::Note, text.clone()),
+            Event::Report(SessionReport::Notice(text)) => self.push(Kind::Note, text.clone()),
             Event::Scroll(direction) => self.scroll(*direction, WHEEL),
             _ => {}
         }
@@ -245,11 +249,13 @@ mod tests {
     #[test]
     fn streamed_pieces_join_until_their_source_changes() {
         let shown = transcript(vec![
-            Event::TurnStarted("hi".into()),
-            Event::Agent(AgentEvent::Reasoning("let me ".into())),
-            Event::Agent(AgentEvent::Reasoning("think".into())),
-            Event::Agent(AgentEvent::Text("Do".into())),
-            Event::Agent(AgentEvent::Text("ne.".into())),
+            Event::Report(SessionReport::TurnStarted("hi".into())),
+            Event::Report(SessionReport::Agent(AgentEvent::Reasoning(
+                "let me ".into(),
+            ))),
+            Event::Report(SessionReport::Agent(AgentEvent::Reasoning("think".into()))),
+            Event::Report(SessionReport::Agent(AgentEvent::Text("Do".into()))),
+            Event::Report(SessionReport::Agent(AgentEvent::Text("ne.".into()))),
         ]);
         assert_eq!(
             texts(&shown),
@@ -272,13 +278,16 @@ mod tests {
             is_error,
         };
         let shown = transcript(vec![
-            Event::Agent(AgentEvent::ToolStarted(started)),
-            Event::Agent(finished(false)),
-            Event::Agent(finished(true)),
-            Event::Agent(AgentEvent::ContextNearLimit { used: 8, limit: 10 }),
-            Event::TurnEnded(Ok(TurnEnd::Finished)),
-            Event::TurnEnded(Err("down".into())),
-            Event::Notice("hello".into()),
+            Event::Report(SessionReport::Agent(AgentEvent::ToolStarted(started))),
+            Event::Report(SessionReport::Agent(finished(false))),
+            Event::Report(SessionReport::Agent(finished(true))),
+            Event::Report(SessionReport::Agent(AgentEvent::ContextNearLimit {
+                used: 8,
+                limit: 10,
+            })),
+            Event::Report(SessionReport::TurnEnded(Ok(TurnEnd::Finished))),
+            Event::Report(SessionReport::TurnEnded(Err("down".into()))),
+            Event::Report(SessionReport::Notice("hello".into())),
             Event::Resize,
         ]);
         let notes: Vec<_> = texts(&shown).into_iter().map(|(_, text)| text).collect();
@@ -294,7 +303,7 @@ mod tests {
             output: "out".into(),
             is_error,
         };
-        let shown = transcript(vec![Event::Resumed(vec![
+        let shown = transcript(vec![Event::Report(SessionReport::Resumed(vec![
             Entry::User {
                 text: "fix it".into(),
             },
@@ -314,7 +323,7 @@ mod tests {
             },
             Entry::TurnCancelled,
             Entry::TurnParked,
-        ])]);
+        ]))]);
         assert_eq!(
             texts(&shown),
             [
@@ -335,8 +344,8 @@ mod tests {
     #[test]
     fn prompts_are_marked_and_set_apart() {
         let shown = transcript(vec![
-            Event::Agent(AgentEvent::Text("earlier".into())),
-            Event::TurnStarted("two\nlines".into()),
+            Event::Report(SessionReport::Agent(AgentEvent::Text("earlier".into()))),
+            Event::Report(SessionReport::TurnStarted("two\nlines".into())),
         ]);
         let screen = drawn(20, 4, |frame| shown.render(frame, frame.area()));
         assert_snapshot!(screen.backend());
@@ -345,7 +354,9 @@ mod tests {
     #[test]
     fn the_newest_output_stays_in_view_unless_scrolled_back() {
         let lines: Vec<String> = (1..=30).map(|n| n.to_string()).collect();
-        let mut shown = transcript(vec![Event::Agent(AgentEvent::Text(lines.join("\n")))]);
+        let mut shown = transcript(vec![Event::Report(SessionReport::Agent(AgentEvent::Text(
+            lines.join("\n"),
+        )))]);
         let draw = |shown: &Transcript| screen(5, 2, |frame| shown.render(frame, frame.area()));
         assert_eq!(draw(&shown), ["29", "30"]);
 
@@ -362,7 +373,9 @@ mod tests {
     #[test]
     fn the_mouse_wheel_scrolls_a_few_lines_at_a_time() {
         let lines: Vec<String> = (1..=30).map(|n| n.to_string()).collect();
-        let mut shown = transcript(vec![Event::Agent(AgentEvent::Text(lines.join("\n")))]);
+        let mut shown = transcript(vec![Event::Report(SessionReport::Agent(AgentEvent::Text(
+            lines.join("\n"),
+        )))]);
         let draw = |shown: &Transcript| screen(5, 2, |frame| shown.render(frame, frame.area()));
 
         shown.update(&Event::Scroll(Scroll::Up));

@@ -22,6 +22,8 @@ use sstack::workspace::SessionSummary;
 
 use super::component::{Component, KeyOutcome};
 use super::components::{Activity, Row, SIDEBAR_WIDTH, Sidebar};
+use sstack::session_report::SessionReport;
+
 use super::event::{Action, Event, EventReceiver};
 use super::pane::{Opened, Pane};
 use super::theme::ColorDepth;
@@ -76,7 +78,7 @@ pub trait Sessions {
     fn rename(&mut self, id: &str, name: Option<&str>) -> Result<()>;
 
     /// Starts building the Harness Source in the background, which ends in an
-    /// [`Event::BuildFinished`].
+    /// [`SessionReport::BuildFinished`].
     fn start_build(&mut self);
 
     /// Stops the build, if one is running.
@@ -197,7 +199,9 @@ impl App<'_> {
         match event {
             Event::Key(key) => return self.key(key),
             Event::Session(id, event) => return self.pass_on(&id, &event),
-            Event::BuildFinished(outcome) => return self.build_finished(outcome),
+            Event::Report(SessionReport::BuildFinished(outcome)) => {
+                return self.build_finished(outcome);
+            }
             Event::Click { column, row } => self.click(column, row),
             event => self.panes[self.shown].update(&event),
         }
@@ -212,7 +216,7 @@ impl App<'_> {
         match event {
             Event::Vim(VimEvent::Submitted(line)) => return self.vim_submitted(index, line),
             Event::Vim(VimEvent::Lost { failure, .. }) => self.vim_lost(index, failure),
-            Event::TurnEnded(_) if !self.phase.is_draining() => {
+            Event::Report(SessionReport::TurnEnded(_)) if !self.phase.is_draining() => {
                 self.panes[index].continue_turn();
             }
             _ => {}
@@ -307,7 +311,7 @@ impl App<'_> {
         }
         self.told_nvim_missing |= missing;
         let notice = format!("typing into the plain prompt: {failure}. /vim tries again");
-        self.panes[index].update(&Event::Notice(notice));
+        self.panes[index].update(&Event::Report(SessionReport::Notice(notice)));
     }
 
     /// Returns the position in `panes` of the Session with id `id`.
@@ -566,7 +570,7 @@ impl App<'_> {
 
     /// Tells the person something from the harness itself, in the Session on screen.
     pub fn notice(&mut self, text: String) {
-        self.panes[self.shown].update(&Event::Notice(text));
+        self.panes[self.shown].update(&Event::Report(SessionReport::Notice(text)));
     }
 
     /// Draws the sidebar, if there is room, and the Session on screen beside it.
@@ -891,7 +895,7 @@ mod tests {
             self.enter("go");
             self.enter_new();
             let exit = self.enter(command);
-            self.until(|event| matches!(event, Event::Approval(_)))
+            self.until(|event| matches!(event, Event::Report(SessionReport::Approval(_))))
                 .await;
             exit
         }
@@ -940,7 +944,7 @@ mod tests {
         }
 
         async fn until_turn_ends(&mut self) {
-            self.until(|event| matches!(event, Event::TurnEnded(_)))
+            self.until(|event| matches!(event, Event::Report(SessionReport::TurnEnded(_))))
                 .await;
         }
 
@@ -981,7 +985,8 @@ mod tests {
         h.until_turn_ends().await;
 
         let mut h = h.rebuilt().await;
-        h.until(|event| matches!(event, Event::Resumed(_))).await;
+        h.until(|event| matches!(event, Event::Report(SessionReport::Resumed(_))))
+            .await;
 
         assert_snapshot!(h.drawn_at(NARROW));
     }
@@ -1044,7 +1049,8 @@ mod tests {
         let script = vec![Ok(bash_call("touch ran")), Ok(reply("all done"))];
         let mut h = scripted(script);
         h.enter("go");
-        h.until(|event| matches!(event, Event::Approval(_))).await;
+        h.until(|event| matches!(event, Event::Report(SessionReport::Approval(_))))
+            .await;
         assert_snapshot!(h.drawn_at(NARROW));
 
         assert_eq!(h.app.handle(Event::Key(key(KeyCode::Char('y')))), None);
@@ -1072,7 +1078,7 @@ mod tests {
     async fn while_a_turn_runs_ctrl_c_cancels_it_and_new_turns_wait() {
         let mut h = harness(Arc::new(NeverResponds));
         h.enter("go");
-        h.until(|event| matches!(event, Event::TurnStarted(_)))
+        h.until(|event| matches!(event, Event::Report(SessionReport::TurnStarted(_))))
             .await;
         assert!(h.screen().contains("working"));
 
@@ -1231,7 +1237,7 @@ mod tests {
     async fn switching_to_a_stored_session_resumes_it() {
         let mut h = with_stored(Arc::new(NeverResponds));
         h.press('e');
-        h.until(|event| matches!(event, Event::Resumed(entries) if !entries.is_empty()))
+        h.until(|event| matches!(event, Event::Report(SessionReport::Resumed(entries)) if !entries.is_empty()))
             .await;
         assert!(h.screen().contains("> older"));
     }
@@ -1365,7 +1371,8 @@ mod tests {
         .await;
         let submit = KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT);
         h.app.handle(Event::Key(submit));
-        h.until(|event| matches!(event, Event::TurnEnded(_))).await;
+        h.until(|event| matches!(event, Event::Report(SessionReport::TurnEnded(_))))
+            .await;
         assert!(h.screen().contains("done"));
     }
 
@@ -1438,7 +1445,8 @@ mod tests {
         let mut h = scripted(script);
         h.enter("go");
         h.enter_new();
-        h.until(|event| matches!(event, Event::Approval(_))).await;
+        h.until(|event| matches!(event, Event::Report(SessionReport::Approval(_))))
+            .await;
 
         hiding_seconds(|| assert_snapshot!(h.drawn_at(WIDE)));
 
@@ -1459,7 +1467,8 @@ mod tests {
         h.enter("/new");
         h.press('e');
         h.enter("go");
-        h.until(|event| matches!(event, Event::Approval(_))).await;
+        h.until(|event| matches!(event, Event::Report(SessionReport::Approval(_))))
+            .await;
         h.press('e');
         assert_eq!(h.shown(), "new1");
     }
@@ -1469,7 +1478,8 @@ mod tests {
         let mut h = scripted(vec![Ok(bash_call("touch ran"))]);
         h.enter("go");
         h.enter_new();
-        h.until(|event| matches!(event, Event::Approval(_))).await;
+        h.until(|event| matches!(event, Event::Report(SessionReport::Approval(_))))
+            .await;
         assert_snapshot!(h.drawn_at(NARROW));
         hiding_seconds(|| assert_snapshot!(h.drawn_at(WIDE)));
     }
@@ -1677,7 +1687,7 @@ mod tests {
     }
 
     fn built() -> Event {
-        Event::BuildFinished(Ok(binary()))
+        Event::Report(SessionReport::BuildFinished(Ok(binary())))
     }
 
     fn two_steps() -> Harness {
@@ -1714,7 +1724,8 @@ mod tests {
         let mut h = two_steps();
         h.drain_with_a_question_open("/rebuild").await;
         h.approve();
-        h.until(|event| matches!(event, Event::TurnEnded(_))).await;
+        h.until(|event| matches!(event, Event::Report(SessionReport::TurnEnded(_))))
+            .await;
         assert_eq!(h.app.panes[0].state(), SessionState::Parked);
         let screen = h.screen_of(WIDE);
         assert!(screen.contains("- go"), "{screen}");
@@ -1774,9 +1785,12 @@ mod tests {
         let mut h = two_steps();
         h.drain_with_a_question_open("/rebuild").await;
         h.approve();
-        h.until(|event| matches!(event, Event::TurnEnded(_))).await;
+        h.until(|event| matches!(event, Event::Report(SessionReport::TurnEnded(_))))
+            .await;
 
-        let failed = Event::BuildFinished(Err("the build did not succeed".into()));
+        let failed = Event::Report(SessionReport::BuildFinished(Err(
+            "the build did not succeed".into(),
+        )));
         assert_eq!(h.app.handle(failed), None);
 
         assert!(!h.app.phase.is_draining());
@@ -1810,7 +1824,8 @@ mod tests {
         h.approve();
         h.app.handle(Event::Key(alt('c')));
         h.app.panes[0].set_paused(true);
-        h.until(|event| matches!(event, Event::TurnEnded(_))).await;
+        h.until(|event| matches!(event, Event::Report(SessionReport::TurnEnded(_))))
+            .await;
         h.app.panes[0].set_paused(false);
         assert_eq!(h.app.panes[0].state(), SessionState::Working);
         h.until_turn_ends().await;
