@@ -50,6 +50,24 @@ _Avoid_: The harness (when the Running Harness could be meant)
 The smallest Harness able to make a real change to its own Harness Source with no outside tool.
 _Avoid_: MVP, prototype
 
+### Interfaces
+
+**Interactive Mode**:
+Running the Harness in a terminal so that a person works through the TUI, as opposed to Headless Mode.
+_Avoid_: TUI mode
+
+**Headless Mode**:
+Running the Harness on one prompt given when it starts, with no interface and no person to answer questions.
+_Avoid_: Batch mode, non-interactive mode
+
+**TUI**:
+The full-screen interface a person uses in a terminal.
+_Avoid_: Terminal UI
+
+**GUI**:
+The windowed interface a person uses on the desktop.
+_Avoid_: Desktop app, window
+
 ### Tools
 
 **Workspace**:

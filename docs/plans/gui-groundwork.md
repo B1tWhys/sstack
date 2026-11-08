@@ -1,0 +1,54 @@
+# Plan: groundwork for the GUI
+
+The goal is a GUI good enough that the person can work on sstack in it, in place of the TUI. The design is settled in `docs/adr/0009-gui-in-iced-over-the-same-core.md`; read it, ADR-0004, `GLOSSARY.md` and `AGENTS.md` before starting a step.
+
+## How to run a step
+
+Each step is done by one agent with a fresh context, in order, because each step builds on the one before it. Do only your step.
+
+1. Read this file, the documents above, and the code your step names.
+2. Make the change test-first where the step adds behaviour. Steps 2 to 5 are refactors: the TUI and headless mode must behave exactly as before, and every existing test and snapshot must pass unchanged.
+3. Before merging, extracting or copying any code, load the `judging-duplicate-code` skill and apply its test.
+4. Run `cargo nextest run --workspace --all-features` and commit with a conventional commit message. The hooks must pass, which includes every function's CRAP score being 6 or less. Never bypass them and never push.
+5. Tick your step below and write a short note under it: anything the next step needs to know, and anything you found that this plan got wrong.
+
+A step is done when its commit is in, the full test run is green, and its note is written. If the step cannot be done as written, stop, leave the code as it was, and explain why in the note.
+
+## Steps
+
+### [ ] 1. Lock the Session log
+
+A Running Harness holds an exclusive lock on a Session's log for as long as it has the Session open, so that two Harnesses can never append to the same log. Take the lock with `File::try_lock` in `SessionLog::create` and `SessionLog::open` (`crates/core/src/session.rs`), and add a `SessionError` variant whose message is "this Session is open elsewhere". Reads that only look at a log, such as `first_prompt` and `is_parked`, take no lock. Check that the TUI and headless mode show the error well. Test that opening a log a second time in the same process fails.
+
+### [ ] 2. Move the lifecycle, Human Commands and Rebuild into core
+
+Move `crates/cli/src/tui/lifecycle.rs` (`SessionState`, `SessionEvent`, `Phase`, `Trigger`, `Effect`, `Exit`, `interrupt`), `crates/cli/src/command.rs` and `crates/cli/src/rebuild.rs` into the `sstack` crate. Rebuild currently hardcodes `--package sstack-cli` and the binary `sstack`. Make it build and relaunch the package and binary that is running, given by the caller.
+
+### [ ] 3. Split the Session reports out of the TUI's events, and move the Turn runner
+
+`tui::Event` (`crates/cli/src/tui/event.rs`) mixes terminal input (`Key`, `Paste`, `Resize`, `Scroll`, `Click`, `Vim`) with reports about a Session (`Resumed`, `TurnStarted`, `TurnContinued`, `Agent`, `TurnEnded`, `Approval`, `BuildFinished`, `Notice`). Move the reports into core as their own type, with `ApprovalRequest` and `Reply`. The TUI keeps its `Event` and wraps the core type. Then move `AgentHandle` (`crates/cli/src/tui/worker.rs`) into core, reporting through the new type.
+
+### [ ] 4. Move the setup of a Session into core
+
+Move `crates/cli/src/setup.rs` into core, except for anything that reads the clap `Args`, which stays in the binaries. Core takes plain values: which Session to start or resume, the Connection and model if overridden, and where the Session works. `describe.rs` holds the words headless mode and the TUI show for what happens in a Session. It is presentation, so it stays in the CLI crate.
+
+### [ ] 5. Pull a controller for one Session out of the TUI's App
+
+`App` (`crates/cli/src/tui/app.rs`) mixes the screen with logic that every interface needs. Move that logic into core as a controller for one Session. It covers `submit`, which decides whether a line is a Human Command, a Skill or a prompt, `advance`, `check_settled`, `interrupt`, `resume_parked`, `build_finished` and the Phase they drive. The interface tells the controller what the person did and what core reported, and carries out what the controller asks for. Everything about several Sessions at once stays in the TUI: the sidebar, `queue`, `step`, `show_longest_waiting`, `open_new` and archiving. So do `/rename` and `/vim`. Load the `codebase-design` skill before choosing the controller's interface. If the seam is unclear, stop and describe the options in the note.
+
+### [ ] 6. Add the GUI crate
+
+Add `crates/gui`, package `sstack-gui`, with a binary of the same name, built on the latest iced release. It takes the TUI's `--resume`, `--connection` and `--model` flags, and works on the project in the directory it is started from. Apply `judging-duplicate-code` before sharing the flag definitions with the CLI. It opens one Session in one window, with a plain multi-line prompt that runs a Turn through the controller, and shows the reply as plain text. Session reports reach the iced app through a `Subscription`. Keep styling to iced's defaults: the visual style gets a session of its own.
+
+Test the logic by feeding `Message`s to `update` and checking state. Add a few `iced_test` tests that drive the real widgets and check structure and text. Add no pixel snapshots yet.
+
+### [ ] 7. Make the GUI usable for work on sstack
+
+Commit each item separately:
+
+- A transcript that streams the reply as it arrives, shows the model's reasoning, and shows each tool call as a one-line summary. The GUI builds its own transcript from the Session reports; ADR-0009 explains why it does not share the TUI's.
+- Approval of a shell command, for when the Sandbox is unavailable.
+- Interrupting a running Turn.
+- Rebuild, by `/rebuild` and by a button, which relaunches `sstack-gui` into the same Session.
+
+After this step the person can work on sstack in the GUI.
