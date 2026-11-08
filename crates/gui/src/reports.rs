@@ -1,12 +1,9 @@
 //! The way a Session's reports reach the iced app, which reads them through a [`Subscription`].
 
-use std::hash::{Hash, Hasher};
-use std::sync::{Arc, Mutex};
-
 use iced::Subscription;
-use iced::futures::channel::mpsc::{self, UnboundedReceiver};
-use iced::futures::{Stream, StreamExt, stream};
 use sstack::session_report::{ReportSender, SessionReport};
+
+use crate::inbox::Inbox;
 
 /// The reports of one Session as they arrive, waiting for the window that shows it to read them.
 ///
@@ -14,48 +11,38 @@ use sstack::session_report::{ReportSender, SessionReport};
 /// made before the Session has an id, so that the Session's Approver can ask through them.
 #[derive(Clone)]
 pub struct Reports {
-    /// The reports not yet read, until a stream takes them. Where it sits in memory also tells
-    /// iced that the subscription is the same one from one call of `subscription` to the next,
-    /// so that it keeps reading rather than starting over.
-    unread: Arc<Mutex<Option<UnboundedReceiver<SessionReport>>>>,
+    /// The reports not yet read.
+    inbox: Inbox<SessionReport>,
 }
 
 impl Reports {
     /// Creates the reports of one Session, returning them with the sender that core reports
     /// through.
     pub fn new() -> (Self, ReportSender) {
-        let (sender, unread) = mpsc::unbounded();
-        let reports = Self {
-            unread: Arc::new(Mutex::new(Some(unread))),
-        };
+        let (inbox, sender) = Inbox::new();
         let deliver = move |report| {
             let _ = sender.unbounded_send(report);
         };
-        (reports, ReportSender::new(deliver))
+        (Self { inbox }, ReportSender::new(deliver))
     }
 
     /// Returns the subscription that delivers each report to the app as it arrives.
     pub fn subscription(&self) -> Subscription<SessionReport> {
-        Subscription::run_with(self.clone(), Self::stream)
+        self.inbox.subscription()
     }
 
     /// Takes the reports as a stream that ends once core can send no more. A stream taken after
     /// the first is empty.
-    pub fn stream(&self) -> impl Stream<Item = SessionReport> + use<> {
-        let unread = self.unread.lock().ok().and_then(|mut unread| unread.take());
-        stream::iter(unread).flatten()
-    }
-}
-
-impl Hash for Reports {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        Arc::as_ptr(&self.unread).hash(state);
+    #[cfg(test)]
+    pub fn stream(&self) -> impl iced::futures::Stream<Item = SessionReport> + use<> {
+        self.inbox.stream()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use iced::futures::StreamExt;
     use iced::futures::executor::block_on;
 
     #[test]

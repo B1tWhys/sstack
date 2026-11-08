@@ -4,6 +4,7 @@
 //! only passes keys in and draws the [`VimState`] that comes back. It never computes an edit.
 
 mod connection;
+pub mod layout;
 mod worker;
 
 use std::ops::Range;

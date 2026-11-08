@@ -181,10 +181,10 @@ async fn what_the_person_typed_stays_with_its_session() {
     }
 
     let _ = window.update(Message::NewSession);
-    assert_eq!(window.view_ref().prompt.text(), "");
+    assert_eq!(window.view_ref().prompt.draft().text, "");
     let _ = window.update(Message::Show("1".into()));
 
-    assert_eq!(window.view_ref().prompt.text(), "half done");
+    assert_eq!(window.view_ref().prompt.draft().text, "half done");
 }
 
 #[tokio::test]
@@ -430,18 +430,19 @@ fn character(character: &str) -> keyboard::Key {
 fn shortcuts_are_pressed_with_the_command_key() {
     let command = Modifiers::COMMAND;
     let shortcuts = [
-        ("n", "NewSession"),
-        ("]", "NextSession"),
-        ("[", "PreviousSession"),
-        ("g", "LongestWaiting"),
+        (Key::Named(Named::Enter), "Submit"),
+        (character("n"), "NewSession"),
+        (character("]"), "NextSession"),
+        (character("["), "PreviousSession"),
+        (character("g"), "LongestWaiting"),
     ];
     for (key, message) in shortcuts {
-        let found = command_shortcut(&character(key), command).map(|m| format!("{m:?}"));
+        let found = command_shortcut(&key, command).map(|m| format!("{m:?}"));
         assert_eq!(found.as_deref(), Some(message));
-        assert!(command_shortcut(&character(key), Modifiers::empty()).is_none());
+        assert!(command_shortcut(&key, Modifiers::empty()).is_none());
     }
     assert!(command_shortcut(&character("q"), command).is_none());
-    assert!(command_shortcut(&Key::Named(Named::Enter), command).is_none());
+    assert!(command_shortcut(&Key::Named(Named::Tab), command).is_none());
 }
 
 #[tokio::test]
@@ -467,5 +468,5 @@ async fn a_shortcut_pressed_in_the_prompt_reaches_the_window() {
         messages.iter().any(|m| matches!(m, Message::NewSession)),
         "{messages:?}"
     );
-    assert_eq!(window.view_ref().prompt.text(), "");
+    assert_eq!(window.view_ref().prompt.draft().text, "");
 }

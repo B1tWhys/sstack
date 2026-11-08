@@ -1,6 +1,7 @@
 //! The window: the Sessions the person can switch between, and the one on screen, with what was
 //! said in it and a prompt to say more.
 
+mod input;
 mod session;
 mod sidebar;
 
@@ -13,7 +14,8 @@ use iced::futures::future::BoxFuture;
 use iced::widget::scrollable::Viewport;
 use iced::widget::text_editor::{Binding, KeyPress};
 use iced::widget::{button, column, operation, row, scrollable, text, text_editor};
-use iced::{Element, Fill, Subscription, Task, keyboard, task, time, window};
+use iced::{Element, Fill, Size, Subscription, Task, clipboard, keyboard, task, time, window};
+use input::Input;
 use session::SessionView;
 use sstack::human_command::Command;
 use sstack::running_harness::{
@@ -22,9 +24,11 @@ use sstack::running_harness::{
 use sstack::session_controller::{OpenSessions, SessionController};
 use sstack::session_report::{ApprovalRequest, ReportSender, SessionReport};
 use sstack::session_setup::{Place, Run, Start};
+use sstack::vim::VimEvent;
 use sstack::workspace::SessionSummary;
 
 use crate::reports::Reports;
+use crate::vim_prompt::KeyOutcome;
 
 /// The id of the prompt, by which tests find it.
 const PROMPT: &str = "prompt";
@@ -134,8 +138,16 @@ pub struct Window {
 /// Something that happened in the window, for [`Window::update`] to act on.
 #[derive(Debug, Clone)]
 pub enum Message {
-    /// The person changed the prompt.
+    /// The person changed the plain prompt.
     Edit(text_editor::Action),
+    /// The person pressed a key while typing into nvim, which no widget kept for itself.
+    Key(keyboard::Event),
+    /// The nvim of the Session with this id reported on what the person is typing.
+    Vim(String, VimEvent),
+    /// The clipboard was read for a paste into nvim, and held this, if it held text.
+    Pasted(Option<String>),
+    /// The window laid out the prompt that nvim edits at this size, in logical pixels.
+    PromptResized(Size),
     /// The person sent the prompt.
     Submit,
     /// Core reported on the Session with this id.
@@ -212,6 +224,16 @@ impl Window {
                 self.view_mut().edit(action);
                 Task::none()
             }
+            Message::Key(event) => self.key(&event),
+            Message::Vim(id, event) => self.vim(&id, event),
+            Message::Pasted(pasted) => {
+                self.view_ref().prompt.paste(pasted);
+                Task::none()
+            }
+            Message::PromptResized(size) => {
+                self.view_mut().prompt.resized(size);
+                Task::none()
+            }
             Message::Submit => self.submit(),
             Message::Report(id, report) => self.report(&id, &report),
             Message::Scrolled { at_end } => {
@@ -269,11 +291,15 @@ impl Window {
             })
             .height(Fill)
             .width(Fill);
-        let prompt = text_editor(&view.prompt)
-            .id(PROMPT)
-            .placeholder("Say something, or type a / command")
-            .on_action(Message::Edit)
-            .key_binding(prompt_binding);
+        let prompt = match &view.prompt {
+            Input::Plain(content) => text_editor(content)
+                .id(PROMPT)
+                .placeholder("Say something, or type a / command")
+                .on_action(Message::Edit)
+                .key_binding(prompt_binding)
+                .into(),
+            Input::Vim(vim) => vim.view(),
+        };
         let send = button("Send").on_press(Message::Submit);
         let draining = self.harness.phase().is_draining();
         let interruptible = view.state().in_turn() || draining;
@@ -297,13 +323,18 @@ impl Window {
     }
 
     /// Returns where every open Session's reports come from, with the keys, requests to close
-    /// and passing time that the window acts on.
+    /// and passing time that the window acts on. While the person types into nvim in the Session
+    /// on screen, every key goes to the window, to pass on to nvim.
     ///
     /// The window hears a request to close only if iced is told not to exit on one itself.
     pub fn subscription(&self) -> Subscription<Message> {
         let reports = self.views.iter().map(SessionView::subscription);
+        let keys = match self.view_ref().prompt {
+            Input::Plain(_) => keyboard::listen().filter_map(|event| shortcut(&event)),
+            Input::Vim(_) => keyboard::listen().filter_map(pressed),
+        };
         let window = [
-            keyboard::listen().filter_map(|event| shortcut(&event)),
+            keys,
             window::close_requests().map(|_| Message::CloseRequested),
             time::every(TICK).map(|_| Message::Tick),
         ];
@@ -350,15 +381,60 @@ impl Window {
         self.carry_out(self.shown, outcome)
     }
 
-    /// Acts on what the person typed, which stays in the prompt only if it was refused.
+    /// Acts on what the person typed, which stays in the prompt only if it was refused. Nvim
+    /// hands its text back as [`Message::Vim`] instead, once every key typed before has taken
+    /// effect.
     fn submit(&mut self) -> Task<Message> {
-        let draft = self.view_mut().take_prompt();
-        let typed = draft.text();
-        let outcome = self.drive(self.shown, Happened::Entered(typed.trim()));
-        if matches!(outcome, Some(Outcome::Refused(_))) {
-            self.view_mut().restore_prompt(draft);
+        match self.view_mut().take_prompt() {
+            Some(typed) => self.enter(self.shown, typed),
+            None => Task::none(),
         }
-        self.carry_out(self.shown, outcome)
+    }
+
+    /// Acts on `typed`, which the prompt of the Session at position `index` has already given up,
+    /// putting it back if it was refused.
+    fn enter(&mut self, index: usize, typed: text_editor::Content) -> Task<Message> {
+        let line = typed.text();
+        let outcome = self.drive(index, Happened::Entered(line.trim()));
+        if matches!(outcome, Some(Outcome::Refused(_))) {
+            self.views[index].restore_prompt(typed);
+        }
+        self.carry_out(index, outcome)
+    }
+
+    /// Acts on a key pressed while the person types into nvim. The window's shortcuts still
+    /// work, and Alt-C interrupts, as in the TUI, because Escape belongs to nvim.
+    fn key(&mut self, event: &keyboard::Event) -> Task<Message> {
+        if let keyboard::Event::KeyPressed { key, modifiers, .. } = event
+            && let Some(message) = command_shortcut(key, *modifiers)
+        {
+            return self.update(message);
+        }
+        if is_alt_c(event) {
+            return self.interrupt();
+        }
+        match self.view_ref().prompt.key(event) {
+            KeyOutcome::Paste => clipboard::read().map(Message::Pasted),
+            KeyOutcome::Handled | KeyOutcome::Ignored => Task::none(),
+        }
+    }
+
+    /// Acts on what the nvim of the Session with id `id` reported. A line it submitted is entered
+    /// like one sent from the plain prompt, and the person may have switched away while nvim
+    /// answered, so that Session comes back on screen to take it.
+    fn vim(&mut self, id: &str, event: VimEvent) -> Task<Message> {
+        let Some(index) = self.position(id) else {
+            return Task::none();
+        };
+        if !self.views[index].vim_reported(&event) {
+            return Task::none();
+        }
+        let VimEvent::Submitted(line) = event else {
+            return Task::none();
+        };
+        let shown = self.show(index);
+        let entered = self.enter(index, text_editor::Content::with_text(&line));
+        Task::batch([shown, entered])
     }
 
     /// Shows what core reported about the Session with id `id`, and acts on it. Reports from a
@@ -415,7 +491,11 @@ impl Window {
                 self.rename(name);
                 Task::none()
             }
-            _ => self.notice("/vim is not available in the GUI yet".to_owned()),
+            // Only /vim is left.
+            _ => {
+                self.view_mut().toggle_vim();
+                Task::none()
+            }
         }
     }
 
@@ -703,20 +783,20 @@ fn shortcut(event: &keyboard::Event) -> Option<Message> {
 
 /// Returns the message that `key`, pressed with `modifiers`, sends wherever the person is
 /// typing, if it is one of the window's shortcuts. Each is pressed with Command on macOS and
-/// Control elsewhere: N starts a new Session, ] and [ move along the sidebar, and G shows the
-/// Session that has waited longest.
+/// Control elsewhere: Enter sends the prompt in any mode of nvim, N starts a new Session, ] and [
+/// move along the sidebar, and G shows the Session that has waited longest. They need not match
+/// the TUI's keys (ADR-0010).
 fn command_shortcut(key: &keyboard::Key, modifiers: keyboard::Modifiers) -> Option<Message> {
-    let keyboard::Key::Character(character) = key else {
-        return None;
-    };
+    use keyboard::Key::{Character, Named};
     if !modifiers.command() {
         return None;
     }
-    match character.as_str() {
-        "n" => Some(Message::NewSession),
-        "]" => Some(Message::NextSession),
-        "[" => Some(Message::PreviousSession),
-        "g" => Some(Message::LongestWaiting),
+    match key.as_ref() {
+        Named(keyboard::key::Named::Enter) => Some(Message::Submit),
+        Character("n") => Some(Message::NewSession),
+        Character("]") => Some(Message::NextSession),
+        Character("[") => Some(Message::PreviousSession),
+        Character("g") => Some(Message::LongestWaiting),
         _ => None,
     }
 }
@@ -728,6 +808,21 @@ fn prompt_binding(press: KeyPress) -> Option<Binding<Message>> {
         Some(message) => Some(Binding::Custom(message)),
         None => Binding::from_key_press(press),
     }
+}
+
+/// Returns the message for a key pressed while the person types into nvim. Releasing a key means
+/// nothing to nvim.
+fn pressed(event: keyboard::Event) -> Option<Message> {
+    matches!(event, keyboard::Event::KeyPressed { .. }).then_some(Message::Key(event))
+}
+
+/// Returns whether `event` is a press of Alt-C, which interrupts while the person types into
+/// nvim.
+fn is_alt_c(event: &keyboard::Event) -> bool {
+    let keyboard::Event::KeyPressed { key, modifiers, .. } = event else {
+        return false;
+    };
+    modifiers.alt() && key.as_ref() == keyboard::Key::Character("c")
 }
 
 /// Returns whether the transcript's `viewport` has its newest output in view.

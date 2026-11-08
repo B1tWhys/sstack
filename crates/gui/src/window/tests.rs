@@ -82,7 +82,7 @@ async fn a_prompt_runs_a_turn_and_shows_the_reply() {
     let (_dir, mut window) = window(vec![Ok(reply("hi there"))]);
 
     let _ = send(&mut window, " hello\n");
-    assert_eq!(window.view_ref().prompt.text(), "");
+    assert_eq!(window.view_ref().prompt.draft().text, "");
     let _ = until_turn_ends(&mut window).await;
 
     let said = [
@@ -100,7 +100,7 @@ async fn a_prompt_sent_during_a_turn_is_refused_and_kept() {
 
     let _ = send(&mut window, "second");
 
-    assert_eq!(window.view_ref().prompt.text(), "second");
+    assert_eq!(window.view_ref().prompt.draft().text, "second");
     let refused = notice("a Turn is already running in this Session");
     assert_eq!(blocks(&window).last(), Some(&refused));
 }
@@ -113,17 +113,6 @@ async fn a_failed_turn_says_why() {
 
     let failed = notice("the Turn failed: the model is down");
     assert_eq!(blocks(&window).last(), Some(&failed));
-}
-
-#[tokio::test]
-async fn the_vim_command_is_not_available_yet() {
-    let (_dir, mut window) = window(vec![]);
-
-    let _ = send(&mut window, "/vim");
-
-    let missing = notice("/vim is not available in the GUI yet");
-    assert_eq!(blocks(&window), [missing]);
-    assert_eq!(window.view_ref().prompt.text(), "");
 }
 
 /// Where a test build leaves the new binary.
@@ -393,7 +382,7 @@ async fn typing_into_the_prompt_and_pressing_send_starts_a_turn() {
         let _ = ui.click(iced::widget::Id::new(PROMPT)).unwrap();
         let _ = ui.typewrite("hello");
     });
-    assert_eq!(window.view_ref().prompt.text(), "hello");
+    assert_eq!(window.view_ref().prompt.draft().text, "hello");
     interact(&mut window, |ui| {
         let _ = ui.click("Send").unwrap();
     });
@@ -986,3 +975,4 @@ async fn a_response_with_no_text_before_its_tool_calls_shows_no_empty_reply() {
 }
 
 mod sessions;
+mod vim;

@@ -9,10 +9,15 @@ name = "sstack-gui"
 path = "src/main.rs"
 doc = false
 
+[features]
+default = ["nvim-tests"]
+# Runs the tests that need a real nvim. Turn off where nvim is not installed.
+nvim-tests = []
+
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
-iced = { version = "0.14", features = ["tokio"] }
+iced = { version = "0.14", features = ["advanced", "tokio"] }
 sstack = { path = "../core", default-features = false }
 
 [dev-dependencies]

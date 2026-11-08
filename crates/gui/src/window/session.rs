@@ -1,7 +1,6 @@
 //! Everything the window keeps for one Session, whether or not it is on screen.
 
 use std::collections::VecDeque;
-use std::mem;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -14,8 +13,10 @@ use sstack::session::{self, Entry};
 use sstack::session_controller::SessionController;
 use sstack::session_report::{ApprovalRequest, SessionReport};
 use sstack::turn_runner::AgentHandle;
+use sstack::vim::VimEvent;
 use sstack::workspace::{self, SessionSummary};
 
+use super::input::Input;
 use super::sidebar::{Activity, Row};
 use super::{Message, Opened};
 use crate::reports::Reports;
@@ -57,8 +58,8 @@ pub struct SessionView {
     waits: Waits,
     /// What the person has not seen yet.
     unseen: Option<Unseen>,
-    /// What the person has typed and not yet sent.
-    pub(super) prompt: text_editor::Content,
+    /// What the person has typed and not yet sent, and how they type it.
+    pub(super) prompt: Input,
     /// What has been said in the Session, including before the window opened.
     pub(super) transcript: Transcript,
     /// Questions about shell commands that the Session's Turn is waiting on, oldest first. Only
@@ -101,23 +102,27 @@ impl SessionView {
             stored: SessionState::Idle,
             waits: Waits::since(waiting_since),
             unseen: None,
-            prompt: text_editor::Content::new(),
+            prompt: Input::default(),
             transcript: Transcript::default(),
             questions: VecDeque::new(),
             following: true,
         }
     }
 
-    /// Gives the Session the agent it was missing, telling the person how it was set up. A Turn
-    /// an earlier run left parked stays parked until [`Self::continue_parked`].
+    /// Gives the Session the agent it was missing, telling the person how it was set up, and
+    /// starts nvim if the person wants it, which spares a Session never shown from running one. A
+    /// Turn an earlier run left parked stays parked until [`Self::continue_parked`].
     ///
-    /// Must be called inside a Tokio runtime, which runs the Session's Turns.
+    /// Must be called inside a Tokio runtime, which runs the Session's Turns and its nvim.
     pub fn attach(&mut self, opened: Opened) {
         let Opened {
             run,
             reports,
             sender,
         } = opened;
+        if run.vim {
+            self.prompt.start_vim();
+        }
         let parked = session::is_parked(&run.session).unwrap_or(false);
         let agent = AgentHandle::spawn(run.agent, sender);
         self.controller = Some(SessionController::new(agent, run.skills, parked));
@@ -157,16 +162,24 @@ impl SessionView {
         self.reports.as_ref()
     }
 
-    /// Returns where the Session's reports reach the window, tagged with its id. A Session with
-    /// no agent yet reports nothing.
+    /// Returns where the Session's reports, and those of its nvim if the person types into one,
+    /// reach the window, tagged with its id. A Session with no agent yet reports nothing.
     pub fn subscription(&self) -> Subscription<Message> {
         let Some(reports) = &self.reports else {
             return Subscription::none();
         };
-        reports
+        let reports = reports
             .subscription()
             .with(self.id.clone())
-            .map(|(id, report)| Message::Report(id, report))
+            .map(|(id, report)| Message::Report(id, report));
+        let Input::Vim(vim) = &self.prompt else {
+            return reports;
+        };
+        let vim = vim
+            .subscription()
+            .with(self.id.clone())
+            .map(|(id, event)| Message::Vim(id, event));
+        Subscription::batch([reports, vim])
     }
 
     /// Runs `act` on the Session's controller, if it has one yet, timing the waits that order
@@ -262,19 +275,37 @@ impl SessionView {
         }
     }
 
-    /// Changes the prompt as the person asked.
+    /// Changes the plain prompt as the person asked.
     pub fn edit(&mut self, action: text_editor::Action) {
         self.prompt.perform(action);
     }
 
-    /// Takes what the person typed out of the prompt, leaving it empty.
-    pub fn take_prompt(&mut self) -> text_editor::Content {
-        mem::take(&mut self.prompt)
+    /// Takes what the person typed out of the plain prompt, leaving it empty. Nvim hands its text
+    /// back later instead, so this asks it to and returns `None`.
+    pub fn take_prompt(&mut self) -> Option<text_editor::Content> {
+        self.prompt.take()
     }
 
     /// Puts back what the person typed, after what they sent was refused.
-    pub fn restore_prompt(&mut self, draft: text_editor::Content) {
-        self.prompt = draft;
+    pub fn restore_prompt(&mut self, typed: text_editor::Content) {
+        self.prompt.restore(typed);
+    }
+
+    /// Switches between typing into a real nvim and the plain prompt, keeping what is typed.
+    pub fn toggle_vim(&mut self) {
+        self.prompt.toggle();
+    }
+
+    /// Shows what the Session's nvim reported, returning whether it was taken: a report from an
+    /// nvim the person already switched away from is not. If nvim was lost, the person is told
+    /// they are back to the plain prompt.
+    pub fn vim_reported(&mut self, event: &VimEvent) -> bool {
+        let taken = self.prompt.vim_reported(event);
+        if let (true, VimEvent::Lost { failure, .. }) = (taken, event) {
+            let words = format!("typing into the plain prompt: {failure}. /vim tries again");
+            self.notice(words);
+        }
+        taken
     }
 
     /// Notes that a Turn started on `text`: the transcript shows it, and the newest output comes

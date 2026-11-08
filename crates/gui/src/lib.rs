@@ -3,10 +3,12 @@
 //! Sessions, Providers, tools and the agent loop are in [`sstack`]. The window turns what the
 //! person does into calls on core and draws what core reports about the Session.
 
+mod inbox;
 mod reports;
 #[cfg(test)]
 mod test_support;
 mod transcript;
+mod vim_prompt;
 mod window;
 
 use std::cell::Cell;
