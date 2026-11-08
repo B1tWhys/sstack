@@ -19,7 +19,7 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow, bail};
 use clap::Parser;
 use iced::futures::future::{BoxFuture, FutureExt};
-use iced::{Application, Program};
+use iced::{Application, Program, Task};
 use reports::Reports;
 use sstack::rebuild::{self, Binary};
 use sstack::sandbox::Containers;
@@ -196,13 +196,25 @@ fn build_harness() -> BoxFuture<'static, Result<PathBuf, String>> {
     rebuild::build(HARNESS).boxed()
 }
 
-/// Opens the window on the readied Sessions, which iced asks for once as it starts.
+/// Opens the window on the readied Sessions, which iced asks for once as it starts, along with
+/// the task that maximizes the window.
 ///
 /// # Panics
 ///
 /// Panics if asked a second time, since the Sessions can be opened only once.
-fn open(unopened: &Cell<Option<Ready>>) -> Window {
-    Window::open(unopened.take().expect("iced opens the window once"))
+fn open(unopened: &Cell<Option<Ready>>) -> (Window, Task<Message>) {
+    let window = Window::open(unopened.take().expect("iced opens the window once"));
+    (window, maximize())
+}
+
+/// Returns the task that maximizes the newest window, so that it fills the screen but stays an
+/// ordinary window rather than taking a full-screen space of its own.
+///
+/// It must run once the window is showing. macOS ignores a request to maximize a hidden window,
+/// and iced creates its window hidden, so `maximized` in the window's settings has no effect
+/// there. iced runs the task its startup returns only once the window is showing.
+fn maximize() -> Task<Message> {
+    iced::window::latest().and_then(|id| iced::window::maximize(id, true))
 }
 
 /// Prints a failure and returns the matching exit code.
@@ -221,8 +233,10 @@ mod tests {
     use super::*;
     use anyhow::anyhow;
     use iced::Size;
+    use iced::futures::StreamExt;
     use iced::futures::channel::mpsc;
     use iced_test::emulator::{Emulator, Event, Mode};
+    use iced_test::runtime::{self, window::Action as WindowAction};
     use iced_test::simulator;
     use tempfile::TempDir;
 
@@ -256,6 +270,27 @@ mod tests {
                 break;
             }
         }
+    }
+
+    #[tokio::test]
+    async fn opening_maximizes_the_newest_window() {
+        let mut actions = runtime::task::into_stream(maximize()).unwrap();
+        let Some(runtime::Action::Window(WindowAction::GetLatest(latest))) = actions.next().await
+        else {
+            panic!("the task should ask which window is newest");
+        };
+        let newest = iced::window::Id::unique();
+        latest.send(Some(newest)).unwrap();
+
+        let maximized = actions.next().await;
+
+        assert!(
+            matches!(
+                maximized,
+                Some(runtime::Action::Window(WindowAction::Maximize(id, true))) if id == newest
+            ),
+            "the task should maximize the newest window"
+        );
     }
 
     /// Parses `cli` as if it followed the program name on the command line.
