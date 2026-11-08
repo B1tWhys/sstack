@@ -36,6 +36,9 @@ async fn run(sandbox: &Sandbox, script: &str) -> String {
     String::from_utf8_lossy(&output.stdout).into_owned()
 }
 
+/// The ownership check only means something on Linux. On macOS the Podman VM shares the
+/// Workspace with a file system that gives every file to the person, whichever uid wrote it,
+/// so it passes there even if the container ran as some other user.
 #[tokio::test]
 async fn commands_change_the_workspace_as_the_person() {
     let (_dir, root) = workspace();

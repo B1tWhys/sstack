@@ -167,7 +167,6 @@ mod tests {
     use crate::tools::DenyAll;
     use crate::tools::test_support::{AllowAll, disabled, git_project};
     use std::os::unix::process::ExitStatusExt;
-    use std::path::Path;
     use std::process::ExitStatus;
     use std::sync::Mutex;
 
@@ -201,14 +200,18 @@ mod tests {
     }
 
     /// A Sandbox whose every command exits with `code` after printing `stdout`.
-    fn sandbox(code: i32, stdout: &'static str) -> Arc<Sandbox> {
+    /// It writes files as the person, as the Sandbox checks before running anything.
+    fn sandbox(project: &Project, code: i32, stdout: &'static str) -> Arc<Sandbox> {
         let mut runtime = MockContainerRuntime::new();
         runtime.expect_available().return_const(true);
         runtime.expect_sandboxes().returning(Vec::new);
         runtime.expect_has_image().return_const(true);
         runtime.expect_inspect().return_const(None);
         runtime.expect_start().returning(|_| Ok(()));
-        runtime.expect_exec().returning(move |_, _| {
+        runtime.expect_exec().returning(move |_, argv| {
+            if argv[0] == "touch" {
+                std::fs::write(&argv[1], "").unwrap();
+            }
             Ok(Output {
                 status: ExitStatus::from_raw(code << 8),
                 stdout: stdout.into(),
@@ -217,13 +220,17 @@ mod tests {
         });
         runtime.expect_remove_detached().return_const(());
         let containers = Arc::new(Containers::new(vec![Arc::new(runtime)]));
-        Arc::new(Sandbox::new(containers, "7", Path::new("/w")))
+        Arc::new(Sandbox::new(containers, "7", project.root()))
     }
 
     #[tokio::test]
     async fn sandboxed_commands_run_without_asking() {
         let (_dir, project) = git_project();
-        let tool = tool(project, sandbox(0, "inside\n"), Arc::new(DenyAll));
+        let tool = tool(
+            project.clone(),
+            sandbox(&project, 0, "inside\n"),
+            Arc::new(DenyAll),
+        );
         let output = tool.run(json!({"command": "ls"})).await.unwrap();
         assert_eq!(output, "inside\n");
     }
@@ -231,7 +238,11 @@ mod tests {
     #[tokio::test]
     async fn a_sandboxed_command_past_its_limit_times_out() {
         let (_dir, project) = git_project();
-        let tool = tool(project, sandbox(124, ""), Arc::new(DenyAll));
+        let tool = tool(
+            project.clone(),
+            sandbox(&project, 124, ""),
+            Arc::new(DenyAll),
+        );
         let error = tool.run(json!({"command": "sleep 999"})).await.unwrap_err();
         assert_eq!(error.0, "timed out after 600s");
     }
@@ -240,7 +251,7 @@ mod tests {
     async fn running_on_the_host_asks_and_says_why() {
         let (dir, project) = git_project();
         let noting = Arc::new(Noting::default());
-        let asked = tool(project, sandbox(0, ""), noting.clone());
+        let asked = tool(project.clone(), sandbox(&project, 0, ""), noting.clone());
         let script = json!({"command": "touch host", "unsandboxed": true});
         asked.run(script).await.unwrap();
         let (_other, elsewhere) = git_project();

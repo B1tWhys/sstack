@@ -11,6 +11,7 @@ mod podman;
 mod runtime;
 
 use std::fmt::Write;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::Output;
 use std::sync::Arc;
@@ -317,7 +318,11 @@ impl Sandbox {
         }
     }
 
-    /// Makes sure this Sandbox's container runs the current image, starting it if needed.
+    /// Makes sure this Sandbox's container runs the current image and writes files as the
+    /// person, starting it if needed.
+    ///
+    /// A container that would write files as anyone else, such as root under a rootful
+    /// runtime, is removed and the Sandbox is unavailable, so commands ask instead.
     async fn start(&self, ready: &Ready) -> Result<(), Failure> {
         let _only_one = self.starting.lock().await;
         if self.started.load(Ordering::SeqCst) {
@@ -330,8 +335,27 @@ impl Sandbox {
         {
             self.replace(ready, current.is_some()).await?;
         }
+        if let Err(why) = self.check_owner(ready.runtime.as_ref()).await {
+            ready.runtime.remove(&self.name()).await;
+            return Err(Failure::Unavailable(why));
+        }
         self.started.store(true, Ordering::SeqCst);
         Ok(())
+    }
+
+    /// Writes a file in the Workspace from inside the container and checks on the host that it
+    /// belongs to the person, deleting it again either way.
+    ///
+    /// This checks what the container really does, whatever the runtime or its settings.
+    async fn check_owner(&self, runtime: &dyn ContainerRuntime) -> Result<(), String> {
+        let probe = self
+            .workspace
+            .join(format!(".sstack-owner-check-{}", self.session));
+        let touch = ["touch".to_owned(), probe.display().to_string()];
+        let _ = runtime.exec(&self.name(), &touch).await;
+        let owner = std::fs::symlink_metadata(&probe).map(|m| m.uid()).ok();
+        let _ = std::fs::remove_file(&probe);
+        owner_verdict(owner, getuid().as_raw())
     }
 
     /// Starts a fresh container, first removing the old one if `exists`. A container that
@@ -374,6 +398,18 @@ impl Drop for Sandbox {
         if let Some(ready) = ready.filter(|_| *self.started.get_mut()) {
             ready.runtime.remove_detached(&self.name());
         }
+    }
+}
+
+/// Says whether a file the container wrote, owned by `owner` or missing, shows that it writes
+/// as the person whose uid is `person`, and if not, why not.
+fn owner_verdict(owner: Option<u32>, person: u32) -> Result<(), String> {
+    match owner {
+        Some(uid) if uid == person => Ok(()),
+        Some(uid) => Err(format!(
+            "files written in the Sandbox would belong to uid {uid}, not to you (uid {person})"
+        )),
+        None => Err("the Sandbox could not write to the Workspace".to_owned()),
     }
 }
 
@@ -431,7 +467,7 @@ mod tests {
         }
     }
 
-    /// A runtime that works and already has the image.
+    /// A runtime that works, already has the image, and writes files as the person.
     fn working() -> MockContainerRuntime {
         let mut runtime = MockContainerRuntime::new();
         runtime.expect_name().return_const("mock");
@@ -439,6 +475,18 @@ mod tests {
         runtime.expect_sandboxes().returning(Vec::new);
         runtime.expect_has_image().return_const(true);
         runtime
+            .expect_exec()
+            .withf(|_, argv| argv[0] == "touch")
+            .returning(|_, argv| {
+                fs::write(&argv[1], "").unwrap();
+                Ok(finished(0, ""))
+            });
+        runtime
+    }
+
+    /// Whether `argv` is a command the model asked for, not the Sandbox's own check.
+    fn asked(argv: &[String]) -> bool {
+        argv[0] == "timeout"
     }
 
     fn sandbox(runtime: MockContainerRuntime, workspace: &Path) -> Sandbox {
@@ -546,9 +594,11 @@ mod tests {
     async fn the_container_starts_once_and_commands_run_bounded_in_the_workspace() {
         let mut runtime = working();
         runtime.expect_inspect().times(1).return_const(None);
+        let dir = tempfile::tempdir().unwrap();
+        let workspace = dir.path().to_owned();
         runtime
             .expect_start()
-            .withf(|spec| spec.name == "sstack-7" && spec.workspace == Path::new("/w"))
+            .withf(move |spec| spec.name == "sstack-7" && spec.workspace == workspace)
             .times(1)
             .returning(|_| Ok(()));
         runtime
@@ -560,7 +610,7 @@ mod tests {
             .times(2)
             .returning(|_, _| Ok(finished(0, "a\n")));
         runtime.expect_remove_detached().times(1).return_const(());
-        let sandbox = sandbox(runtime, Path::new("/w"));
+        let sandbox = sandbox(runtime, dir.path());
 
         assert_eq!(sandbox.run("ls", LIMIT).await.unwrap().stdout, b"a\n");
         assert!(sandbox.run("ls", LIMIT).await.is_ok());
@@ -575,14 +625,13 @@ mod tests {
             .return_const(Some(running(image_tag())));
         runtime.expect_start().never();
         runtime.expect_remove().never();
-        runtime.expect_exec().returning(|_, _| Ok(finished(0, "")));
+        runtime
+            .expect_exec()
+            .withf(|_, argv| asked(argv))
+            .returning(|_, _| Ok(finished(0, "")));
         runtime.expect_remove_detached().return_const(());
-        assert!(
-            sandbox(runtime, Path::new("/w"))
-                .run("ls", LIMIT)
-                .await
-                .is_ok()
-        );
+        let dir = tempfile::tempdir().unwrap();
+        assert!(sandbox(runtime, dir.path()).run("ls", LIMIT).await.is_ok());
     }
 
     #[tokio::test]
@@ -597,14 +646,13 @@ mod tests {
             .withf(|spec| spec.image == image_tag())
             .times(1)
             .returning(|_| Ok(()));
-        runtime.expect_exec().returning(|_, _| Ok(finished(0, "")));
+        runtime
+            .expect_exec()
+            .withf(|_, argv| asked(argv))
+            .returning(|_, _| Ok(finished(0, "")));
         runtime.expect_remove_detached().return_const(());
-        assert!(
-            sandbox(runtime, Path::new("/w"))
-                .run("ls", LIMIT)
-                .await
-                .is_ok()
-        );
+        let dir = tempfile::tempdir().unwrap();
+        assert!(sandbox(runtime, dir.path()).run("ls", LIMIT).await.is_ok());
     }
 
     #[tokio::test]
@@ -615,7 +663,8 @@ mod tests {
             .expect_start()
             .returning(|_| Err(RuntimeError("no such image".into())));
         runtime.expect_remove().times(1).return_const(());
-        let failure = sandbox(runtime, Path::new("/w")).run("ls", LIMIT).await;
+        let dir = tempfile::tempdir().unwrap();
+        let failure = sandbox(runtime, dir.path()).run("ls", LIMIT).await;
         let expected = "the Sandbox did not start: no such image";
         assert_eq!(failure.unwrap_err(), Failure::Unavailable(expected.into()));
     }
@@ -632,9 +681,11 @@ mod tests {
         ];
         runtime
             .expect_exec()
+            .withf(|_, argv| asked(argv))
             .returning(move |_, _| results.pop().unwrap());
         runtime.expect_remove_detached().return_const(());
-        let sandbox = sandbox(runtime, Path::new("/w"));
+        let dir = tempfile::tempdir().unwrap();
+        let sandbox = sandbox(runtime, dir.path());
 
         let stopped = sandbox.run("sleep 99", LIMIT).await.unwrap_err();
         assert_eq!(stopped, Failure::TimedOut(LIMIT));
@@ -643,6 +694,45 @@ mod tests {
             lost,
             Failure::Unavailable("mock did not run it: gone".into())
         );
+    }
+
+    #[tokio::test]
+    async fn a_container_that_cannot_write_as_the_person_is_removed_and_unavailable() {
+        let mut runtime = MockContainerRuntime::new();
+        runtime.expect_name().return_const("mock");
+        runtime.expect_available().return_const(true);
+        runtime.expect_sandboxes().returning(Vec::new);
+        runtime.expect_has_image().return_const(true);
+        runtime
+            .expect_inspect()
+            .return_const(Some(running(image_tag())));
+        runtime
+            .expect_exec()
+            .withf(|_, argv| argv[0] == "touch")
+            .returning(|_, _| Ok(finished(1, "")));
+        runtime.expect_exec().withf(|_, argv| asked(argv)).never();
+        runtime
+            .expect_remove()
+            .with(eq("sstack-7"))
+            .times(1)
+            .return_const(());
+        runtime.expect_remove_detached().never();
+        let dir = tempfile::tempdir().unwrap();
+        let sandbox = sandbox(runtime, dir.path());
+
+        let failure = sandbox.run("ls", LIMIT).await.unwrap_err();
+        let expected = "the Sandbox could not write to the Workspace";
+        assert_eq!(failure, Failure::Unavailable(expected.into()));
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn only_files_that_belong_to_the_person_pass_the_owner_check() {
+        assert_eq!(owner_verdict(Some(501), 501), Ok(()));
+        let root = "files written in the Sandbox would belong to uid 0, not to you (uid 501)";
+        assert_eq!(owner_verdict(Some(0), 501), Err(root.to_owned()));
+        let missing = "the Sandbox could not write to the Workspace";
+        assert_eq!(owner_verdict(None, 501), Err(missing.to_owned()));
     }
 
     #[tokio::test]
