@@ -1,0 +1,24 @@
+[package]
+name = "sstack-gui"
+version.workspace = true
+edition.workspace = true
+
+# The library has the docs, as a binary with the same name would overwrite them.
+[[bin]]
+name = "sstack-gui"
+path = "src/main.rs"
+doc = false
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+iced = { version = "0.14", features = ["tokio"] }
+sstack = { path = "../core", default-features = false }
+
+[dev-dependencies]
+iced_test = "0.14"
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

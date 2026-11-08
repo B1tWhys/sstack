@@ -55,11 +55,27 @@ The GUI in step 6 has one Session per window. It passes `&mut NoOtherSessions` a
 
 In the TUI, a `Pane` holds an `Option<SessionController>`, because a stored Session has no agent until it is shown. `Pane::control` runs a closure on the controller and updates the waits that order the sidebar from the state before and after. `App::drive` splits the panes into the focused one and the rest, which go to core as a `Panes` adapter. `in_session` exists because the clippy limit is three arguments, and it reads better than a `bon` builder on each call. The TUI's small `Happened` enum picks the `InSession` call, because clippy's `redundant_closure_for_method_calls` suggests `InSession::interrupt` for `|harness| harness.interrupt()`, and that path does not compile against the higher-ranked closure.
 
-### [ ] 6. Add the GUI crate
+### [x] 6. Add the GUI crate
 
 Add `crates/gui`, package `sstack-gui`, with a binary of the same name, built on the latest iced release. It takes the TUI's `--resume`, `--connection` and `--model` flags, and works on the project in the directory it is started from. Apply `judging-duplicate-code` before sharing the flag definitions with the CLI. It opens one Session in one window, with a plain multi-line prompt that runs a Turn through the controller, and shows the reply as plain text. Session reports reach the iced app through a `Subscription`. Keep styling to iced's defaults: the visual style gets a session of its own.
 
 Test the logic by feeding `Message`s to `update` and checking state. Add a few `iced_test` tests that drive the real widgets and check structure and text. Add no pixel snapshots yet.
+
+Note: The crate uses iced 0.14.0 and iced_test 0.14.0, the latest on crates.io. iced has its `tokio` feature on, so iced runs `boot`, `update` and subscriptions inside its own Tokio runtime, which `AgentHandle::spawn` needs. Like the CLI, the crate is a library with the docs and a binary `sstack-gui` with `doc = false`. `lib.rs` has `Args`, `ready` (which calls `prepare`) and `application`, which builds the iced program. `reports.rs` has `Reports`. `window.rs` has `Window`, its `Message` and the transcript's `Block`, with its tests in `window/tests.rs`. `test_support.rs` readies a Session on a `ScriptedProvider`.
+
+The GUI defines its own flags. By `judging-duplicate-code` they are not duplicate: ADR-0009 expects the GUI to choose a project and a Session itself later, and then its flags change while the TUI's stay. I did not write `Args::relaunch` yet, because only Rebuild needs it. Step 7 should write the GUI's own, for the same reason.
+
+The Session is readied before iced starts, so a failure such as "this Session is open elsewhere" prints `error: ...` in the terminal and no window opens. iced's `boot` is an `Fn`, so `open` takes the `Run` out of a `Cell`. `Window::open` makes the `Reports`, a futures unbounded channel whose sending half is the Session's `ReportSender`. `Window::subscription` is `Subscription::run_with(reports, Reports::stream)`, hashed by the Session id, and each report arrives in `update` as `Message::Report`. The test `reports_reach_the_window_through_its_subscription` in `lib.rs` runs the real program in `iced_test::Emulator` and times out if the subscription delivers nothing.
+
+Run it from inside the project with `cargo run -p sstack-gui -- [--resume [id]] [--connection name] [--model id]`. Without `--resume`, every launch starts a new Session in a worktree of its own. The TUI reuses a blank, unnamed Session instead, so the GUI may want the same rule. I could not see a window, so I only checked that the binary builds, that `--help` works, and that `--resume` with an unknown id prints an error and exits with 1. `update` tests send `Message`s and pass on reports from `window.reports.stream()` by hand. The `iced_test` `Simulator` renders headless with tiny-skia in about 0.3 seconds a test. Its selectors cannot read a `text_editor`'s content, only find the editor by its id, `PROMPT`, so tests read the prompt from `Window::prompt`.
+
+What step 7 should know:
+
+- Shell commands the Sandbox cannot run are denied, because `ready` passes `DenyAll`. `prepare` calls the approver closure with the Session id before `Window::open` makes the `Reports`. To use `ReportingApprover`, make the `Reports` inside that closure and hand them to `Window::open` with the `Run`.
+- `/rebuild` lands in `Window::refuse_rebuild`, which calls `build_finished(None, ..)` at once. Replace it with a `Task` that runs `rebuild::build` on a `HARNESS` const naming `sstack-gui` as package and binary, made abortable for `Outcome::CancelBuild`. `carry_out` maps every `Exit` to `iced::exit()`, so `Exit::Rebuild` has to relaunch instead.
+- Nothing calls `InSession::interrupt` yet, and no key does anything. The prompt is sent only by the Send button.
+- `Block::Reply` joins the text of every Step in a Turn. Tool calls, reasoning, the entries in `SessionReport::Resumed` and the ends of a Turn other than an error are not shown, and the transcript does not scroll to follow a reply.
+- Closing the window ends the process with any Turn still running, without a drain. `exit_on_close_request(false)` with `iced::window::close_requests` could route a close to `/quit`.
 
 ### [ ] 7. Make the GUI usable for work on sstack
 

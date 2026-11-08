@@ -1,6 +1,7 @@
 //! The UI-free core of sstack: Sessions, Providers, tools and the agent loop.
 //!
-//! The terminal front end is in [`sstack_cli`](../sstack_cli/index.html).
+//! The terminal front end is in [`sstack_cli`](../sstack_cli/index.html), and the windowed one
+//! in [`sstack_gui`](../sstack_gui/index.html).
 
 pub mod agent;
 pub mod config;
