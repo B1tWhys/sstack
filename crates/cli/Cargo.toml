@@ -23,7 +23,6 @@ async-trait = "0.1"
 bon = "3"
 clap = { version = "4", features = ["derive"] }
 crossterm = { version = "0.29", features = ["event-stream"] }
-dirs = "7"
 futures = "0.3"
 ratatui = { version = "0.30", features = ["unstable-rendered-line-info"] }
 sstack = { path = "../core", default-features = false }

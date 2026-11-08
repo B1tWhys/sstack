@@ -37,6 +37,9 @@ use sstack::rebuild;
 use sstack::running_harness::Exit;
 use sstack::sandbox::Containers;
 use sstack::session_report::{ReportingApprover, SessionReport};
+use sstack::session_setup::{
+    Place, Start, installed_skills, main_checkout, prepare, sessions_directory,
+};
 use sstack::tools::Approver;
 use sstack::turn_runner::AgentHandle;
 use sstack::workspace::SessionSummary;
@@ -46,9 +49,6 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::describe;
-use crate::setup::{
-    Place, Start, installed_skills, main_checkout, prepare, relaunch_args, sessions_directory,
-};
 use crate::{Args, HARNESS};
 
 /// Runs the interactive harness until the person quits, rebuilding when asked.
@@ -59,11 +59,14 @@ use crate::{Args, HARNESS};
 pub async fn run(args: &Args) -> Result<ExitCode> {
     require_terminal(io::stdin().is_terminal() && io::stdout().is_terminal())?;
     let (sender, mut events) = mpsc::unbounded_channel();
+    let started_in = std::env::current_dir()?;
+    let main = main_checkout(&started_in)?;
     let mut sessions = LiveSessions {
         args,
         events: sender.clone(),
-        main: main_checkout()?,
-        directory: sessions_directory()?,
+        directory: sessions_directory(&started_in)?,
+        main: main.clone(),
+        started_in: started_in.clone(),
         build: None,
         containers: Arc::new(Containers::detect()),
     };
@@ -75,12 +78,12 @@ pub async fn run(args: &Args) -> Result<ExitCode> {
         .sessions(Box::new(sessions))
         .colors(ColorDepth::detect())
         .build();
-    let found = installed_skills(&main_checkout()?);
+    let found = installed_skills(&main, &started_in);
     app.notice(describe::skills_loaded(&found));
     app.continue_parked();
     input::spawn(sender);
     while let Exit::Rebuild(binary) = on_screen(&mut app, &mut events).await? {
-        let failure = rebuild::relaunch(&binary, &relaunch_args(args, app.session()));
+        let failure = rebuild::relaunch(&binary, &args.relaunch(app.session()));
         app.relaunch_failed(&failure.to_string());
     }
     Ok(ExitCode::SUCCESS)
@@ -105,6 +108,8 @@ struct LiveSessions<'a> {
     events: EventSender,
     /// The main checkout of the project.
     main: PathBuf,
+    /// The directory the person started the harness in, inside the project.
+    started_in: PathBuf,
     /// Where the project's Sessions are stored.
     directory: PathBuf,
     /// The container runtime shared by every Session's Sandbox, so that the runtime is chosen and
@@ -136,8 +141,10 @@ impl Sessions for LiveSessions<'_> {
             Arc::new(ReportingApprover::new(report_to(id).reporter()))
         };
         let run = prepare()
-            .args(self.args)
             .start(start)
+            .directory(&self.started_in)
+            .maybe_connection(self.args.connection.as_deref())
+            .maybe_model(self.args.model.as_deref())
             .approver(approver)
             .containers(self.containers.clone())
             .call()?;
@@ -145,7 +152,11 @@ impl Sessions for LiveSessions<'_> {
         Ok(Opened {
             agent: AgentHandle::spawn(run.agent, report_to(&id).reporter()),
             path: run.session,
-            notices: run.notices,
+            notices: run
+                .notices
+                .into_iter()
+                .chain(describe::listing_shortened(run.descriptions_left_out))
+                .collect(),
             events: report_to(&id),
             vim: run.vim,
             skills: run.skills,

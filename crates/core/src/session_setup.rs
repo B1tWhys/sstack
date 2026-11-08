@@ -1,30 +1,64 @@
-//! The setup of an agent and its Session for either mode, as the run's arguments ask.
+//! The setup of an agent and its Session, shared by every interface.
+//!
+//! An interface says which Session to start or resume, which Connection and model to use if not
+//! the defaults in settings, and the directory the person started in. Everything else, from the
+//! user's settings to the Workspace and the Sandbox, is found from those.
 
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
 use bon::builder;
-use sstack::agent::{Agent, AgentConfig};
-use sstack::config::{Config, Connection};
-use sstack::credentials::{SystemKeyring, resolve_secret};
-use sstack::sandbox::{Containers, Sandbox};
-use sstack::session::{Entry, SessionLog};
-use sstack::skills::{self, Skill};
-use sstack::tools::project::Project;
-use sstack::tools::{Approver, Land, ToolBox};
-use sstack::workspace::{self, SkillListing};
-use sstack::worktree;
 
-use crate::{Args, LATEST, describe};
+use crate::agent::{Agent, AgentConfig};
+use crate::config::{Config, ConfigError, Connection};
+use crate::credentials::{MissingSecret, SystemKeyring, resolve_secret};
+use crate::provider::ProviderError;
+use crate::sandbox::{Containers, Sandbox};
+use crate::session::{Entry, SessionError, SessionLog};
+use crate::skills::{self, Skill};
+use crate::tools::project::Project;
+use crate::tools::{Approver, Land, ToolBox};
+use crate::workspace::{self, SkillListing};
+use crate::worktree;
+
+/// The Session id that asks to resume the newest Session, archived or not.
+pub const LATEST: &str = "latest";
 
 /// The name of the directory that keeps the harness's files apart from others in the user's
 /// shared directories.
 const DIRECTORY_NAME: &str = "sstack";
 
+/// A reason a Session could not be readied.
+#[derive(Debug, thiserror::Error)]
+pub enum SetupError {
+    /// The operating system gives no place for the user's data or settings, so the harness has
+    /// nowhere to keep its files.
+    #[error("cannot find the user data directory")]
+    NoUserDirectory,
+    /// [`LATEST`] was asked for, but the project has no Session yet.
+    #[error("no session to resume")]
+    NothingToResume,
+    /// The project, its Sessions or its Workspace could not be read.
+    #[error(transparent)]
+    Io(#[from] io::Error),
+    /// The user's settings are unreadable or name a Connection they do not define.
+    #[error(transparent)]
+    Config(#[from] ConfigError),
+    /// The Session's log could not be opened or repaired, as when it is open elsewhere.
+    #[error(transparent)]
+    Session(#[from] SessionError),
+    /// The Connection's secret is in none of the places it is looked for.
+    #[error(transparent)]
+    MissingSecret(#[from] MissingSecret),
+    /// The Connection's Provider could not be set up with its secret.
+    #[error(transparent)]
+    Provider(#[from] ProviderError),
+}
+
 /// Returns where the harness keeps its files within `base`, failing if `base` is unknown.
-fn app_dir(base: Option<PathBuf>) -> Result<PathBuf> {
-    let base = base.context("cannot find the user data directory")?;
+fn app_dir(base: Option<PathBuf>) -> Result<PathBuf, SetupError> {
+    let base = base.ok_or(SetupError::NoUserDirectory)?;
     Ok(base.join(DIRECTORY_NAME))
 }
 
@@ -37,7 +71,7 @@ pub enum Place {
     MainCheckout,
 }
 
-/// Which Session a run works on.
+/// Which Session to work on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Start<'a> {
     /// The Session with this id, or the newest one for [`LATEST`], archived or not.
@@ -59,7 +93,7 @@ struct OpenedLog {
 }
 
 /// Opens the log of the Session that `start` asks for.
-fn open_session(directory: &Path, start: Start<'_>) -> Result<OpenedLog> {
+fn open_session(directory: &Path, start: Start<'_>) -> Result<OpenedLog, SetupError> {
     match start {
         Start::New(place) => {
             let path = workspace::new_session_path(directory);
@@ -76,7 +110,7 @@ fn open_session(directory: &Path, start: Start<'_>) -> Result<OpenedLog> {
 }
 
 /// Opens the log of an existing Session, bringing it back first if it was archived.
-fn resume_session(directory: &Path, wanted: &str) -> Result<OpenedLog> {
+fn resume_session(directory: &Path, wanted: &str) -> Result<OpenedLog, SetupError> {
     let wants_worktree = workspace::restore_session(directory, wanted)?;
     let path = resume_path(directory, wanted)?;
     let (log, entries) = SessionLog::open(&path)?;
@@ -89,10 +123,10 @@ fn resume_session(directory: &Path, wanted: &str) -> Result<OpenedLog> {
 }
 
 /// Finds the Session to resume.
-fn resume_path(directory: &Path, wanted: &str) -> Result<PathBuf> {
+fn resume_path(directory: &Path, wanted: &str) -> Result<PathBuf, SetupError> {
     if wanted == LATEST {
         let latest = workspace::latest_session(directory)?;
-        latest.context("no session to resume")
+        latest.ok_or(SetupError::NothingToResume)
     } else {
         Ok(workspace::session_path(directory, wanted))
     }
@@ -107,6 +141,11 @@ pub struct Run {
     /// Things the person should know about how the Session was set up, in the order they
     /// happened.
     pub notices: Vec<String>,
+    /// How many Skills the system prompt lists by name alone, because their descriptions did not
+    /// fit the listing's share of the context window. The person should hear of it when this is
+    /// not zero, after the [`notices`](Self::notices), since the model is then less likely to
+    /// load those Skills when they would help.
+    pub descriptions_left_out: usize,
     /// Whether the person wants to type into a real nvim.
     pub vim: bool,
     /// Every Skill installed for the Session, which the person can run by name.
@@ -138,32 +177,41 @@ fn workplace(main: &Path, id: &str, wants_worktree: bool) -> Workplace {
     Workplace { worktree, notice }
 }
 
-/// Readies a harness for the current directory, with the [`Connection`] and model the run's
-/// arguments ask for.
+/// Readies a harness for the project the person started in, with the [`Connection`] and model
+/// they ask for.
+///
+/// # Errors
+/// Fails if `directory` is in no readable project, if the user's settings are unusable, if the
+/// Session cannot be found or is open elsewhere, or if the Connection cannot be set up.
 #[builder]
 pub fn prepare(
-    /// The arguments of the run.
-    args: &Args,
     /// Which Session to work on.
     start: Start<'_>,
+    /// The directory the person started in, which picks the project and any Skills of a
+    /// directory nested inside it.
+    directory: &Path,
+    /// The name of the Connection to use. Missing means the default in settings.
+    connection: Option<&str>,
+    /// The identifier of the model to request. Missing means the default in settings.
+    model: Option<&str>,
     /// Makes, from the Session's id, whoever decides whether each shell command the model asks to
     /// run on the host may run.
     approver: impl FnOnce(&str) -> Arc<dyn Approver>,
     /// The runtime for the Session's Sandbox, shared with every other Session of the run.
     containers: Arc<Containers>,
-) -> Result<Run> {
+) -> Result<Run, SetupError> {
     let config = load_settings()?;
-    let connection = config.connection(args.connection.as_deref())?;
-    let main = main_checkout()?;
+    let connection = config.connection(connection)?;
+    let main = main_checkout(directory)?;
     let backend = Backend {
         connection,
-        model: args.model.as_ref().unwrap_or(&config.default_model).clone(),
+        model: model.map_or_else(|| config.default_model.clone(), str::to_owned),
         main: &main,
     };
     let session = open_session(&project_sessions(&main)?, start)?;
     let id = workspace::session_id(&session.path);
     let place = workplace(&main, &id, session.wants_worktree);
-    let installed = installed_skills(place.worktree.as_deref().unwrap_or(&main));
+    let installed = installed_skills(place.worktree.as_deref().unwrap_or(&main), directory);
     let listing = SkillListing::new(&offered_skills(&installed), connection.context_limit);
     let agent_config = agent_config()
         .backend(&backend)
@@ -174,33 +222,39 @@ pub fn prepare(
         .skills(&installed)
         .listing(&listing)
         .call()?;
-    let shortened = describe::listing_shortened(listing.without_descriptions);
     Ok(Run {
         agent: Agent::new(agent_config, session.log, session.entries)?,
         session: session.path,
-        notices: place.notice.into_iter().chain(shortened).collect(),
+        notices: place.notice.into_iter().collect(),
+        descriptions_left_out: listing.without_descriptions,
         vim: config.vim,
         skills: installed,
     })
 }
 
-/// Returns the directory the harness was started in, with symlinks resolved.
-pub fn main_checkout() -> Result<PathBuf> {
-    Ok(Project::new(&std::env::current_dir()?)?.root().to_owned())
+/// Returns the main checkout of the project that `directory` is in, with symlinks resolved.
+///
+/// # Errors
+/// Fails if `directory` cannot be read.
+pub fn main_checkout(directory: &Path) -> Result<PathBuf, SetupError> {
+    Ok(Project::new(directory)?.root().to_owned())
 }
 
-/// Returns where the Sessions of the current directory are stored.
-pub fn sessions_directory() -> Result<PathBuf> {
-    project_sessions(&main_checkout()?)
+/// Returns where the Sessions of the project that `directory` is in are stored.
+///
+/// # Errors
+/// Fails if `directory` cannot be read or the user data directory is unknown.
+pub fn sessions_directory(directory: &Path) -> Result<PathBuf, SetupError> {
+    project_sessions(&main_checkout(directory)?)
 }
 
 /// Returns where the Sessions of the project at `root` are stored.
-fn project_sessions(root: &Path) -> Result<PathBuf> {
+fn project_sessions(root: &Path) -> Result<PathBuf, SetupError> {
     Ok(workspace::sessions_dir(&app_dir(dirs::data_dir())?, root))
 }
 
 /// Returns the user's settings.
-fn load_settings() -> Result<Config> {
+fn load_settings() -> Result<Config, SetupError> {
     let path = app_dir(dirs::config_dir())?.join("config.toml");
     Ok(Config::load(&path)?)
 }
@@ -216,12 +270,12 @@ struct Backend<'a> {
 }
 
 /// Finds the [`Skill`]s for a Session working in the project at `root`: the project's own,
-/// including those of the directory the person started in if it lies inside `root`, and the
+/// including those of `directory`, where the person started, if it lies inside `root`, and the
 /// person's.
-pub fn installed_skills(root: &Path) -> Vec<Skill> {
+#[must_use]
+pub fn installed_skills(root: &Path, directory: &Path) -> Vec<Skill> {
     let home = dirs::home_dir();
-    let start = std::env::current_dir().unwrap_or_else(|_| root.to_owned());
-    skills::discover(&skills::locations(root, &start, home.as_deref()))
+    skills::discover(&skills::locations(root, directory, home.as_deref()))
 }
 
 /// Returns the ones among `installed` that the model may load on its own.
@@ -251,7 +305,7 @@ fn agent_config(
     skills: &[Skill],
     /// How the system prompt lists those Skills.
     listing: &SkillListing,
-) -> Result<AgentConfig> {
+) -> Result<AgentConfig, SetupError> {
     let connection = backend.connection;
     SystemKeyring::connect();
     let secret = resolve_secret(&connection.secret, &SystemKeyring, backend.main)?;
@@ -294,22 +348,9 @@ fn agent_config(
     })
 }
 
-/// Returns the arguments that bring a rebuilt harness back to the same Session.
-pub fn relaunch_args(args: &Args, session: &Path) -> Vec<String> {
-    let mut relaunch = vec!["--resume".to_owned(), workspace::session_id(session)];
-    let options = [("--connection", &args.connection), ("--model", &args.model)];
-    for (flag, value) in options {
-        if let Some(value) = value {
-            relaunch.extend([flag.to_owned(), value.clone()]);
-        }
-    }
-    relaunch
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tests::args;
 
     #[test]
     fn a_new_session_is_created_and_can_be_resumed() {
@@ -376,17 +417,6 @@ mod tests {
         std::fs::create_dir_all(&existing).unwrap();
         let found = workplace(main, "2", false);
         assert_eq!(found.worktree, Some(existing));
-    }
-
-    #[test]
-    fn relaunching_keeps_the_session_and_chosen_options() {
-        let plain = relaunch_args(&args(&[]), Path::new("/s/123.jsonl"));
-        assert_eq!(plain, ["--resume", "123"]);
-        let chosen = args(&["--connection", "work", "--model", "m"]);
-        assert_eq!(
-            relaunch_args(&chosen, Path::new("/s/123.jsonl")),
-            ["--resume", "123", "--connection", "work", "--model", "m"]
-        );
     }
 
     #[test]

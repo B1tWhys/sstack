@@ -9,13 +9,13 @@ use std::sync::atomic::AtomicBool;
 use anyhow::Result;
 use sstack::agent::{AgentEvent, TurnContext, TurnEnd};
 use sstack::sandbox::Containers;
+use sstack::session_setup::{Place, Run, Start, prepare};
 use sstack::tools::DenyAll;
 use sstack::workspace;
 use tokio_util::sync::CancellationToken;
 
 use crate::Args;
 use crate::describe;
-use crate::setup::{Place, Run, Start, prepare};
 
 /// Runs one prompt with no interaction, denying all shell commands. With nobody to watch, it
 /// has no Sandbox either.
@@ -29,8 +29,10 @@ pub async fn run(args: &Args, prompt: &str) -> Result<ExitCode> {
     let Run {
         mut agent, session, ..
     } = prepare()
-        .args(args)
         .start(start)
+        .directory(&std::env::current_dir()?)
+        .maybe_connection(args.connection.as_deref())
+        .maybe_model(args.model.as_deref())
         .approver(|_| Arc::new(DenyAll))
         .containers(Arc::new(Containers::new(Vec::new())))
         .call()?;

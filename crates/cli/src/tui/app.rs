@@ -27,7 +27,7 @@ use sstack::session_report::SessionReport;
 use super::event::{Action, Event, EventReceiver};
 use super::pane::{Opened, Pane};
 use super::theme::ColorDepth;
-use crate::setup::{Place, Start};
+use sstack::session_setup::{Place, Start};
 
 /// The reason given to the person when their input is not acted on.
 const BUSY: &str = "a Turn is running: wait for it to end, or press Alt-C to cancel it";

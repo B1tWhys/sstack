@@ -4,14 +4,16 @@
 
 mod describe;
 mod headless;
-mod setup;
 mod tui;
 
+use std::path::Path;
 use std::process::ExitCode;
 
 use anyhow::Result;
 use clap::Parser;
 use sstack::rebuild::Binary;
+use sstack::session_setup::LATEST;
+use sstack::workspace;
 
 /// A coding agent that improves itself.
 #[derive(Debug, Parser)]
@@ -31,14 +33,26 @@ struct Args {
     resume: Option<String>,
 }
 
-/// The `--resume` value that means the newest Session.
-const LATEST: &str = "latest";
-
 /// The binary a Rebuild builds and relaunches into, which is this one.
 const HARNESS: Binary = Binary {
     package: env!("CARGO_PKG_NAME"),
     name: "sstack",
 };
+
+impl Args {
+    /// Returns the arguments that bring a rebuilt harness back to the Session stored at
+    /// `session`, with the same Connection and model as this run.
+    fn relaunch(&self, session: &Path) -> Vec<String> {
+        let mut relaunch = vec!["--resume".to_owned(), workspace::session_id(session)];
+        let options = [("--connection", &self.connection), ("--model", &self.model)];
+        for (flag, value) in options {
+            if let Some(value) = value {
+                relaunch.extend([flag.to_owned(), value.clone()]);
+            }
+        }
+        relaunch
+    }
+}
 
 /// Runs the mode the arguments ask for.
 async fn run(args: Args) -> Result<ExitCode> {
@@ -81,6 +95,17 @@ mod tests {
         assert_eq!(args(&["--resume"]).resume.as_deref(), Some(LATEST));
         assert_eq!(args(&["--resume", "12"]).resume.as_deref(), Some("12"));
         assert_eq!(args(&[]).resume, None);
+    }
+
+    #[test]
+    fn relaunching_keeps_the_session_and_chosen_options() {
+        let plain = args(&[]).relaunch(Path::new("/s/123.jsonl"));
+        assert_eq!(plain, ["--resume", "123"]);
+        let chosen = args(&["--connection", "work", "--model", "m"]);
+        assert_eq!(
+            chosen.relaunch(Path::new("/s/123.jsonl")),
+            ["--resume", "123", "--connection", "work", "--model", "m"]
+        );
     }
 
     #[test]
