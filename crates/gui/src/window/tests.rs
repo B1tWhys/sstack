@@ -685,10 +685,9 @@ async fn the_window_labels_reasoning_tool_calls_and_notices() {
 
     let mut ui = simulator(window.view());
 
-    let cut: String = long.chars().take(100).collect();
     let shown = [
         "Thinking: hmm".to_owned(),
-        format!("Tool: bash {cut}... (failed)"),
+        format!("Tool: bash {long} (failed)"),
         "Note: the context window is 8 of 10 tokens full, so start a new Session soon".to_owned(),
     ];
     for shown in shown {

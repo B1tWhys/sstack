@@ -1,23 +1,19 @@
 //! What has been said in a Session, as the window shows it.
 //!
 //! The TUI's `Transcript` and the CLI's `describe.rs` turn the same reports into words, and parts
-//! of this module look much like them, such as the joining of streamed text and the cutting of
-//! long tool input. By `judging-duplicate-code` they are not duplicate: a change to how one
-//! interface presents a Session is not a bug in the other, and the GUI is expected to present
-//! tool calls and reasoning differently once it gets a visual style (ADR-0009). So the GUI keeps
-//! its own copy and its own words.
+//! of this module look much like them, such as the joining of streamed text. By
+//! `judging-duplicate-code` they are not duplicate: a change to how one interface presents a
+//! Session is not a bug in the other, and the GUI is expected to present tool calls and reasoning
+//! differently once it gets a visual style (ADR-0009). So the GUI keeps its own copy and its own
+//! words.
 
 use std::collections::HashMap;
 
-use iced::widget::text::Wrapping;
 use iced::widget::{button, column, row, text};
 use iced::{Element, Font};
 use sstack::agent::{AgentEvent, ToolCallSummary, TurnEnd};
 use sstack::session::{AssistantEntry, Entry};
 use sstack::session_report::{ApprovalRequest, SessionReport};
-
-/// The most characters of a tool call's input that its one-line summary shows.
-const MAX_TOOL_INPUT_CHARS: usize = 100;
 
 /// Space between the parts of the transcript, in logical pixels.
 const SPACING: f32 = 10.0;
@@ -363,15 +359,15 @@ impl Decision {
     }
 }
 
-/// Draws a tool call as its one-line summary `line`, with the question about it in full below
-/// while it is open. Pressing Allow or Deny sends what `answer` makes of whether the command may
-/// run.
+/// Draws a tool call as its summary `line`, wrapped to fit, with the question about it in full
+/// below while it is open. Pressing Allow or Deny sends what `answer` makes of whether the command
+/// may run.
 fn tool_view<'a, Message: Clone + 'a>(
     line: String,
     approval: Option<&'a Approval>,
     answer: fn(bool) -> Message,
 ) -> Element<'a, Message> {
-    let line = text(line).wrapping(Wrapping::None);
+    let line = text(line);
     match approval {
         Some(open) if open.decision == Decision::Open => {
             column![line, open.view(answer)].spacing(SPACING).into()
@@ -380,17 +376,11 @@ fn tool_view<'a, Message: Clone + 'a>(
     }
 }
 
-/// Returns the one-line summary of a tool call, cutting long input short, and marking how any
-/// question about it was answered and whether it failed.
+/// Returns the summary of a tool call, with its whole input, marking how any question about it
+/// was answered and whether it failed.
 fn tool_summary(call: &ToolCallSummary, failed: bool, approval: Option<&Approval>) -> String {
-    let input: String = call.input.chars().take(MAX_TOOL_INPUT_CHARS).collect();
-    let cut = if input.len() < call.input.len() {
-        "..."
-    } else {
-        ""
-    };
     let marks = marks(failed, approval.map(|approval| approval.decision));
-    format!("Tool: {} {input}{cut}{marks}", call.name)
+    format!("Tool: {} {}{marks}", call.name, call.input)
 }
 
 /// Returns what goes after a tool call's summary to say how any question about it was answered
