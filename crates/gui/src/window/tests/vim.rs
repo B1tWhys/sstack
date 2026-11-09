@@ -215,3 +215,78 @@ async fn a_prompt_typed_into_a_real_nvim_starts_a_turn() {
 
     assert_eq!(blocks(&window), [Block::Prompt("hi there".into())]);
 }
+
+/// Draws `window` frame after frame as the running window does, keeping what its widgets
+/// remember between frames, which a [`Simulator`] forgets.
+struct Frames {
+    /// What the widgets remember from the last frame.
+    cache: runtime::user_interface::Cache,
+    /// Draws the frames, off screen.
+    renderer: iced_test::renderer::Renderer,
+}
+
+impl Frames {
+    /// Starts with nothing drawn yet.
+    fn new() -> Self {
+        use iced::advanced::renderer::Headless;
+        let renderer = iced::futures::executor::block_on(iced_test::renderer::Renderer::new(
+            iced::Font::with_name("Fira Sans"),
+            iced::Pixels(16.0),
+            None,
+        ))
+        .expect("a headless renderer should start");
+        Self {
+            cache: runtime::user_interface::Cache::default(),
+            renderer,
+        }
+    }
+
+    /// Draws one frame of `window`, returning the messages its widgets produced.
+    fn draw(&mut self, window: &Window) -> Vec<Message> {
+        let mut ui = runtime::UserInterface::build(
+            window.view(),
+            Size::new(1024.0, 768.0),
+            std::mem::take(&mut self.cache),
+            &mut self.renderer,
+        );
+        let redraw = iced::Event::Window(iced::window::Event::RedrawRequested(
+            iced::time::Instant::now(),
+        ));
+        let mut messages = Vec::new();
+        let _ = ui.update(
+            &[redraw],
+            mouse::Cursor::Unavailable,
+            &mut self.renderer,
+            &mut iced::advanced::clipboard::Null,
+            &mut messages,
+        );
+        self.cache = ui.into_cache();
+        messages
+    }
+}
+
+#[tokio::test]
+async fn the_prompt_of_a_new_session_learns_its_width() {
+    let (_dir, mut window) = vim_window(vec![]);
+    let mut frames = Frames::new();
+    let first = frames.draw(&window);
+    assert!(
+        matches!(first[..], [Message::PromptResized(_)]),
+        "{first:?}"
+    );
+    for message in first {
+        let _ = window.update(message);
+    }
+
+    let _ = window.update(Message::NewSession);
+    // Sessions a test opens never start in nvim, which outside tests they do if the person wants.
+    window.view_mut().prompt.start_vim();
+    let messages = frames.draw(&window);
+
+    assert!(
+        messages
+            .iter()
+            .any(|message| matches!(message, Message::PromptResized(_))),
+        "the new prompt should be told how wide it is"
+    );
+}

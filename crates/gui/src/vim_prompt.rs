@@ -2,6 +2,7 @@
 //! so that it wraps at the same columns nvim moves the cursor by.
 
 use std::ops::Range;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use iced::advanced::text::{Paragraph as _, Text};
 use iced::keyboard::{self, Key, Modifiers, key::Named};
@@ -48,6 +49,9 @@ const SELECTION_ALPHA: f32 = 0.3;
 /// How many characters are measured to find the width of one cell, which is more precise than
 /// measuring one.
 const MEASURED: usize = 100;
+
+/// The [`VimPrompt::key`] the next prompt started gets.
+static NEXT_KEY: AtomicU64 = AtomicU64::new(0);
 
 /// The keys that have a name in nvim's key notation. `PageUp` and `PageDown` are left out, as in
 /// the TUI, where they scroll the transcript.
@@ -117,6 +121,10 @@ pub struct VimPrompt {
     width: Option<f32>,
     /// The size last given to nvim, as rows then columns.
     size: (u16, u16),
+    /// What sets this prompt apart from every other, so that iced measures it afresh when it
+    /// takes the place of another, as a new Session's prompt does, instead of treating it as one
+    /// already measured.
+    key: u64,
 }
 
 impl VimPrompt {
@@ -149,6 +157,7 @@ impl VimPrompt {
             cell: cell_size(),
             width: None,
             size: (0, 0),
+            key: NEXT_KEY.fetch_add(1, Ordering::Relaxed),
         }
     }
 
@@ -229,6 +238,7 @@ impl VimPrompt {
         let status = row![self.status_line(), space::horizontal(), mode];
         // The sensor sits inside the padding, so that only the room for text counts as width.
         let measured = sensor(column![grid, status].width(Fill))
+            .key(self.key)
             .on_show(Message::PromptResized)
             .on_resize(Message::PromptResized);
         container(measured)
