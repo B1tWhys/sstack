@@ -5,6 +5,7 @@ mod input;
 mod session;
 mod sidebar;
 
+use std::fmt::Display;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime};
@@ -178,6 +179,8 @@ pub enum Message {
     Report(String, SessionReport),
     /// The person answered the question about a shell command: whether it may run.
     Answer(bool),
+    /// The person clicked a link in a reply, which leads to this address.
+    OpenLink(String),
     /// The person asked to interrupt.
     Interrupt,
     /// The person asked for a Rebuild, as `/rebuild` does.
@@ -274,6 +277,7 @@ impl Window {
                 self.view_mut().answer(allowed);
                 Task::none()
             }
+            Message::OpenLink(uri) => self.open_link(&uri),
             Message::JumpToEnd => self.jump_to_end(),
             Message::Interrupt => self.interrupt(),
             Message::Built(built) => self.built(built),
@@ -281,6 +285,16 @@ impl Window {
             Message::CloseRequested => self.close(),
             message => self.switch(message),
         }
+    }
+
+    /// Opens the link at `uri` in the person's browser if it is a web address, telling them in
+    /// the transcript if that failed. Any other link, such as a path in the Workspace, does
+    /// nothing, since the window has nowhere to show it yet.
+    fn open_link(&mut self, uri: &str) -> Task<Message> {
+        if let Some(failure) = open_web_link(uri, |uri: &str| opener::open_browser(uri)) {
+            self.view_mut().notice(failure);
+        }
+        Task::none()
     }
 
     /// Acts on a request to show another Session, or to start a new one.
@@ -318,7 +332,7 @@ impl Window {
     /// archives the Session does nothing while a Turn runs in it.
     fn session_view(&self) -> Element<'_, Message> {
         let view = self.view_ref();
-        let transcript = scrollable(view.transcript.view(Message::Answer))
+        let transcript = scrollable(view.transcript.view(Message::Answer, Message::OpenLink))
             .id(TRANSCRIPT)
             .on_scroll(|viewport| Message::Scrolled {
                 at_end: at_end(&viewport),
@@ -797,6 +811,17 @@ fn waiting_pill(view: &SessionView) -> Option<Element<'_, Message>> {
             .padding(SPACING)
             .into()
     })
+}
+
+/// Opens the link at `uri` with `open` if it is a web address, returning what to tell the person
+/// if that failed. Any other link is left alone, and needs no telling.
+fn open_web_link<E: Display>(
+    uri: &str,
+    open: impl FnOnce(&str) -> Result<(), E>,
+) -> Option<String> {
+    let web = uri.starts_with("https://") || uri.starts_with("http://");
+    let failed = web.then(|| open(uri).err()).flatten();
+    failed.map(|error| format!("could not open {uri}: {error}"))
 }
 
 /// Styles the pill over the transcript as a button of the theme's main color with round ends,

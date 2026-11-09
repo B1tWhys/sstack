@@ -452,7 +452,8 @@ async fn the_window_shows_the_transcript_and_the_prompt() {
 
     let mut ui = simulator(window.view());
 
-    for shown in ["> hello", "hi there", "Send"] {
+    // The reply is drawn as Markdown, which tests cannot find, so only the prompt is looked for.
+    for shown in ["> hello", "Send"] {
         assert!(ui.find(shown).is_ok(), "{shown} should be shown");
     }
     assert!(ui.find(iced::widget::Id::new(PROMPT)).is_ok());
@@ -735,7 +736,7 @@ async fn the_window_labels_reasoning_tool_calls_and_notices() {
 #[tokio::test]
 async fn scrolling_the_transcript_says_whether_the_newest_output_is_in_view() {
     let (_dir, mut window) = window(vec![]);
-    let _ = happened(&mut window, [AgentEvent::Text("line\n".repeat(200))]);
+    let _ = happened(&mut window, [AgentEvent::Text("line\n\n".repeat(200))]);
     let mut ui = simulator(window.view());
     ui.point_at(iced::Point::new(600.0, 50.0));
 
@@ -1167,6 +1168,44 @@ async fn a_response_with_no_text_before_its_tool_calls_shows_no_empty_reply() {
 
     assert_eq!(nothing.units(), 0);
     assert_eq!(blocks(&window), [tool("read", "{}", false)]);
+}
+
+#[test]
+fn a_web_link_is_opened_and_a_failure_to_open_it_is_told() {
+    let mut opened = Vec::new();
+    let mut open = |uri: &str| {
+        opened.push(uri.to_owned());
+        Err("no browser")
+    };
+
+    let failure = open_web_link("https://example.com", &mut open);
+
+    assert_eq!(opened, ["https://example.com"]);
+    assert_eq!(
+        failure.as_deref(),
+        Some("could not open https://example.com: no browser")
+    );
+    assert_eq!(
+        open_web_link("http://example.com", |_| Ok::<_, String>(())),
+        None
+    );
+}
+
+#[test]
+fn a_link_that_is_not_a_web_address_is_left_alone() {
+    let open = |uri: &str| -> Result<(), String> { panic!("{uri} should not be opened") };
+
+    assert_eq!(open_web_link("src/main.rs", open), None);
+}
+
+#[tokio::test]
+async fn clicking_a_link_that_leads_nowhere_changes_nothing() {
+    let (_dir, mut window) = window(vec![]);
+
+    let task = window.update(Message::OpenLink("src/main.rs".into()));
+
+    assert_eq!(task.units(), 0);
+    assert_eq!(blocks(&window), []);
 }
 
 mod sessions;

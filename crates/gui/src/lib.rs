@@ -246,7 +246,7 @@ mod tests {
     use iced_test::simulator;
     use tempfile::TempDir;
 
-    use crate::test_support::{readied, reply, typed};
+    use crate::test_support::{bash_call, readied, typed};
 
     /// Returns whether the window that `emulator` runs shows `text`.
     fn shows<P: Program + 'static>(emulator: &Emulator<P>, program: &P, text: &str) -> bool {
@@ -256,7 +256,10 @@ mod tests {
     #[test]
     fn reports_reach_the_window_through_its_subscription() {
         let dir = TempDir::new().unwrap();
-        let program = application(readied(dir.path(), vec![Ok(reply("hi there"))], &[]));
+        // A reply is drawn as Markdown, which tests cannot find, so this waits for the question
+        // whether a command may run, which shows the command as plain text.
+        let script = vec![Ok(bash_call("touch ran"))];
+        let program = application(readied(dir.path(), script, &[]));
         let (sender, mut events) = mpsc::channel(100);
         let size = Size::new(800.0, 600.0);
         let mut emulator = Emulator::new(sender, &program, Mode::Immediate, size);
@@ -265,14 +268,14 @@ mod tests {
             emulator.update(&program, message);
         }
 
-        // Without the reply, this never ends, and nextest stops the test.
+        // Without the question, this never ends, and nextest stops the test.
         loop {
             while let Ok(event) = events.try_recv() {
                 if let Event::Action(action) = event {
                     emulator.perform(&program, action);
                 }
             }
-            if shows(&emulator, &program, "hi there") {
+            if shows(&emulator, &program, "touch ran") {
                 break;
             }
         }

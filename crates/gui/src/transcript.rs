@@ -7,6 +7,8 @@
 //! differently once it gets a visual style (ADR-0009). So the GUI keeps its own copy and its own
 //! words.
 
+mod reply;
+
 use std::collections::HashMap;
 
 use iced::widget::{button, column, row, text};
@@ -14,6 +16,8 @@ use iced::{Element, Font};
 use sstack::agent::{AgentEvent, ToolCallSummary, TurnEnd};
 use sstack::session::{AssistantEntry, Entry};
 use sstack::session_report::{ApprovalRequest, SessionReport};
+
+pub use self::reply::Reply;
 
 /// Space between the parts of the transcript, in logical pixels.
 const SPACING: f32 = 10.0;
@@ -28,12 +32,12 @@ pub struct Transcript {
 }
 
 /// One part of the transcript.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Block {
     /// What the person sent.
     Prompt(String),
     /// The model's reply in one Step, as much of it as has arrived.
-    Reply(String),
+    Reply(Reply),
     /// The model's summarized thinking in one Step, as much of it as has arrived.
     Reasoning(String),
     /// A tool call the model made.
@@ -125,13 +129,15 @@ impl Transcript {
         &self.blocks
     }
 
-    /// Draws the transcript as plain text, one block under another. Pressing Allow or Deny on an
-    /// open question sends what `answer` makes of whether the command may run.
+    /// Draws the transcript, one block under another, with the model's replies formatted as
+    /// Markdown. Pressing Allow or Deny on an open question sends what `answer` makes of whether
+    /// the command may run, and clicking a link in a reply sends what `open` makes of its address.
     pub fn view<'a, Message: Clone + 'a>(
         &'a self,
         answer: fn(bool) -> Message,
+        open: fn(String) -> Message,
     ) -> Element<'a, Message> {
-        column(self.blocks.iter().map(|block| block.view(answer)))
+        column(self.blocks.iter().map(|block| block.view(answer, open)))
             .spacing(SPACING)
             .into()
     }
@@ -165,7 +171,7 @@ impl Transcript {
         if let Some(Block::Reply(reply)) = self.blocks.last_mut() {
             reply.push_str(piece);
         } else {
-            self.blocks.push(Block::Reply(piece.to_owned()));
+            self.blocks.push(Block::Reply(piece.into()));
         }
         true
     }
@@ -301,16 +307,18 @@ impl Transcript {
 }
 
 impl Block {
-    /// Draws this part of the transcript as plain text, with a label for any kind of block that
-    /// could be mistaken for the reply. Pressing Allow or Deny on an open question sends what
-    /// `answer` makes of whether the command may run.
+    /// Draws this part of the transcript: a reply formatted as Markdown, and everything else as
+    /// plain text, with a label for any kind of block that could be mistaken for the reply.
+    /// Pressing Allow or Deny on an open question sends what `answer` makes of whether the command
+    /// may run, and clicking a link in a reply sends what `open` makes of its address.
     fn view<'a, Message: Clone + 'a>(
         &'a self,
         answer: fn(bool) -> Message,
+        open: fn(String) -> Message,
     ) -> Element<'a, Message> {
         match self {
             Self::Prompt(prompt) => text(format!("> {prompt}")).into(),
-            Self::Reply(words) => text(words).into(),
+            Self::Reply(reply) => reply.view(open),
             Self::Reasoning(thought) => text(format!("Thinking: {thought}")).into(),
             Self::Tool {
                 call,
