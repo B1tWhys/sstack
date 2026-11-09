@@ -11,6 +11,7 @@ use sstack::queue::Waits;
 use sstack::running_harness::SessionState;
 use sstack::session::{self, Entry};
 use sstack::session_controller::SessionController;
+use sstack::session_name;
 use sstack::session_report::{ApprovalRequest, SessionReport};
 use sstack::turn_runner::AgentHandle;
 use sstack::vim::VimEvent;
@@ -21,9 +22,6 @@ use super::sidebar::{Activity, Row};
 use super::{Message, Opened};
 use crate::reports::Reports;
 use crate::transcript::Transcript;
-
-/// The name of a Session the person has neither named nor said anything in yet.
-const UNTITLED: &str = "new session";
 
 /// Something that ended while the person was looking at another Session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,10 +39,10 @@ pub struct SessionView {
     id: String,
     /// Where the Session is stored.
     path: PathBuf,
-    /// The first thing the person said in the Session, which is its Session Name until they give
-    /// it one.
+    /// The first thing the person said in the Session, which it is known by while it has no
+    /// Session Name of its own.
     first_prompt: Option<String>,
-    /// The name the person gave the Session, if they gave it one.
+    /// The Session Name the person gave the Session, or that was made from their first input.
     name: Option<String>,
     /// Control of the Session's Turns. Missing until the Session is first shown, because a
     /// Session the person never opens needs no agent.
@@ -124,8 +122,12 @@ impl SessionView {
             self.prompt.start_vim();
         }
         let parked = session::is_parked(&run.session).unwrap_or(false);
-        let agent = AgentHandle::spawn(run.agent, sender);
-        self.controller = Some(SessionController::new(agent, run.skills, parked));
+        let agent = AgentHandle::spawn(run.agent, sender.clone());
+        let controller = SessionController::new(agent, run.skills, parked);
+        self.controller = Some(match run.naming {
+            Some(naming) => controller.with_naming(naming, sender),
+            None => controller,
+        });
         self.reports = Some(reports);
         let notices = run
             .notices
@@ -202,12 +204,20 @@ impl SessionView {
         self.waits.position(self.state())
     }
 
+    /// Returns what the Session is known by, or nothing while it has no name to show yet.
+    pub fn known_name(&self) -> Option<String> {
+        let naming = self
+            .controller
+            .as_ref()
+            .is_some_and(SessionController::is_naming);
+        session_name::known(self.name.as_deref(), self.first_prompt.as_deref(), naming)
+    }
+
     /// Returns how the sidebar shows this Session as of `now`.
     pub fn row(&self, now: SystemTime) -> Row {
-        let name = self.name.as_ref().or(self.first_prompt.as_ref());
         Row {
             id: self.id.clone(),
-            name: name.map_or_else(|| UNTITLED.to_owned(), String::clone),
+            name: session_name::listed(self.known_name().as_deref()),
             activity: self.activity(),
             waiting: self.state().is_waiting().then(|| self.waits.waited(now)),
         }
@@ -246,6 +256,9 @@ impl SessionView {
             SessionReport::Approval(question) => self.questions.push_back(question.clone()),
             SessionReport::Resumed(entries) => {
                 self.first_prompt = self.first_prompt.take().or(first_prompt(entries));
+            }
+            SessionReport::Named(Some(name)) => {
+                self.name.get_or_insert_with(|| name.clone());
             }
             SessionReport::TurnEnded(Ok(TurnEnd::Paused)) => {}
             SessionReport::TurnEnded(outcome) => {

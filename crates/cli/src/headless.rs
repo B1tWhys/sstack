@@ -18,7 +18,8 @@ use crate::Args;
 use crate::describe;
 
 /// Runs one prompt with no interaction, denying all shell commands. With nobody to watch, it
-/// has no Sandbox either.
+/// has no Sandbox either. A new Session is named after the prompt while the Turn runs, and the
+/// run waits for that to finish too.
 ///
 /// Succeeds only if the Turn finished normally, so scripts can tell when it did not.
 pub async fn run(args: &Args, prompt: &str) -> Result<ExitCode> {
@@ -27,7 +28,10 @@ pub async fn run(args: &Args, prompt: &str) -> Result<ExitCode> {
         .as_deref()
         .map_or(Start::New(Place::MainCheckout), Start::Resume);
     let Run {
-        mut agent, session, ..
+        mut agent,
+        session,
+        naming,
+        ..
     } = prepare()
         .start(start)
         .directory(&std::env::current_dir()?)
@@ -45,7 +49,12 @@ pub async fn run(args: &Args, prompt: &str) -> Result<ExitCode> {
         pause: &never_paused,
         on_event: &mut |event| view.show(&event),
     };
-    let result = agent.run_turn(prompt, &mut context).await;
+    let named = async {
+        if let Some(naming) = naming {
+            naming.name(prompt).await;
+        }
+    };
+    let (result, ()) = tokio::join!(agent.run_turn(prompt, &mut context), named);
     let outcome =
         describe::outcome_text(result.as_ref().map(|end| *end).map_err(ToString::to_string));
     print!(

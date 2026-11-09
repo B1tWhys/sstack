@@ -386,7 +386,7 @@ impl RunningHarness {
     fn run_skill(&self, line: &str, focus: &mut SessionController) -> Outcome<'static> {
         match focus.skill_prompt(line) {
             Ok(_) if self.phase.is_draining() => Outcome::Refused(Refusal::Draining),
-            Ok(text) => focus.start_turn(text),
+            Ok(text) => focus.start_turn(text, line),
             Err(refusal) => Outcome::Refused(refusal),
         }
     }
@@ -444,7 +444,7 @@ impl InSession<'_> {
             return Some(Outcome::Refused(Refusal::Draining));
         }
         match command {
-            Command::Prompt(text) => Some(self.sessions.focus.start_turn(text.to_owned())),
+            Command::Prompt(text) => Some(self.sessions.focus.start_turn(text.to_owned(), text)),
             Command::Unknown(line) => Some(self.harness.run_skill(line, self.sessions.focus)),
             Command::Rebuild => self.advance(Trigger::RebuildAsked),
             Command::Quit => self.quit(),

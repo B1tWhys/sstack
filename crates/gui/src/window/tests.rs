@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use iced::futures::future::{self, BoxFuture, FutureExt};
 use iced::futures::{Stream, StreamExt};
@@ -7,9 +8,10 @@ use iced::mouse::{self, ScrollDelta};
 use iced_test::{Simulator, runtime, simulator};
 use serde_json::json;
 use sstack::agent::{AgentEvent, ToolCallSummary};
-use sstack::provider::scripted::Scripted;
+use sstack::provider::scripted::{Scripted, ScriptedProvider};
 use sstack::running_harness::SessionState;
 use sstack::session::{Entry, StopReason, ToolCall};
+use sstack::session_name::Naming;
 use tempfile::TempDir;
 
 use super::*;
@@ -304,7 +306,52 @@ async fn opening_tells_the_person_about_the_setup_and_names_the_window() {
                    not think to load those Skills";
     let notices = [notice("working in the main checkout"), notice(warning)];
     assert_eq!(blocks(&window), notices);
-    assert_eq!(window.title(), "sstack 1");
+    assert_eq!(window.title(), "sstack");
+}
+
+/// Opens a window on a new Session whose model replies "ok", and whose Session Name is made by a
+/// model that gives `named`.
+fn naming_window(named: Scripted) -> (TempDir, Window) {
+    let dir = TempDir::new().unwrap();
+    let mut ready = readied(dir.path(), vec![Ok(reply("ok"))], &[]);
+    let provider = Arc::new(ScriptedProvider::new([named]));
+    let log = ready.first.run.session.clone();
+    ready.first.run.naming = Some(Naming::new(provider, "scripted".into(), log));
+    (dir, Window::open(ready))
+}
+
+/// Passes the Session's reports to `window` until its Session Name has been made.
+async fn until_named(window: &mut Window) {
+    let mut reports = reports(window);
+    loop {
+        let report = reports.next().await.expect("the Session should be named");
+        let named = matches!(report, SessionReport::Named(_));
+        let _ = window.update(Message::Report("1".into(), report));
+        if named {
+            return;
+        }
+    }
+}
+
+#[tokio::test]
+async fn the_window_is_titled_after_the_session_name_once_it_is_made() {
+    let (_dir, mut window) = naming_window(Ok(reply("Say hello")));
+
+    let _ = send(&mut window, "hello\nthere");
+    assert_eq!(window.title(), "sstack");
+    until_named(&mut window).await;
+
+    assert_eq!(window.title(), "Say hello - sstack");
+}
+
+#[tokio::test]
+async fn the_window_is_titled_after_the_first_line_if_no_name_is_made() {
+    let (_dir, mut window) = naming_window(Err("down".into()));
+
+    let _ = send(&mut window, "hello\nthere");
+    until_named(&mut window).await;
+
+    assert_eq!(window.title(), "hello - sstack");
 }
 
 #[tokio::test]

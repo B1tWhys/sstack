@@ -118,6 +118,7 @@ pub fn opened(path: &Path, provider: Arc<dyn Provider>, events: &EventSender) ->
             directory: path.parent().unwrap().join(".agents/skills"),
             scope: Scope::Project,
         }]),
+        naming: None,
     }
 }
 

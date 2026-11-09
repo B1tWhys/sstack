@@ -9,7 +9,8 @@
 
 use crate::agent::TurnEnd;
 use crate::running_harness::{Outcome, Refusal, SessionEvent, SessionState};
-use crate::session_report::SessionReport;
+use crate::session_name::Naming;
+use crate::session_report::{ReportSender, SessionReport};
 use crate::skills::{self, Lookup, Skill};
 use crate::turn_runner::AgentHandle;
 
@@ -26,6 +27,25 @@ pub struct SessionController {
     state: SessionState,
     /// The Skills the person can run by name in the Session.
     skills: Vec<Skill>,
+    /// How far the Session is from having a Session Name made for it.
+    naming: NameWork,
+}
+
+/// How far a Session is from having a Session Name made from the first thing the person says in
+/// it.
+///
+/// ```text
+///   +--------+  turn started  +---------+  named, or not  +----------+
+///   | Wanted | -------------> | Running | --------------> | Unwanted |
+///   +--------+                +---------+                 +----------+
+/// ```
+enum NameWork {
+    /// Nothing will be made, because the Session needs no name or one has been made already.
+    Unwanted,
+    /// A name will be made from the next Turn the person starts, and reported to these reports.
+    Wanted(Naming, ReportSender),
+    /// A name is being made, and [`SessionReport::Named`] will say when it is done.
+    Running,
 }
 
 impl SessionController {
@@ -43,7 +63,23 @@ impl SessionController {
             agent,
             state,
             skills,
+            naming: NameWork::Unwanted,
         }
+    }
+
+    /// Has `naming` give the Session its Session Name from the first Turn the person starts,
+    /// reporting [`SessionReport::Named`] through `reports` once that is done.
+    #[must_use]
+    pub fn with_naming(mut self, naming: Naming, reports: ReportSender) -> Self {
+        self.naming = NameWork::Wanted(naming, reports);
+        self
+    }
+
+    /// Returns whether the Session's Session Name is being made, until when an interface shows
+    /// [`UNTITLED`](crate::session_name::UNTITLED) rather than the first prompt.
+    #[must_use]
+    pub fn is_naming(&self) -> bool {
+        matches!(self.naming, NameWork::Running)
     }
 
     /// Returns what the Session is doing.
@@ -76,6 +112,10 @@ impl SessionController {
     /// Keeps up with what core reported about the Session.
     pub(crate) fn report(&mut self, report: &SessionReport) {
         let event = match report {
+            SessionReport::Named(_) => {
+                self.naming = NameWork::Unwanted;
+                return;
+            }
             SessionReport::Approval(_) => SessionEvent::ApprovalRequested,
             SessionReport::TurnEnded(Ok(TurnEnd::Paused)) => SessionEvent::Parked,
             SessionReport::TurnEnded(_) => SessionEvent::TurnEnded,
@@ -84,14 +124,27 @@ impl SessionController {
         self.moved(event);
     }
 
-    /// Starts a Turn on `text`, unless one is already running.
-    pub(crate) fn start_turn(&mut self, text: String) -> Outcome<'static> {
+    /// Starts a Turn on `text`, unless one is already running. `typed` is the line the person
+    /// typed for it, which differs from `text` when it runs a Skill, and which names the Session
+    /// if this is its first Turn.
+    pub(crate) fn start_turn(&mut self, text: String, typed: &str) -> Outcome<'static> {
         if self.state.in_turn() {
             return Outcome::Refused(Refusal::Busy);
         }
         self.agent.prompt(text.clone());
         self.moved(SessionEvent::TurnStarted);
+        self.start_naming(typed);
         Outcome::TurnStarted(text)
+    }
+
+    /// Starts making the Session's Session Name from `typed`, if it wants one.
+    fn start_naming(&mut self, typed: &str) {
+        if let NameWork::Wanted(naming, reports) =
+            std::mem::replace(&mut self.naming, NameWork::Unwanted)
+        {
+            naming.spawn(typed.to_owned(), reports);
+            self.naming = NameWork::Running;
+        }
     }
 
     /// Returns the prompt that runs the Skill the slash-prefixed `line` names, with the rest of
@@ -165,8 +218,7 @@ mod tests {
     use crate::human_command::Command;
     use crate::provider::scripted::ScriptedProvider;
     use crate::running_harness::{Exit, RunningHarness};
-    use crate::session::SessionLog;
-    use crate::session_report::ReportSender;
+    use crate::session::{AssistantEntry, Entry, SessionLog, StopReason, Usage};
     use crate::tools::project::Project;
     use crate::tools::test_support::{disabled, git_project};
     use crate::tools::{DenyAll, ToolBox};
@@ -192,6 +244,24 @@ mod tests {
         SessionController::new(agent, Vec::new(), false)
     }
 
+    /// Returns a way to name the Session called `name` in `dir`, with a model that replies
+    /// `title`, along with that model.
+    fn naming(dir: &TempDir, name: &str, title: &str) -> (Naming, Arc<ScriptedProvider>) {
+        let reply = AssistantEntry {
+            text: title.into(),
+            tool_calls: vec![],
+            stop: StopReason::EndTurn,
+            usage: Usage::default(),
+            payload: None,
+        };
+        let provider = Arc::new(ScriptedProvider::new([Ok(reply)]));
+        let log = dir.path().join(name).with_extension("jsonl");
+        (
+            Naming::new(provider.clone(), "scripted".into(), log),
+            provider,
+        )
+    }
+
     /// Returns the report of a Turn that ended for `end`.
     fn ended(end: TurnEnd) -> SessionReport {
         SessionReport::TurnEnded(Ok(end))
@@ -212,6 +282,35 @@ mod tests {
         assert_eq!(started, Some(Outcome::TurnStarted("hello".into())));
         assert_eq!(submit("again"), Some(Outcome::Refused(Refusal::Busy)));
         assert_eq!(session.state(), SessionState::Working);
+    }
+
+    #[tokio::test]
+    async fn the_first_turn_names_the_session_after_what_was_typed() {
+        let (dir, _) = git_project();
+        let (sender, mut received) = tokio::sync::mpsc::unbounded_channel();
+        let reports = ReportSender::new(move |report| {
+            let _ = sender.send(report);
+        });
+        let (naming, provider) = naming(&dir, "a", "Say hello");
+        let mut session = controller(&dir, "a").with_naming(naming, reports);
+        let mut harness = RunningHarness::default();
+        assert!(!session.is_naming());
+
+        let _ = harness
+            .in_session(&mut session, &mut NoOtherSessions)
+            .submit("hello");
+        assert!(session.is_naming());
+        let named = received.recv().await.unwrap();
+        assert!(matches!(&named, SessionReport::Named(Some(name)) if name == "Say hello"));
+        let _ = harness
+            .in_session(&mut session, &mut NoOtherSessions)
+            .report(&named);
+
+        assert!(!session.is_naming());
+        let typed = Entry::User {
+            text: "hello".into(),
+        };
+        assert_eq!(provider.requests(), [[typed]]);
     }
 
     #[tokio::test]

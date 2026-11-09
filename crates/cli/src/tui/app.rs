@@ -10,6 +10,7 @@ use bon::bon;
 use crossterm::cursor::SetCursorStyle;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
+use crossterm::terminal::SetTitle;
 use ratatui::backend::Backend;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::{Frame, Terminal};
@@ -18,6 +19,7 @@ use sstack::running_harness::{
     Exit, InSession, Outcome, Phase, Refusal, RunningHarness, SessionState,
 };
 use sstack::session_controller::{OpenSessions, SessionController};
+use sstack::session_name;
 use sstack::vim::{VimEvent, VimFailure};
 use sstack::workspace::SessionSummary;
 
@@ -103,6 +105,8 @@ pub struct App<'a> {
     colors: ColorDepth,
     /// The cursor shape the terminal was last told to use.
     cursor_style: SetCursorStyle,
+    /// The title the terminal was last told to show. Empty until it is first told.
+    title: String,
     /// Whether the person has heard that nvim is missing, which every Session would otherwise
     /// repeat.
     told_nvim_missing: bool,
@@ -137,6 +141,7 @@ impl<'a> App<'a> {
             sessions,
             colors,
             cursor_style: SetCursorStyle::DefaultUserShape,
+            title: String::new(),
             told_nvim_missing: false,
         }
     }
@@ -163,6 +168,7 @@ impl App<'_> {
         loop {
             terminal.draw(|frame| self.render(frame))?;
             self.apply_cursor_style();
+            self.apply_title();
             let Some(event) = events.recv().await else {
                 return Ok(Exit::Quit);
             };
@@ -179,6 +185,16 @@ impl App<'_> {
         if wanted != self.cursor_style {
             self.cursor_style = wanted;
             let _ = execute!(io::stdout(), wanted);
+        }
+    }
+
+    /// Titles the terminal after the Session on screen. Goes straight to the terminal, because the
+    /// screen library has no notion of a title.
+    fn apply_title(&mut self) {
+        let wanted = session_name::title(self.panes[self.shown].known_name().as_deref());
+        if wanted != self.title {
+            let _ = execute!(io::stdout(), SetTitle(&wanted));
+            self.title = wanted;
         }
     }
 

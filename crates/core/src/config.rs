@@ -15,6 +15,8 @@ use crate::provider::{Effort, Provider, ProviderError};
 const DEFAULT_CONNECTION: &str = "anthropic";
 /// The model used unless settings or arguments choose another.
 const DEFAULT_MODEL: &str = "claude-opus-5-5";
+/// The model that names Sessions unless settings choose another.
+const DEFAULT_NAME_MODEL: &str = "claude-haiku-5-5";
 /// The secret the built-in [`Connection`] authenticates with.
 const DEFAULT_SECRET: &str = "ANTHROPIC_API_KEY";
 /// The context window assumed for a [`Connection`] that does not set one, in tokens.
@@ -80,6 +82,15 @@ pub struct Config {
     /// Whether new Sessions edit their input with a real nvim, where one is installed.
     #[serde(default = "vim_by_default")]
     pub vim: bool,
+    /// The model that sums up the first thing the person says in a Session as its Session Name,
+    /// served by the Session's own [`Connection`]. A small, fast model is enough.
+    #[serde(default = "name_model_by_default")]
+    pub name_model: String,
+}
+
+/// Returns the [`Config::name_model`] of settings that do not mention it.
+fn name_model_by_default() -> String {
+    DEFAULT_NAME_MODEL.to_owned()
 }
 
 /// Returns the [`Config::vim`] of settings that do not mention it.
@@ -101,6 +112,7 @@ impl Default for Config {
             default_model: DEFAULT_MODEL.to_owned(),
             connections: BTreeMap::from([(DEFAULT_CONNECTION.to_owned(), anthropic)]),
             vim: vim_by_default(),
+            name_model: name_model_by_default(),
         }
     }
 }
@@ -191,6 +203,7 @@ mod tests {
         let config = Config::load(&path).unwrap();
 
         assert_eq!(config.connection(None).unwrap().effort, Effort::Low);
+        assert_eq!(config.name_model, DEFAULT_NAME_MODEL);
         let home = config.connection(Some("home")).unwrap();
         assert_eq!(home.secret, "HOME_KEY");
         assert_eq!(home.effort, Effort::High);

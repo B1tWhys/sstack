@@ -93,10 +93,17 @@ fn tool_call(name: &str, input: &serde_json::Value) -> String {
     stream(&blocks, "tool_use")
 }
 
-/// A stand-in for the Claude API, so tests can script replies and inspect requests.
+/// The model that names Sessions when settings choose no other.
+const NAME_MODEL: &str = "claude-haiku-5-5";
+/// The Session Name the stand-in for the Claude API gives every Session.
+const SESSION_NAME: &str = "Named by the model";
+
+/// A stand-in for the Claude API, so tests can script replies and inspect requests. Requests to
+/// name a Session are answered with [`SESSION_NAME`] whenever they come, apart from the script.
 struct FakeApi {
     url: String,
     requests: Arc<Mutex<Vec<String>>>,
+    namings: Arc<Mutex<Vec<String>>>,
 }
 
 impl FakeApi {
@@ -104,30 +111,45 @@ impl FakeApi {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}/v1/", listener.local_addr().unwrap());
         let requests = Arc::new(Mutex::new(Vec::new()));
-        let recorded = requests.clone();
+        let namings = Arc::new(Mutex::new(Vec::new()));
+        let (recorded, named) = (requests.clone(), namings.clone());
         std::thread::spawn(move || {
-            for reply in replies {
-                let (socket, _) = listener.accept().unwrap();
-                recorded.lock().unwrap().push(answer(socket, &reply));
+            let mut replies = replies.into_iter();
+            for socket in listener.incoming() {
+                let mut socket = socket.unwrap();
+                let body = read_body(&mut socket);
+                if body.contains(NAME_MODEL) {
+                    named.lock().unwrap().push(body);
+                    answer(&mut socket, &text_reply(SESSION_NAME));
+                } else if let Some(reply) = replies.next() {
+                    recorded.lock().unwrap().push(body);
+                    answer(&mut socket, &reply);
+                }
             }
         });
-        Self { url, requests }
+        Self {
+            url,
+            requests,
+            namings,
+        }
     }
 
     fn request(&self, index: usize) -> String {
         self.requests.lock().unwrap()[index].clone()
     }
+
+    fn namings(&self) -> Vec<String> {
+        self.namings.lock().unwrap().clone()
+    }
 }
 
-fn answer(mut socket: TcpStream, reply: &str) -> String {
-    let body = read_body(&mut socket);
+fn answer(socket: &mut TcpStream, reply: &str) {
     let head = format!(
         "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
         reply.len()
     );
     socket.write_all(head.as_bytes()).unwrap();
     socket.write_all(reply.as_bytes()).unwrap();
-    body
 }
 
 fn read_body(socket: &mut TcpStream) -> String {
@@ -202,6 +224,18 @@ impl Sandbox {
         command
     }
 
+    /// Returns the Session Name of every named Session in the project.
+    fn session_names(&self) -> Vec<String> {
+        let sessions = data_dir(&self.home).join("sstack/sessions");
+        let projects = fs::read_dir(sessions).unwrap();
+        let files = projects.flat_map(|project| fs::read_dir(project.unwrap().path()).unwrap());
+        files
+            .map(|file| file.unwrap().path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "name"))
+            .map(|path| fs::read_to_string(path).unwrap())
+            .collect()
+    }
+
     fn run(&self, args: &[&str]) -> Output {
         self.command(args).output().unwrap()
     }
@@ -232,6 +266,14 @@ fn config_dir(home: &Path) -> PathBuf {
     }
 }
 
+fn data_dir(home: &Path) -> PathBuf {
+    if cfg!(target_os = "macos") {
+        home.join("Library/Application Support")
+    } else {
+        home.join(".local/share")
+    }
+}
+
 fn stdout(output: &Output) -> String {
     String::from_utf8_lossy(&output.stdout).into_owned()
 }
@@ -254,6 +296,21 @@ fn a_headless_prompt_streams_a_reply_and_can_be_resumed() {
     assert!(stdout(&second).contains("second reply"));
     assert!(api.request(1).contains("remember this"));
     assert!(api.request(1).contains("first reply"));
+}
+
+#[test]
+fn a_headless_run_names_its_new_session_after_the_prompt() {
+    let api = FakeApi::start(vec![text_reply("first reply"), text_reply("second reply")]);
+    let sandbox = Sandbox::new(&api.url);
+
+    let first = sandbox.run(&["--prompt", "remember this"]);
+    assert!(first.status.success(), "{}", stderr(&first));
+    sandbox.run(&["--prompt", "what did I say?", "--resume"]);
+
+    let namings = api.namings();
+    assert_eq!(namings.len(), 1, "only the new Session is named");
+    assert!(namings[0].contains("remember this"));
+    assert_eq!(sandbox.session_names(), [SESSION_NAME]);
 }
 
 #[test]

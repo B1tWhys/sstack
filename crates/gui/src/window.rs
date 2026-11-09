@@ -22,6 +22,7 @@ use sstack::running_harness::{
     Exit, InSession, Outcome, Phase, Refusal, RunningHarness, SessionState,
 };
 use sstack::session_controller::{OpenSessions, SessionController};
+use sstack::session_name;
 use sstack::session_report::{ApprovalRequest, ReportSender, SessionReport};
 use sstack::session_setup::{Place, Run, Start};
 use sstack::vim::VimEvent;
@@ -324,9 +325,9 @@ impl Window {
             .into()
     }
 
-    /// Returns the window's title, which names the Session on screen.
+    /// Returns the window's title, which gives the Session Name of the Session on screen.
     pub fn title(&self) -> String {
-        format!("sstack {}", self.view_ref().id())
+        session_name::title(self.view_ref().known_name().as_deref())
     }
 
     /// Returns where every open Session's reports come from, with the keys, requests to close

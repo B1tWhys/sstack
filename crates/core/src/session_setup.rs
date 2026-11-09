@@ -13,9 +13,10 @@ use bon::builder;
 use crate::agent::{Agent, AgentConfig};
 use crate::config::{Config, ConfigError, Connection};
 use crate::credentials::{MissingSecret, SystemKeyring, resolve_secret};
-use crate::provider::ProviderError;
+use crate::provider::{Effort, Provider, ProviderError};
 use crate::sandbox::{Containers, Sandbox};
 use crate::session::{Entry, SessionError, SessionLog};
+use crate::session_name::Naming;
 use crate::skills::{self, Skill};
 use crate::tools::project::Project;
 use crate::tools::{Approver, Land, ToolBox};
@@ -150,6 +151,9 @@ pub struct Run {
     pub vim: bool,
     /// Every Skill installed for the Session, which the person can run by name.
     pub skills: Vec<Skill>,
+    /// The way to give the Session its Session Name from the first thing the person says in it.
+    /// Missing if the Session already has a Session Name or a first prompt to be known by.
+    pub naming: Option<Naming>,
 }
 
 /// Where a Session turned out to work.
@@ -208,12 +212,13 @@ pub fn prepare(
         model: model.map_or_else(|| config.default_model.clone(), str::to_owned),
         main: &main,
     };
+    let name_model = config.name_model.clone();
     let session = open_session(&project_sessions(&main)?, start)?;
     let id = workspace::session_id(&session.path);
     let place = workplace(&main, &id, session.wants_worktree);
     let installed = installed_skills(place.worktree.as_deref().unwrap_or(&main), directory);
     let listing = SkillListing::new(&offered_skills(&installed), connection.context_limit);
-    let agent_config = agent_config()
+    let configured = agent_config()
         .backend(&backend)
         .id(&id)
         .place(&place)
@@ -222,14 +227,24 @@ pub fn prepare(
         .skills(&installed)
         .listing(&listing)
         .call()?;
+    let naming = wants_name(&session)
+        .then(|| Naming::new(configured.namer, name_model, session.path.clone()));
     Ok(Run {
-        agent: Agent::new(agent_config, session.log, session.entries)?,
+        agent: Agent::new(configured.agent, session.log, session.entries)?,
         session: session.path,
         notices: place.notice.into_iter().collect(),
         descriptions_left_out: listing.without_descriptions,
         vim: config.vim,
         skills: installed,
+        naming,
     })
+}
+
+/// Returns whether the opened Session still needs a Session Name: it has neither one of its own
+/// nor a first prompt to be known by.
+fn wants_name(session: &OpenedLog) -> bool {
+    let spoken = (session.entries.iter()).any(|entry| matches!(entry, Entry::User { .. }));
+    !spoken && !workspace::is_named(&session.path)
 }
 
 /// Returns the main checkout of the project that `directory` is in, with symlinks resolved.
@@ -317,7 +332,16 @@ fn offered_skills(installed: &[Skill]) -> Vec<Skill> {
         .collect()
 }
 
-/// Decides what the agent for a Session runs on.
+/// What a Session's models run on.
+struct Configured {
+    /// What the agent runs on.
+    agent: AgentConfig,
+    /// The service that runs the model that names the Session, on the same Connection as the
+    /// agent's but asking for little effort.
+    namer: Arc<dyn Provider>,
+}
+
+/// Decides what the agent for a Session, and the model that names it, run on.
 #[builder]
 fn agent_config(
     /// The model the run has chosen.
@@ -335,7 +359,7 @@ fn agent_config(
     skills: &[Skill],
     /// How the system prompt lists those Skills.
     listing: &SkillListing,
-) -> Result<AgentConfig, SetupError> {
+) -> Result<Configured, SetupError> {
     let connection = backend.connection;
     SystemKeyring::connect();
     let secret = resolve_secret(&connection.secret, &SystemKeyring, backend.main)?;
@@ -369,18 +393,38 @@ fn agent_config(
     } else {
         (tools, system)
     };
-    Ok(AgentConfig {
-        provider: connection.provider(secret)?,
-        model: backend.model.clone(),
-        system,
-        tools,
-        context_limit: connection.context_limit,
+    let namer = Connection {
+        effort: Effort::Low,
+        ..connection.clone()
+    };
+    Ok(Configured {
+        namer: namer.provider(secret.clone())?,
+        agent: AgentConfig {
+            provider: connection.provider(secret)?,
+            model: backend.model.clone(),
+            system,
+            tools,
+            context_limit: connection.context_limit,
+        },
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_session_with_nothing_to_be_known_by_wants_a_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut new = open_session(dir.path(), Start::New(Place::MainCheckout)).unwrap();
+        assert!(wants_name(&new));
+        new.entries.push(Entry::User { text: "hi".into() });
+        assert!(!wants_name(&new));
+        new.entries.clear();
+        let id = workspace::session_id(&new.path);
+        workspace::name_session(dir.path(), &id, Some("named")).unwrap();
+        assert!(!wants_name(&new));
+    }
 
     #[test]
     fn a_new_session_is_created_and_can_be_resumed() {

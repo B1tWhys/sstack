@@ -83,6 +83,7 @@ fn open_stored(dir: &Path, path: PathBuf, script: Vec<Scripted>) -> Opened {
         descriptions_left_out: 0,
         vim: false,
         skills: Vec::new(),
+        naming: None,
     };
     Opened {
         run,

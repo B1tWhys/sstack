@@ -106,7 +106,7 @@ async fn a_new_session_opens_beside_the_others_and_is_shown() {
     let _ = send(&mut window, "/new");
 
     assert_eq!(window.views.len(), 2);
-    assert_eq!(window.title(), "sstack 2");
+    assert_eq!(window.view_ref().id(), "2");
     assert_eq!(blocks(&window), []);
 }
 
@@ -119,7 +119,7 @@ async fn the_new_button_and_its_shortcut_open_a_session() {
     });
     let _ = window.update(Message::NewSession);
 
-    assert_eq!(window.title(), "sstack 3");
+    assert_eq!(window.view_ref().id(), "3");
 }
 
 #[tokio::test]
@@ -207,7 +207,7 @@ async fn a_click_in_the_sidebar_shows_that_session_and_resumes_it() {
         let _ = ui.click("session 3").unwrap();
     });
 
-    assert_eq!(window.title(), "sstack 3");
+    assert_eq!(window.view_ref().id(), "3");
     assert!(window.view_ref().has_agent());
 }
 
@@ -216,11 +216,11 @@ async fn keys_move_through_the_sidebar_and_wrap() {
     let (_dir, mut window) = with_stored();
 
     let _ = window.update(Message::NextSession);
-    assert_eq!(window.title(), "sstack 2");
+    assert_eq!(window.view_ref().id(), "2");
     let _ = window.update(Message::PreviousSession);
-    assert_eq!(window.title(), "sstack 1");
+    assert_eq!(window.view_ref().id(), "1");
     let _ = window.update(Message::PreviousSession);
-    assert_eq!(window.title(), "sstack 4");
+    assert_eq!(window.view_ref().id(), "4");
 }
 
 #[tokio::test]
@@ -228,9 +228,9 @@ async fn the_longest_wait_is_a_key_away_and_skips_the_session_on_screen() {
     let (_dir, mut window) = with_stored();
 
     let _ = window.update(Message::LongestWaiting);
-    assert_eq!(window.title(), "sstack 2");
+    assert_eq!(window.view_ref().id(), "2");
     let _ = window.update(Message::LongestWaiting);
-    assert_eq!(window.title(), "sstack 3");
+    assert_eq!(window.view_ref().id(), "3");
 }
 
 #[tokio::test]
@@ -239,7 +239,7 @@ async fn with_nothing_else_waiting_the_longest_wait_key_stays_put() {
 
     let _ = window.update(Message::LongestWaiting);
 
-    assert_eq!(window.title(), "sstack 1");
+    assert_eq!(window.view_ref().id(), "1");
 }
 
 #[tokio::test]
@@ -255,7 +255,7 @@ async fn a_session_that_cannot_open_leaves_the_person_where_they_were() {
     let _ = window.update(Message::Show("2".into()));
     let _ = send(&mut window, "/new");
 
-    assert_eq!(window.title(), "sstack 1");
+    assert_eq!(window.view_ref().id(), "1");
     let failed = [
         notice("could not open the Session: the Session is open elsewhere"),
         notice("could not start a new Session: the Session is open elsewhere"),
@@ -304,7 +304,7 @@ async fn opening_carries_on_parked_turns_in_stored_sessions() {
 
     let carried = &window.views[window.position("2").unwrap()];
     assert!(carried.state().in_turn());
-    assert_eq!(window.title(), "sstack 1");
+    assert_eq!(window.view_ref().id(), "1");
 }
 
 #[tokio::test]
@@ -334,7 +334,7 @@ async fn archiving_puts_the_session_away_and_moves_on_to_the_queue() {
 
     assert_eq!(done.borrow().archived, ["2"]);
     assert_eq!(listed(&window), ["1"]);
-    assert_eq!(window.title(), "sstack 1");
+    assert_eq!(window.view_ref().id(), "1");
 }
 
 #[tokio::test]
@@ -405,7 +405,7 @@ async fn being_unable_to_move_on_keeps_the_session_on_screen() {
     let _ = send(&mut window, "/archive");
 
     assert_eq!(done.borrow().archived.len(), 0);
-    assert_eq!(window.title(), "sstack 1");
+    assert_eq!(window.view_ref().id(), "1");
 }
 
 #[tokio::test]

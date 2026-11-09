@@ -1,7 +1,7 @@
 //! Where a project's Sessions live, and the instructions a Session starts with.
 
 use std::fs;
-use std::io;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -137,6 +137,31 @@ pub fn name_session(sessions_dir: &Path, id: &str, name: Option<&str>) -> io::Re
         Some(name) => fs::write(path, name),
         None => remove_if_present(&path),
     }
+}
+
+/// Makes `name` the Session Name of the Session stored at `log`, unless it already has one,
+/// returning whether it did. A name the person gives while `name` is being made is never
+/// overwritten.
+///
+/// # Errors
+/// Returns an error if the name cannot be stored.
+pub fn name_unnamed_session(log: &Path, name: &str) -> io::Result<bool> {
+    let created = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(name_path(log));
+    match created {
+        Ok(mut file) => file.write_all(name.as_bytes()).map(|()| true),
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
+/// Returns whether the Session stored at `log` has a Session Name of its own, rather than being
+/// known by its first prompt.
+#[must_use]
+pub fn is_named(log: &Path) -> bool {
+    name_path(log).exists()
 }
 
 /// Deletes the file at `path`, which need not exist.

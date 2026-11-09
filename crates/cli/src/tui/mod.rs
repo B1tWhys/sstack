@@ -31,6 +31,7 @@ use crossterm::event::{
     DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
 };
 use crossterm::execute;
+use crossterm::style::Print;
 use event::{Event, EventReceiver, EventSender, SessionSender};
 use pane::Opened;
 use sstack::rebuild;
@@ -135,6 +136,7 @@ impl Sessions for LiveSessions<'_> {
             events: report_to(&id),
             vim: run.vim,
             skills: run.skills,
+            naming: run.naming,
         })
     }
 
@@ -184,7 +186,9 @@ fn require_terminal(attached: bool) -> Result<()> {
 async fn on_screen(app: &mut App<'_>, events: &mut EventReceiver) -> Result<Exit> {
     let mut terminal = ratatui::try_init()?;
     let modes = InputModes::enable();
+    let title = SavedTitle::save();
     let exit = app.run(&mut terminal, events).await;
+    drop(title);
     drop(modes);
     ratatui::restore();
     Ok(exit?)
@@ -214,6 +218,32 @@ impl Drop for InputModes {
             DisableMouseCapture,
             DisableBracketedPaste
         );
+    }
+}
+
+/// The title the terminal showed before the harness titled it after its Sessions, which comes back
+/// once this value is dropped, including when the harness panics.
+///
+/// It uses the xterm title stack, which most terminals keep. In one that does not, the last
+/// Session's title stays.
+struct SavedTitle;
+
+/// The escape sequence that pushes the terminal's title onto its title stack.
+const PUSH_TITLE: &str = "\x1b[22;0t";
+/// The escape sequence that pops the terminal's title back off its title stack.
+const POP_TITLE: &str = "\x1b[23;0t";
+
+impl SavedTitle {
+    /// Saves the terminal's title. A terminal that cannot save it still works.
+    fn save() -> Self {
+        let _ = execute!(io::stdout(), Print(PUSH_TITLE));
+        Self
+    }
+}
+
+impl Drop for SavedTitle {
+    fn drop(&mut self) {
+        let _ = execute!(io::stdout(), Print(POP_TITLE));
     }
 }
 

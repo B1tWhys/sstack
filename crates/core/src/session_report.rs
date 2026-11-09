@@ -34,6 +34,10 @@ pub enum SessionReport {
     BuildFinished(Result<PathBuf, String>),
     /// The Running Harness has something to tell the person, such as a mistyped Human Command.
     Notice(String),
+    /// The attempt to give the Session its Session Name from the person's first input ended, with
+    /// the name it gave, or nothing if it gave none, as when the model failed or the person named
+    /// the Session first.
+    Named(Option<String>),
 }
 
 /// Where one Session's reports go, chosen by the interface showing it.
