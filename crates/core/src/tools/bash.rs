@@ -128,11 +128,15 @@ impl Tool for Bash {
             name: "bash".into(),
             description: "Run a bash command in the project root. It runs in a sandbox: a \
                 container that sees only the project, has no network and cannot see .git or \
-                .env files, so git does not work there. It has coreutils, grep, sed, awk, find, \
-                rg, fd, jq, python3, patch, file, tree, xxd, bc and less, but no compilers. \
-                Shell pipelines are fine for searching and for mechanical edits across many \
-                files. For a single targeted change, use the edit tool. Set unsandboxed to \
-                true only for a command that needs the network, git, a toolchain or files \
+                .env files, so git does not work on the project there. It has coreutils, grep, \
+                sed, awk, find, rg, fd, jq, python3, patch, file, tree, xxd, bc, less, git, gcc \
+                and cargo, with stable and nightly Rust. Cargo is offline and uses the crates \
+                the host has downloaded; if one is missing, run `cargo fetch` unsandboxed. \
+                Cargo builds into /target inside the sandbox, not the project's target \
+                directory, and that build is lost when the sandbox restarts. Shell pipelines \
+                are fine for searching and for mechanical edits across many files. For a \
+                single targeted change, use the edit tool. Set unsandboxed to true only for a \
+                command that needs the network, git on the project, another toolchain or files \
                 outside the project; the user approves each of those."
                 .into(),
             input_schema: json!({

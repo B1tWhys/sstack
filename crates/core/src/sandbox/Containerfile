@@ -1,6 +1,25 @@
 FROM ubuntu:latest
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        bc file fd-find jq less patch python3 ripgrep tree xxd \
+        bc build-essential ca-certificates curl file fd-find git jq less patch pkg-config \
+        python3 ripgrep tree xxd \
     && rm -rf /var/lib/apt/lists/* \
     && ln -s /usr/bin/fdfind /usr/local/bin/fd
+
+# The toolchains live outside CARGO_HOME, which is only for what cargo writes at run time.
+# Nightly is whichever was current when the image was built.
+ENV RUSTUP_HOME=/usr/local/rustup PATH=/usr/local/cargo/bin:$PATH
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+        | CARGO_HOME=/usr/local/cargo sh -s -- -y --no-modify-path --profile minimal \
+            --default-toolchain stable --component clippy,rustfmt \
+    && CARGO_HOME=/usr/local/cargo rustup toolchain install nightly --profile minimal \
+        --component clippy,rustfmt,llvm-tools \
+    && chmod -R a+rX /usr/local/rustup /usr/local/cargo
+
+# The Harness mounts the host's crate downloads read-only at /cargo/registry and /cargo/git,
+# so cargo never needs the network. Builds go to /target, not the Workspace's own target
+# directory, so that Linux builds never overwrite the host's. Cargo must not clean up the
+# downloads, which it cannot change.
+RUN mkdir -m 1777 /cargo /target
+ENV CARGO_HOME=/cargo CARGO_TARGET_DIR=/target CARGO_NET_OFFLINE=true \
+    CARGO_CACHE_AUTO_CLEAN_FREQUENCY=never

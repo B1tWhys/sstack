@@ -79,7 +79,7 @@ A path in the Workspace that the model can never see or change by any tool, such
 _Avoid_: Hidden file, secret file
 
 **Sandbox**:
-The container a Session's shell commands run in without asking the person. It sees only the Workspace, without its Protected Paths, and has no network.
+The container a Session's shell commands run in without asking the person. It sees the Workspace, without its Protected Paths, and the crates the person has downloaded, which it cannot change. It has no network.
 _Avoid_: Jail, container (when the Sandbox is meant)
 
 ### Input

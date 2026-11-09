@@ -92,6 +92,8 @@ pub struct ContainerSpec {
     pub workspace: PathBuf,
     /// The Protected Paths inside the Workspace, covered so the container cannot see them.
     pub masks: Vec<Mask>,
+    /// Directories of the host's that the container may read but never change.
+    pub read_only: Vec<ReadOnly>,
     /// Labels identifying the container, as name and value.
     pub labels: Vec<(String, String)>,
     /// The user and group id commands run as, so that files they write belong to the person.
@@ -105,6 +107,16 @@ pub enum Mask {
     File(PathBuf),
     /// A directory, which reads as empty.
     Directory(PathBuf),
+}
+
+/// A directory of the host's that a container sees at a path of its own and cannot change, such
+/// as the person's crate downloads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReadOnly {
+    /// The directory on the host, which must have no symlinks in its path.
+    pub host: PathBuf,
+    /// Where the container sees it.
+    pub container: PathBuf,
 }
 
 /// The program a container waits in, doing nothing but collecting the processes that commands
@@ -198,6 +210,10 @@ fn start_args(program: &str, spec: &ContainerSpec) -> Vec<String> {
         format!("{workspace}:{workspace}"),
     ];
     args.extend(spec.masks.iter().flat_map(|mask| mask_args(program, mask)));
+    for shared in &spec.read_only {
+        let (host, container) = (shared.host.display(), shared.container.display());
+        args.extend(["--volume".to_owned(), format!("{host}:{container}:ro")]);
+    }
     for (name, value) in &spec.labels {
         args.extend(["--label".to_owned(), format!("{name}={value}")]);
     }
@@ -327,6 +343,10 @@ mod tests {
                 Mask::File("/w/.git".into()),
                 Mask::Directory("/w/.sstack".into()),
             ],
+            read_only: vec![ReadOnly {
+                host: "/h/.cargo/registry".into(),
+                container: "/cargo/registry".into(),
+            }],
             labels: vec![("sstack.session".into(), "7".into())],
             user: (501, 20),
         }
@@ -348,6 +368,12 @@ mod tests {
         assert!(args.contains("--label sstack.session=7"));
         let podman = start_args("podman", &spec()).join(" ");
         assert!(podman.contains("--tmpfs /w/.sstack:ro,notmpcopyup"));
+    }
+
+    #[test]
+    fn shared_host_directories_are_mounted_read_only() {
+        let args = start_args("docker", &spec()).join(" ");
+        assert!(args.contains("--volume /h/.cargo/registry:/cargo/registry:ro"));
     }
 
     #[test]

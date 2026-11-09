@@ -76,13 +76,35 @@ async fn protected_paths_and_the_network_are_out_of_reach() {
 async fn the_image_has_the_tools_the_model_is_told_about() {
     let (_dir, root) = workspace();
     let sandbox = sandbox(&root);
-    let tools = "rg fd jq python3 patch file tree xxd bc less";
+    let tools = "rg fd jq python3 patch file tree xxd bc less git cc cargo rustc";
     let missing = run(
         &sandbox,
         &format!("for t in {tools}; do command -v $t >/dev/null || echo $t; done"),
     )
     .await;
     assert_eq!(missing, "");
+}
+
+/// Assumes the host has downloaded crates before, as any machine running these tests has.
+#[tokio::test]
+async fn cargo_builds_offline_outside_the_workspace_and_cannot_change_the_downloads() {
+    let (_dir, root) = workspace();
+    let manifest = "[package]\nname = \"probe\"\nversion = \"0.1.0\"\nedition = \"2024\"\n";
+    fs::write(root.join("Cargo.toml"), manifest).unwrap();
+    fs::create_dir(root.join("src")).unwrap();
+    fs::write(root.join("src/main.rs"), "fn main() {}\n").unwrap();
+    let sandbox = sandbox(&root);
+
+    run(
+        &sandbox,
+        "cargo build --quiet && test -x /target/debug/probe",
+    )
+    .await;
+    run(&sandbox, "test -d /cargo/registry/cache").await;
+    let planted = sandbox.run("touch /cargo/registry/planted", LIMIT).await;
+
+    assert!(!root.join("target").exists());
+    assert!(!planted.unwrap().status.success());
 }
 
 #[tokio::test]

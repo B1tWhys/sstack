@@ -1,5 +1,6 @@
-//! A restricted environment for the model's shell commands, which can reach nothing but the
-//! Workspace, so they need nobody's approval.
+//! A restricted environment for the model's shell commands, which can change nothing but the
+//! Workspace and has no network, so they need nobody's approval. Cargo works offline in it,
+//! from the crates the host has downloaded.
 //!
 //! Each Session's Sandbox is a long-lived container, started by its first command and removed
 //! when the Session goes. Commands run in it one `exec` at a time. Which runtime runs the
@@ -29,7 +30,9 @@ use tokio::sync::{Mutex, OnceCell};
 use crate::worktree::DATA_DIR;
 #[cfg(test)]
 pub(crate) use runtime::MockContainerRuntime;
-pub use runtime::{ContainerRuntime, ContainerSpec, DockerCli, Inspected, Mask, RuntimeError};
+pub use runtime::{
+    ContainerRuntime, ContainerSpec, DockerCli, Inspected, Mask, ReadOnly, RuntimeError,
+};
 use runtime::{HARNESS_LABEL, IMAGE_LABEL, SESSION_LABEL};
 
 /// The programs that may run Sandboxes, in the order they are tried.
@@ -41,6 +44,14 @@ pub const RUNTIMES: [&str; 4] = [
 
 /// What the Sandbox image is built from.
 const CONTAINERFILE: &str = include_str!("Containerfile");
+
+/// Where cargo keeps its files inside the container, which the [`CONTAINERFILE`] sets as
+/// `CARGO_HOME`.
+const CONTAINER_CARGO_HOME: &str = "/cargo";
+
+/// The directories of cargo's home that hold downloaded crates, which the Sandbox shares from
+/// the host.
+const CRATE_DOWNLOADS: [&str; 2] = ["registry", "git"];
 
 /// How much longer than its own limit a command may take before the Harness stops waiting,
 /// which only happens if the runtime fails to stop it.
@@ -223,6 +234,22 @@ fn env_files(workspace: &Path) -> Vec<Mask> {
         .collect()
 }
 
+/// Returns the person's crate downloads in `cargo_home` on the host, shared read-only so that
+/// cargo in the Sandbox can build offline.
+///
+/// Read-only matters: a Sandbox that could change a crate's source could plant a build script
+/// that later runs on the host. Directories that do not exist are left out.
+fn crate_downloads(cargo_home: &Path) -> Vec<ReadOnly> {
+    CRATE_DOWNLOADS
+        .iter()
+        .filter_map(|name| {
+            let host = cargo_home.join(name).canonicalize().ok()?;
+            let container = Path::new(CONTAINER_CARGO_HOME).join(name);
+            Some(ReadOnly { host, container })
+        })
+        .collect()
+}
+
 /// Returns the command that runs `script` in the container, stopped after `limit`.
 ///
 /// `timeout` stops the whole process group, so nothing a pipeline started outlives it.
@@ -239,8 +266,8 @@ fn bounded(script: &str, limit: Duration) -> Vec<String> {
     .to_vec()
 }
 
-/// The container one Session's shell commands run in, which sees only its Workspace, without
-/// its Protected Paths, and has no network.
+/// The container one Session's shell commands run in, which sees its Workspace, without its
+/// Protected Paths, and the host's crate downloads, which it cannot change. It has no network.
 ///
 /// The container starts with the first command and is removed when the Sandbox is dropped. A
 /// command abandoned partway, as when its Turn is cancelled, takes the container with it,
@@ -386,6 +413,7 @@ impl Sandbox {
             image: image.to_owned(),
             workspace: self.workspace.clone(),
             masks: masks(&self.workspace),
+            read_only: home::cargo_home().map_or_else(|_| Vec::new(), |h| crate_downloads(&h)),
             labels: labels.map(|(k, v)| (k.to_owned(), v)).to_vec(),
             user: (getuid().as_raw(), getgid().as_raw()),
         }
@@ -776,6 +804,17 @@ mod tests {
                 Mask::File(root.join("app/.env.local")),
             ]
         );
+    }
+
+    #[test]
+    fn crate_downloads_that_exist_are_shared_where_the_image_expects_them() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join("registry")).unwrap();
+        fs::create_dir(dir.path().join("bin")).unwrap();
+        let host = dir.path().canonicalize().unwrap().join("registry");
+        let container = PathBuf::from("/cargo/registry");
+        assert_eq!(crate_downloads(dir.path()), [ReadOnly { host, container }]);
+        assert!(CONTAINERFILE.contains(&format!("CARGO_HOME={CONTAINER_CARGO_HOME} ")));
     }
 
     #[test]
