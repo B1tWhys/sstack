@@ -3,17 +3,24 @@
 
 use std::time::Duration;
 
+use iced::alignment::{Horizontal, Vertical};
 use iced::widget::text::Wrapping;
-use iced::widget::{Column, button, column, row, scrollable, space, text};
+use iced::widget::{Column, Text, button, column, row, scrollable, space, text};
 use iced::{Element, Fill};
+use lucide_icons::Icon;
 
 use super::{Message, SPACING};
+use crate::hint::hint;
 
 /// How wide the sidebar is, in logical pixels.
 const WIDTH: f32 = 260.0;
 
 /// The most characters of a Session Name that the sidebar shows, after which it is cut short.
 const MAX_NAME_CHARS: usize = 28;
+
+/// How wide the room for a row's activity icon is, in logical pixels, which is the same for every
+/// icon so that the names line up.
+const ICON_WIDTH: f32 = 18.0;
 
 /// What a Session is doing, as far as the person needs to know at a glance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,7 +40,19 @@ pub enum Activity {
 }
 
 impl Activity {
-    /// Returns the word shown for this activity.
+    /// Returns the icon drawn before the Session Name for this activity.
+    fn icon(self) -> Icon {
+        match self {
+            Self::Working => Icon::Brain,
+            Self::Blocked => Icon::CircleAlert,
+            Self::Failed => Icon::CircleX,
+            Self::Done => Icon::CircleCheck,
+            Self::Parked => Icon::CirclePause,
+            Self::Idle => Icon::Circle,
+        }
+    }
+
+    /// Returns the word that names this activity in the hint on its icon.
     fn label(self) -> &'static str {
         match self {
             Self::Working => "working",
@@ -60,7 +79,8 @@ pub struct Row {
 }
 
 impl Row {
-    /// Returns what the row says the Session is doing, with how long it has waited.
+    /// Returns the hint on the row's icon, which says in words what the Session is doing and how
+    /// long it has waited.
     pub fn status(&self) -> String {
         match self.waiting {
             Some(waited) => format!("{} {}", self.activity.label(), age(waited)),
@@ -71,12 +91,17 @@ impl Row {
     /// Draws the row as a button that shows its Session. The Session on screen stands out, and
     /// one that needs the person is drawn as a warning.
     fn view(self, on_screen: bool) -> Element<'static, Message> {
+        let icon = Text::from(self.activity.icon())
+            .width(ICON_WIDTH)
+            .align_x(Horizontal::Center);
         let label = row![
-            text(fit(&self.name)).wrapping(Wrapping::None),
+            hint(icon, self.status()),
+            name(&self.name),
             space::horizontal(),
-            text(self.status()).wrapping(Wrapping::None),
+            self.waiting.map(|waited| text(age(waited))),
         ]
-        .spacing(SPACING);
+        .spacing(SPACING)
+        .align_y(Vertical::Center);
         let style = match (on_screen, self.activity) {
             (true, _) => button::primary,
             (false, Activity::Blocked | Activity::Failed) => button::danger,
@@ -122,15 +147,24 @@ fn age(age: Duration) -> String {
     }
 }
 
-/// Returns the first line of `name`, cut short if it is too long for the sidebar.
-fn fit(name: &str) -> String {
+/// Draws the Session Name `name` on one line. A name cut short to fit shows in full in a hint.
+fn name(name: &str) -> Element<'static, Message> {
+    let whole = name.trim_end();
+    match cut_short(name) {
+        Some(shown) => hint(text(shown).wrapping(Wrapping::None), whole),
+        None => text(whole.to_owned()).wrapping(Wrapping::None).into(),
+    }
+}
+
+/// Returns the first line of `name`, cut short, if it is too long for the sidebar or has more
+/// lines, and `None` if it fits as it is.
+fn cut_short(name: &str) -> Option<String> {
     let line = name.lines().next().unwrap_or_default();
-    if line.chars().count() > MAX_NAME_CHARS || line.len() < name.trim_end().len() {
+    let fits = line.chars().count() <= MAX_NAME_CHARS && line.len() == name.trim_end().len();
+    (!fits).then(|| {
         let kept: String = line.chars().take(MAX_NAME_CHARS).collect();
         format!("{}..", kept.trim_end())
-    } else {
-        line.to_owned()
-    }
+    })
 }
 
 #[cfg(test)]
@@ -153,10 +187,28 @@ mod tests {
 
     #[test]
     fn long_or_several_line_names_are_cut_short() {
-        assert_eq!(fit("short"), "short");
-        assert_eq!(fit("two\nlines"), "two..");
+        assert_eq!(cut_short("short"), None);
+        assert_eq!(cut_short("ends in a newline\n"), None);
+        assert_eq!(cut_short(&"a".repeat(MAX_NAME_CHARS)), None);
+        assert_eq!(cut_short("two\nlines").as_deref(), Some("two.."));
         let long = "a".repeat(40);
-        assert_eq!(fit(&long), format!("{}..", "a".repeat(MAX_NAME_CHARS)));
+        let cut = format!("{}..", "a".repeat(MAX_NAME_CHARS));
+        assert_eq!(cut_short(&long), Some(cut));
+    }
+
+    #[test]
+    fn each_activity_has_its_own_icon() {
+        let icons = [
+            (Activity::Working, "brain"),
+            (Activity::Blocked, "circle-alert"),
+            (Activity::Failed, "circle-x"),
+            (Activity::Done, "circle-check"),
+            (Activity::Parked, "circle-pause"),
+            (Activity::Idle, "circle"),
+        ];
+        for (activity, icon) in icons {
+            assert_eq!(activity.icon().to_string(), icon, "{activity:?}");
+        }
     }
 
     #[test]

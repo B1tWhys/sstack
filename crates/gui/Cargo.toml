@@ -18,6 +18,7 @@ nvim-tests = []
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 iced = { version = "0.14", features = ["advanced", "tokio"] }
+lucide-icons = { version = "1", features = ["iced"] }
 sstack = { path = "../core", default-features = false }
 
 [dev-dependencies]

@@ -3,6 +3,7 @@
 //! Sessions, Providers, tools and the agent loop are in [`sstack`]. The window turns what the
 //! person does into calls on core and draws what core reports about the Session.
 
+mod hint;
 mod inbox;
 mod reports;
 #[cfg(test)]
@@ -107,6 +108,7 @@ fn application(ready: Ready) -> Application<impl Program<State = Window, Message
     iced::application(move || open(&unopened), Window::update, Window::view)
         .title(Window::title)
         .subscription(Window::subscription)
+        .font(lucide_icons::LUCIDE_FONT_BYTES)
         .exit_on_close_request(false)
 }
 

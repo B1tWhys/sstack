@@ -3037,6 +3037,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4050469837a6ff301cd14c1f8f24f88549e6d548f24f64e2148eb0f72cebc51f"
 
 [[package]]
+name = "lucide-icons"
+version = "1.70.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "83bac69fc369b66f6dfcd418a34f474c6b79f6985e7cdf29f1b5319fc0050322"
+dependencies = [
+ "iced",
+]
+
+[[package]]
 name = "mac_address"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5380,6 +5389,7 @@ dependencies = [
  "clap",
  "iced",
  "iced_test",
+ "lucide-icons",
  "serde_json",
  "sstack",
  "tempfile",

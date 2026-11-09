@@ -199,6 +199,23 @@ async fn the_sidebar_lists_sessions_longest_wait_first() {
 }
 
 #[tokio::test]
+async fn the_sidebar_draws_no_activity_words_and_cuts_long_names_short() {
+    let dir = TempDir::new().unwrap();
+    let mut ready = readied(dir.path(), vec![], &[]);
+    let mut long = summary(dir.path(), "2", 30);
+    long.name = Some("a name far too long to fit in the sidebar".into());
+    ready.stored = vec![long];
+    let window = Window::open(ready);
+
+    let mut ui = simulator(window.view());
+
+    assert!(ui.find("a name far too long to fit i..").is_ok());
+    for hidden in ["a name far too long to fit in the sidebar", "idle"] {
+        assert!(ui.find(hidden).is_err(), "{hidden} should only be a hint");
+    }
+}
+
+#[tokio::test]
 async fn a_click_in_the_sidebar_shows_that_session_and_resumes_it() {
     let (_dir, mut window) = with_stored();
     assert!(!window.views[window.position("3").unwrap()].has_agent());
