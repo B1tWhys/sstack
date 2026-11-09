@@ -60,8 +60,9 @@ pub struct SessionView {
     pub(super) prompt: Input,
     /// What has been said in the Session, including before the window opened.
     pub(super) transcript: Transcript,
-    /// Questions about shell commands that the Session's Turn is waiting on, oldest first. Only
-    /// the oldest is shown. Dropping one unanswered, as closing the window does, denies it.
+    /// Questions about shell commands that the Session's Turn is waiting on, oldest first, which
+    /// the transcript shows and the person answers in that order. Dropping one unanswered, as
+    /// closing the window does, denies it.
     questions: VecDeque<ApprovalRequest>,
     /// Whether the transcript keeps its newest output in view as more arrives. It stops once the
     /// person scrolls back, and starts again when they scroll to the end, start a Turn or come
@@ -274,16 +275,12 @@ impl SessionView {
         self.transcript.report(report)
     }
 
-    /// Returns the oldest open question about a shell command, which is the one shown.
-    pub fn question(&self) -> Option<&ApprovalRequest> {
-        self.questions.front()
-    }
-
     /// Answers the oldest open question about a shell command, if there is one: `allowed` says
     /// whether the command may run.
     pub fn answer(&mut self, allowed: bool) {
         if let Some(question) = self.questions.pop_front() {
             question.reply.send(allowed);
+            self.transcript.answered(allowed);
             self.control(SessionController::answered);
         }
     }

@@ -9,12 +9,12 @@
 
 use std::collections::HashMap;
 
-use iced::Element;
 use iced::widget::text::Wrapping;
-use iced::widget::{column, text};
+use iced::widget::{button, column, row, text};
+use iced::{Element, Font};
 use sstack::agent::{AgentEvent, ToolCallSummary, TurnEnd};
 use sstack::session::{AssistantEntry, Entry};
-use sstack::session_report::SessionReport;
+use sstack::session_report::{ApprovalRequest, SessionReport};
 
 /// The most characters of a tool call's input that its one-line summary shows.
 const MAX_TOOL_INPUT_CHARS: usize = 100;
@@ -23,8 +23,8 @@ const MAX_TOOL_INPUT_CHARS: usize = 100;
 const SPACING: f32 = 10.0;
 
 /// The Session as it unfolds in the window: what the Session held when it opened, what the
-/// person sent, what the model thought and replied, the tools it called, and what the window
-/// tells the person.
+/// person sent, what the model thought and replied, the tools it called and the questions about
+/// them, and what the window tells the person.
 #[derive(Debug, Default)]
 pub struct Transcript {
     /// Everything shown, oldest first.
@@ -46,10 +46,39 @@ pub enum Block {
         call: ToolCallSummary,
         /// Whether the call failed. A call still running has not failed.
         failed: bool,
+        /// The question whether the call's command may run, if the person was asked.
+        approval: Option<Approval>,
     },
     /// Something the window tells the person, such as how a Turn ended or why it could not do
     /// what they asked.
     Notice(String),
+}
+
+/// A question to the person whether a command may run, and what became of it.
+///
+/// Once answered it shows as a word on its tool call's line, but the transcript keeps the whole
+/// command and note, so that a later change can show them again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Approval {
+    /// The command, exactly as it would run.
+    pub command: String,
+    /// Why the person is asked, if the asker said.
+    pub note: Option<String>,
+    /// Where the question stands.
+    pub decision: Decision,
+}
+
+/// Where a question whether a command may run stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Decision {
+    /// The question waits for the person.
+    Open,
+    /// The person let the command run.
+    Allowed,
+    /// The person refused the command.
+    Denied,
+    /// The Turn ended before the person answered, which refuses the command.
+    Unanswered,
 }
 
 impl Transcript {
@@ -76,7 +105,21 @@ impl Transcript {
                 self.notice(words.clone());
                 true
             }
+            SessionReport::Approval(request) => self.ask(request),
             _ => false,
+        }
+    }
+
+    /// Notes the person's answer to the oldest open question about a command: `allowed` says
+    /// whether it may run.
+    pub fn answered(&mut self, allowed: bool) {
+        let decision = if allowed {
+            Decision::Allowed
+        } else {
+            Decision::Denied
+        };
+        if let Some(approval) = self.open_approvals().next() {
+            approval.decision = decision;
         }
     }
 
@@ -86,9 +129,13 @@ impl Transcript {
         &self.blocks
     }
 
-    /// Draws the transcript as plain text, one block under another.
-    pub fn view<'a, Message: 'a>(&'a self) -> Element<'a, Message> {
-        column(self.blocks.iter().map(Block::view))
+    /// Draws the transcript as plain text, one block under another. Pressing Allow or Deny on an
+    /// open question sends what `answer` makes of whether the command may run.
+    pub fn view<'a, Message: Clone + 'a>(
+        &'a self,
+        answer: fn(bool) -> Message,
+    ) -> Element<'a, Message> {
+        column(self.blocks.iter().map(|block| block.view(answer)))
             .spacing(SPACING)
             .into()
     }
@@ -141,7 +188,35 @@ impl Transcript {
         self.blocks.push(Block::Tool {
             call,
             failed: false,
+            approval: None,
         });
+    }
+
+    /// Puts `request` to the person on the newest tool call, which is the one asking, returning
+    /// whether there was a call to put it on. Tools run one at a time, and each is shown before
+    /// it runs.
+    fn ask(&mut self, request: &ApprovalRequest) -> bool {
+        let newest = self.blocks.iter_mut().rev().find_map(|block| match block {
+            Block::Tool { approval, .. } => Some(approval),
+            _ => None,
+        });
+        let approval = Approval {
+            command: request.command.clone(),
+            note: request.note.clone(),
+            decision: Decision::Open,
+        };
+        newest.map(|asked| *asked = Some(approval)).is_some()
+    }
+
+    /// Returns the questions about commands that still wait for the person, oldest first.
+    fn open_approvals(&mut self) -> impl Iterator<Item = &mut Approval> {
+        self.blocks.iter_mut().filter_map(|block| match block {
+            Block::Tool {
+                approval: Some(approval),
+                ..
+            } if approval.decision == Decision::Open => Some(approval),
+            _ => None,
+        })
     }
 
     /// Marks the newest tool call as failed, returning whether there was one. Tools run one at a
@@ -154,14 +229,19 @@ impl Transcript {
         newest.map(|failed| *failed = true).is_some()
     }
 
-    /// Notes how a Turn ended or the error that stopped it, returning whether that needed
-    /// saying.
+    /// Notes how a Turn ended or the error that stopped it, returning whether the transcript
+    /// changed. Questions the Turn left open are marked unanswered.
     fn ended(&mut self, outcome: Result<TurnEnd, &String>) -> bool {
+        let mut lapsed = false;
+        for approval in self.open_approvals() {
+            approval.decision = Decision::Unanswered;
+            lapsed = true;
+        }
         let words = match outcome {
             Ok(end) => turn_end_text(end).map(str::to_owned),
             Err(error) => Some(format!("the Turn failed: {error}")),
         };
-        words.map(|words| self.notice(words)).is_some()
+        words.map(|words| self.notice(words)).is_some() || lapsed
     }
 
     /// Shows the Turns the Session already held, before everything already shown, returning
@@ -226,30 +306,106 @@ impl Transcript {
 
 impl Block {
     /// Draws this part of the transcript as plain text, with a label for any kind of block that
-    /// could be mistaken for the reply.
-    fn view<'a, Message: 'a>(&'a self) -> Element<'a, Message> {
+    /// could be mistaken for the reply. Pressing Allow or Deny on an open question sends what
+    /// `answer` makes of whether the command may run.
+    fn view<'a, Message: Clone + 'a>(
+        &'a self,
+        answer: fn(bool) -> Message,
+    ) -> Element<'a, Message> {
         match self {
             Self::Prompt(prompt) => text(format!("> {prompt}")).into(),
             Self::Reply(words) => text(words).into(),
             Self::Reasoning(thought) => text(format!("Thinking: {thought}")).into(),
-            Self::Tool { call, failed } => text(tool_summary(call, *failed))
-                .wrapping(Wrapping::None)
-                .into(),
+            Self::Tool {
+                call,
+                failed,
+                approval,
+            } => {
+                let line = tool_summary(call, *failed, approval.as_ref());
+                tool_view(line, approval.as_ref(), answer)
+            }
             Self::Notice(words) => text(format!("Note: {words}")).into(),
         }
     }
 }
 
-/// Returns the one-line summary of a tool call, cutting long input short.
-fn tool_summary(call: &ToolCallSummary, failed: bool) -> String {
+impl Approval {
+    /// Draws the open question: why the person is asked, the whole command, and the buttons
+    /// that send what `answer` makes of whether it may run.
+    fn view<'a, Message: Clone + 'a>(
+        &'a self,
+        answer: fn(bool) -> Message,
+    ) -> Element<'a, Message> {
+        let answers = row![
+            button("Allow").on_press(answer(true)),
+            button("Deny").on_press(answer(false)),
+        ]
+        .spacing(SPACING);
+        column![]
+            .push(self.note.as_deref().map(text))
+            .push(text(self.command.as_str()).font(Font::MONOSPACE))
+            .push(answers)
+            .spacing(SPACING)
+            .into()
+    }
+}
+
+impl Decision {
+    /// Returns the word that marks an answered question on its tool call's line. An open
+    /// question has none, since it shows in full.
+    fn label(self) -> Option<&'static str> {
+        match self {
+            Self::Open => None,
+            Self::Allowed => Some("allowed"),
+            Self::Denied => Some("denied"),
+            Self::Unanswered => Some("not answered"),
+        }
+    }
+}
+
+/// Draws a tool call as its one-line summary `line`, with the question about it in full below
+/// while it is open. Pressing Allow or Deny sends what `answer` makes of whether the command may
+/// run.
+fn tool_view<'a, Message: Clone + 'a>(
+    line: String,
+    approval: Option<&'a Approval>,
+    answer: fn(bool) -> Message,
+) -> Element<'a, Message> {
+    let line = text(line).wrapping(Wrapping::None);
+    match approval {
+        Some(open) if open.decision == Decision::Open => {
+            column![line, open.view(answer)].spacing(SPACING).into()
+        }
+        _ => line.into(),
+    }
+}
+
+/// Returns the one-line summary of a tool call, cutting long input short, and marking how any
+/// question about it was answered and whether it failed.
+fn tool_summary(call: &ToolCallSummary, failed: bool, approval: Option<&Approval>) -> String {
     let input: String = call.input.chars().take(MAX_TOOL_INPUT_CHARS).collect();
     let cut = if input.len() < call.input.len() {
         "..."
     } else {
         ""
     };
-    let failed = if failed { " (failed)" } else { "" };
-    format!("Tool: {} {input}{cut}{failed}", call.name)
+    let marks = marks(failed, approval.map(|approval| approval.decision));
+    format!("Tool: {} {input}{cut}{marks}", call.name)
+}
+
+/// Returns what goes after a tool call's summary to say how any question about it was answered
+/// and whether it failed, such as ` (denied, failed)`, or nothing if neither needs saying.
+fn marks(failed: bool, decision: Option<Decision>) -> String {
+    let words: Vec<&str> = decision
+        .and_then(Decision::label)
+        .into_iter()
+        .chain(failed.then_some("failed"))
+        .collect();
+    if words.is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", words.join(", "))
+    }
 }
 
 /// Describes how a Turn ended, if that needs saying.

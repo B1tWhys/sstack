@@ -23,7 +23,7 @@ use sstack::running_harness::{
 };
 use sstack::session_controller::{OpenSessions, SessionController};
 use sstack::session_name;
-use sstack::session_report::{ApprovalRequest, ReportSender, SessionReport};
+use sstack::session_report::{ReportSender, SessionReport};
 use sstack::session_setup::{Place, Run, Start};
 use sstack::vim::VimEvent;
 use sstack::workspace::SessionSummary;
@@ -285,12 +285,12 @@ impl Window {
             .into()
     }
 
-    /// Draws the Session on screen: its transcript, any question for the person, what the
+    /// Draws the Session on screen: its transcript with any questions for the person, what the
     /// Running Harness is doing on its way out, and the prompt with its buttons. The button that
     /// archives the Session does nothing while a Turn runs in it.
     fn session_view(&self) -> Element<'_, Message> {
         let view = self.view_ref();
-        let transcript = scrollable(view.transcript.view())
+        let transcript = scrollable(view.transcript.view(Message::Answer))
             .id(TRANSCRIPT)
             .on_scroll(|viewport| Message::Scrolled {
                 at_end: at_end(&viewport),
@@ -314,10 +314,8 @@ impl Window {
         let rebuild = button("Rebuild").on_press_maybe((!draining).then_some(Message::Rebuild));
         let archive =
             button("Archive").on_press_maybe((!view.state().in_turn()).then_some(Message::Archive));
-        let question = view.question().map(question);
         let progress = progress(self.harness.phase()).map(text);
         column![transcript]
-            .push(question)
             .push(progress)
             .push(row![prompt, send, interrupt, rebuild, archive].spacing(SPACING))
             .spacing(SPACING)
@@ -738,22 +736,6 @@ impl OpenSessions for Views<'_> {
             view.control(&mut *visit);
         }
     }
-}
-
-/// Draws the question whether the command `asked` about may run, with why the person is asked,
-/// and the buttons that answer it.
-fn question(asked: &ApprovalRequest) -> Element<'_, Message> {
-    let answers = row![
-        button("Allow").on_press(Message::Answer(true)),
-        button("Deny").on_press(Message::Answer(false)),
-    ]
-    .spacing(SPACING);
-    column![]
-        .push(asked.note.as_deref().map(text))
-        .push(text(format!("Run `{}`?", asked.command)))
-        .push(answers)
-        .spacing(SPACING)
-        .into()
 }
 
 /// Returns what the window says about the Running Harness being on its way out in `phase`, if it

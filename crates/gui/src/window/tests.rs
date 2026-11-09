@@ -16,7 +16,7 @@ use tempfile::TempDir;
 
 use super::*;
 use crate::test_support::{bash_call, readied, reply, typed};
-use crate::transcript::Block;
+use crate::transcript::{Approval, Block, Decision};
 
 /// Opens a window on a new Session whose model gives the `script`ed responses in order.
 fn window(script: Vec<Scripted>) -> (TempDir, Window) {
@@ -464,11 +464,13 @@ fn call(name: &str, input: &str) -> ToolCallSummary {
     }
 }
 
-/// Returns a call of the tool `name` with the JSON text `input` as it appears in the transcript.
+/// Returns a call of the tool `name` with the JSON text `input` as it appears in the transcript,
+/// when the person was not asked about it.
 fn tool(name: &str, input: &str, failed: bool) -> Block {
     Block::Tool {
         call: call(name, input),
         failed,
+        approval: None,
     }
 }
 
@@ -718,6 +720,25 @@ async fn scrolling_the_transcript_says_whether_the_newest_output_is_in_view() {
     assert_eq!(scrolled, [true, false]);
 }
 
+/// Why the person is asked about a shell command in tests, where the Sandbox is off.
+const HOST_NOTE: &str =
+    "The Sandbox is unavailable, so this runs on the host: the Sandbox is turned off";
+
+/// Returns the call of `bash` with `command` as it appears in the transcript once the question
+/// about it reached `decision`, and whether the call `failed`.
+fn asked_bash(command: &str, decision: Decision, failed: bool) -> Block {
+    let input = serde_json::to_string(&json!({ "command": command })).unwrap();
+    Block::Tool {
+        call: call("bash", &input),
+        failed,
+        approval: Some(Approval {
+            command: command.into(),
+            note: Some(HOST_NOTE.into()),
+            decision,
+        }),
+    }
+}
+
 /// Passes `reports` to `window` until the running Turn asks about a shell command.
 async fn until_asked(
     window: &mut Window,
@@ -759,8 +780,8 @@ async fn a_denied_shell_command_does_not_run_and_its_call_shows_as_failed() {
     let _ = until_turn_ends_on(&mut window, &mut reports).await;
 
     assert!(!dir.path().join("ran").exists());
-    let failed = tool("bash", r#"{"command":"touch ran"}"#, true);
-    assert!(blocks(&window).contains(&failed));
+    let denied = asked_bash("touch ran", Decision::Denied, true);
+    assert!(blocks(&window).contains(&denied));
 }
 
 #[tokio::test]
@@ -791,10 +812,63 @@ async fn the_window_asks_about_a_shell_command_with_its_note() {
 
     let mut ui = simulator(window.view());
 
-    let note = "The Sandbox is unavailable, so this runs on the host: the Sandbox is turned off";
-    for shown in [note, "Run `touch ran`?", "Allow", "Deny"] {
+    for shown in [HOST_NOTE, "touch ran", "Allow", "Deny"] {
         assert!(ui.find(shown).is_ok(), "{shown} should be shown");
     }
+    let open = asked_bash("touch ran", Decision::Open, false);
+    assert_eq!(blocks(&window).last(), Some(&open));
+}
+
+#[tokio::test]
+async fn an_answered_question_shrinks_to_its_tool_line_but_is_kept_whole() {
+    let command = "cat <<EOF > ran\none\ntwo\nEOF";
+    let (_dir, mut window) = window(vec![Ok(bash_call(command)), Ok(reply("ok"))]);
+    let mut reports = reports(&window);
+    let _ = send(&mut window, "go");
+    until_asked(&mut window, &mut reports).await;
+
+    let _ = window.update(Message::Answer(true));
+    let _ = until_turn_ends_on(&mut window, &mut reports).await;
+
+    let allowed = asked_bash(command, Decision::Allowed, false);
+    assert!(blocks(&window).contains(&allowed));
+    let mut ui = simulator(window.view());
+    let line = r#"Tool: bash {"command":"cat <<EOF > ran\none\ntwo\nEOF"} (allowed)"#;
+    assert!(ui.find(line).is_ok(), "the call should show as one line");
+    for gone in [command, HOST_NOTE, "Allow", "Deny"] {
+        assert!(ui.find(gone).is_err(), "{gone} should no longer be shown");
+    }
+}
+
+#[tokio::test]
+async fn a_question_too_long_for_the_window_leaves_the_prompt_on_screen() {
+    let command = format!("cat <<EOF\n{}EOF", "a line of the heredoc\n".repeat(200));
+    let (_dir, mut window) = window(vec![Ok(bash_call(&command))]);
+    let mut reports = reports(&window);
+    let _ = send(&mut window, "go");
+    until_asked(&mut window, &mut reports).await;
+
+    let mut ui = simulator(window.view());
+
+    let button = ui.find("Send").unwrap();
+    assert!(
+        button.visible_bounds().is_some(),
+        "Send should be on screen"
+    );
+}
+
+#[tokio::test]
+async fn a_denied_call_says_so_on_its_line() {
+    let (_dir, mut window) = window(vec![Ok(bash_call("touch ran")), Ok(reply("ok"))]);
+    let mut reports = reports(&window);
+    let _ = send(&mut window, "go");
+    until_asked(&mut window, &mut reports).await;
+
+    let _ = window.update(Message::Answer(false));
+    let _ = until_turn_ends_on(&mut window, &mut reports).await;
+
+    let line = r#"Tool: bash {"command":"touch ran"} (denied, failed)"#;
+    assert!(simulator(window.view()).find(line).is_ok());
 }
 
 #[tokio::test]
@@ -840,6 +914,8 @@ async fn interrupting_cancels_the_running_turn_and_its_question() {
 
     let cancelled = notice("the Turn was cancelled");
     assert_eq!(blocks(&window).last(), Some(&cancelled));
+    let unanswered = asked_bash("touch ran", Decision::Unanswered, false);
+    assert!(blocks(&window).contains(&unanswered));
     assert!(simulator(window.view()).find("Allow").is_err());
     assert!(!window.view_ref().state().in_turn());
 }

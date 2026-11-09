@@ -142,7 +142,7 @@ async fn sessions_run_side_by_side() {
     );
     assert_eq!(row_of(&window, "1").activity, sidebar::Activity::Blocked);
     let _ = window.update(Message::Show("1".into()));
-    assert!(simulator(window.view()).find("Run `touch ran`?").is_ok());
+    assert!(simulator(window.view()).find("touch ran").is_ok());
 }
 
 #[tokio::test]
