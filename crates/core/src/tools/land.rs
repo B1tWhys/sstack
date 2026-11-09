@@ -29,8 +29,6 @@ pub struct Land {
     pub worktree: Arc<Project>,
     /// The main checkout, which decides what the main branch is.
     pub main: PathBuf,
-    /// The Session's branch.
-    pub branch: String,
     /// Who decides whether the landing may happen.
     pub approver: Arc<dyn Approver>,
     /// Environment variables withheld from the checks.
@@ -41,6 +39,13 @@ impl Land {
     /// Returns the branch to land on, which is whatever the main checkout has checked out.
     async fn target(&self) -> Result<String, ToolError> {
         let name = git(&self.main, &["symbolic-ref", "--short", "HEAD"]).await?;
+        Ok(name.trim().to_owned())
+    }
+
+    /// Returns the Session's branch, which its Session Name may have renamed since the tool was
+    /// made.
+    async fn branch(&self) -> Result<String, ToolError> {
+        let name = git(self.worktree.root(), &["branch", "--show-current"]).await?;
         Ok(name.trim().to_owned())
     }
 
@@ -100,24 +105,25 @@ impl Land {
         }
     }
 
-    /// Moves `target` up to the Session's commits, returning false if it moved on while the checks
-    /// ran, in which case it is left alone.
-    async fn fast_forward(&self, target: &str) -> Result<bool, ToolError> {
+    /// Moves `target` up to the Session's commits on `branch`, returning false if it moved on
+    /// while the checks ran, in which case it is left alone.
+    async fn fast_forward(&self, target: &str, branch: &str) -> Result<bool, ToolError> {
         let ancestor = ["merge-base", "--is-ancestor", target, "HEAD"];
         if git(self.worktree.root(), &ancestor).await.is_err() {
             return Ok(false);
         }
-        git(&self.main, &["merge", "-q", "--ff-only", &self.branch]).await?;
+        git(&self.main, &["merge", "-q", "--ff-only", branch]).await?;
         Ok(true)
     }
 
-    /// Lands the Session's commits on `target`, starting again if it moves in the meantime.
-    async fn land_on(&self, target: &str) -> Result<String, ToolError> {
+    /// Lands the Session's commits on `branch` onto `target`, starting again if it moves in the
+    /// meantime.
+    async fn land_on(&self, target: &str, branch: &str) -> Result<String, ToolError> {
         for _ in 0..ATTEMPTS {
             self.rebase(target).await?;
             self.check().await?;
-            if self.fast_forward(target).await? {
-                return Ok(format!("landed {} on {target}", self.branch));
+            if self.fast_forward(target, branch).await? {
+                return Ok(format!("landed {branch} on {target}"));
             }
         }
         Err(ToolError(format!(
@@ -188,11 +194,12 @@ impl Tool for Land {
         if !self.has_commits(&target).await? {
             return Ok(format!("nothing to land: {target} has everything"));
         }
-        let request = format!("land {} onto {target}", self.branch);
+        let branch = self.branch().await?;
+        let request = format!("land {branch} onto {target}");
         if !self.approver.approve(&request, None).await {
             return Err(ToolError("the user denied this landing".to_owned()));
         }
-        self.land_on(&target).await
+        self.land_on(&target, &branch).await
     }
 }
 
@@ -220,7 +227,6 @@ mod tests {
         let land = Land {
             worktree: Arc::new(Project::new(&worktree).unwrap()),
             main: dir.path().to_owned(),
-            branch: worktree::branch("1"),
             approver,
             secret_env: vec![],
         };

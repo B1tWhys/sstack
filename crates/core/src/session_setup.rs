@@ -227,8 +227,13 @@ pub fn prepare(
         .skills(&installed)
         .listing(&listing)
         .call()?;
-    let naming = wants_name(&session)
-        .then(|| Naming::new(configured.namer, name_model, session.path.clone()));
+    let naming = wants_name(&session).then(|| {
+        let naming = Naming::new(configured.namer, name_model, session.path.clone());
+        match place.worktree {
+            Some(_) => naming.with_branch(main.clone()),
+            None => naming,
+        }
+    });
     Ok(Run {
         agent: Agent::new(configured.agent, session.log, session.entries)?,
         session: session.path,
@@ -385,7 +390,6 @@ fn agent_config(
         let land = Land {
             worktree: project,
             main: backend.main.to_owned(),
-            branch: worktree::branch(id),
             approver,
             secret_env,
         };

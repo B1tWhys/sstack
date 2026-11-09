@@ -30,10 +30,54 @@ pub fn path(main: &Path, id: &str) -> PathBuf {
     main.join(DATA_DIR).join("worktrees").join(id)
 }
 
-/// Returns the name of the branch a worktree Session works on.
-#[must_use]
-pub fn branch(id: &str) -> String {
-    format!("session/{id}")
+/// The start of the name of every Session's branch.
+const BRANCH_PREFIX: &str = "session/";
+/// How many numbered names to try for a renamed branch before giving up, when others already
+/// have them.
+const MAX_BRANCH_NUMBER: usize = 100;
+
+/// Returns the name a worktree Session's branch starts with, before it is renamed after its
+/// Session Name.
+fn first_branch(id: &str) -> String {
+    format!("{BRANCH_PREFIX}{id}")
+}
+
+/// Returns the name of the branch the Session with id `id` works on, which its Session Name may
+/// have changed since the worktree was made.
+///
+/// # Errors
+/// Returns an error if the Session has no worktree, or git cannot tell.
+pub fn branch(main: &Path, id: &str) -> Result<String, GitError> {
+    let current = git(&path(main, id), &["branch", "--show-current"])?;
+    Ok(current.trim().to_owned())
+}
+
+/// Renames the branch of the Session with id `id` after `name`, its Session Name, returning the
+/// new branch. A number is added when another branch has the name already. Its worktree stays
+/// where it is, so a Turn running in it carries on.
+///
+/// # Errors
+/// Returns an error if `name` has nothing a branch name can use, every numbered name is taken,
+/// or git refuses.
+pub fn rename_branch(main: &Path, id: &str, name: &str) -> Result<String, GitError> {
+    let slug = slug::slugify(name);
+    if slug.is_empty() {
+        return Err(GitError(format!(
+            "no branch name can be made from {name:?}"
+        )));
+    }
+    let free = |branch: &String| {
+        let reference = format!("refs/heads/{branch}");
+        git(main, &["rev-parse", "--verify", "--quiet", &reference]).is_err()
+    };
+    let candidates = (1..=MAX_BRANCH_NUMBER).map(|number| match number {
+        1 => format!("{BRANCH_PREFIX}{slug}"),
+        _ => format!("{BRANCH_PREFIX}{slug}-{number}"),
+    });
+    let renamed = (candidates.into_iter().find(free))
+        .ok_or_else(|| GitError(format!("every branch named after {slug} is taken")))?;
+    git(&path(main, id), &["branch", "-m", &renamed])?;
+    Ok(renamed)
 }
 
 /// Returns the file that remembers which commands the person always allows in `main`.
@@ -54,7 +98,15 @@ pub fn create(main: &Path, id: &str) -> Result<PathBuf, GitError> {
     let target = path.to_string_lossy();
     git(
         main,
-        &["worktree", "add", "-q", "-b", &branch(id), &target, "HEAD"],
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            &first_branch(id),
+            &target,
+            "HEAD",
+        ],
     )?;
     Ok(path)
 }
@@ -97,7 +149,7 @@ pub fn unfinished_work(main: &Path, id: &str) -> Result<Option<String>, GitError
     {
         return Ok(Some("it has uncommitted changes".to_owned()));
     }
-    let range = format!("HEAD..{}", branch(id));
+    let range = format!("HEAD..{}", branch(main, id)?);
     let unlanded = git(main, &["rev-list", "--count", &range])?;
     Ok((unlanded.trim() != "0").then(|| format!("it has {} unlanded commits", unlanded.trim())))
 }
@@ -112,9 +164,10 @@ pub fn remove(main: &Path, id: &str) -> Result<(), GitError> {
     if !worktree.exists() {
         return Ok(());
     }
+    let branch = branch(main, id)?;
     let target = worktree.to_string_lossy();
     git(main, &["worktree", "remove", "--force", &target])?;
-    git(main, &["branch", "-q", "-D", &branch(id)])?;
+    git(main, &["branch", "-q", "-D", &branch])?;
     Ok(())
 }
 
@@ -169,6 +222,26 @@ mod tests {
         let current = git(&worktree, &["branch", "--show-current"]).unwrap();
         assert_eq!(current.trim(), "session/7");
         assert_eq!(git(dir.path(), &["status", "--porcelain"]).unwrap(), "");
+    }
+
+    #[test]
+    fn a_renamed_branch_is_named_after_the_session_and_numbered_if_taken() {
+        let dir = tempfile::tempdir().unwrap();
+        repository(dir.path());
+        let worktree = create(dir.path(), "1").unwrap();
+        create(dir.path(), "2").unwrap();
+
+        let first = rename_branch(dir.path(), "1", "Add Session names!").unwrap();
+        let second = rename_branch(dir.path(), "2", "Add Session names").unwrap();
+
+        assert_eq!(first, "session/add-session-names");
+        assert_eq!(second, "session/add-session-names-2");
+        assert_eq!(branch(dir.path(), "1").unwrap(), first);
+        assert!(worktree.exists());
+        assert!(rename_branch(dir.path(), "1", "!!").is_err());
+        remove(dir.path(), "2").unwrap();
+        let gone = ["rev-parse", "--verify", "session/add-session-names-2"];
+        assert!(git(dir.path(), &gone).is_err());
     }
 
     #[test]

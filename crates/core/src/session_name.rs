@@ -7,7 +7,7 @@ use std::sync::Arc;
 use crate::provider::{ModelRequest, Provider};
 use crate::session::Entry;
 use crate::session_report::{ReportSender, SessionReport};
-use crate::workspace;
+use crate::{workspace, worktree};
 
 /// What a Session is called before anything names it, and while its Session Name is being made.
 pub const UNTITLED: &str = "new session";
@@ -32,6 +32,9 @@ pub struct Naming {
     model: String,
     /// Where the Session is stored, which the name is kept beside.
     log: PathBuf,
+    /// The main checkout of a Session with its own worktree, whose branch is renamed after the
+    /// name. Missing for a Session in the main checkout, which has no branch of its own.
+    main: Option<PathBuf>,
 }
 
 impl Naming {
@@ -42,21 +45,43 @@ impl Naming {
             provider,
             model,
             log,
+            main: None,
         }
     }
 
+    /// Also renames the branch of the Session's worktree, made from the project whose main
+    /// checkout is `main`, after the name once it is made.
+    #[must_use]
+    pub fn with_branch(mut self, main: PathBuf) -> Self {
+        self.main = Some(main);
+        self
+    }
+
     /// Names the Session after `typed`, the line the person typed to start its first Turn,
-    /// returning the name. Returns nothing, and leaves the Session as it was, if the model gave no
-    /// usable name or the Session was named meanwhile.
+    /// returning the name, and renames its branch to match if it has one. Returns nothing, and
+    /// leaves the Session as it was, if the model gave no usable name or the Session was named
+    /// meanwhile. A branch that cannot be renamed keeps its name.
     pub async fn name(self, typed: &str) -> Option<String> {
         let name = self.summarize(typed).await?;
         match workspace::name_unnamed_session(&self.log, &name) {
-            Ok(true) => Some(name),
+            Ok(true) => {
+                self.rename_branch(&name);
+                Some(name)
+            }
             Ok(false) => None,
             Err(_) => {
                 // TODO: log that the Session Name could not be stored.
                 None
             }
+        }
+    }
+
+    /// Renames the Session's branch after `name`, if it has a branch.
+    fn rename_branch(&self, name: &str) {
+        let Some(main) = &self.main else { return };
+        let id = workspace::session_id(&self.log);
+        if worktree::rename_branch(main, &id, name).is_err() {
+            // TODO: log that the Session's branch could not be renamed.
         }
     }
 
@@ -217,6 +242,19 @@ mod tests {
 
         let again = naming(&dir, vec![Ok(reply("Other"))]).name("typed").await;
         assert_eq!(again, None);
+    }
+
+    #[tokio::test]
+    async fn a_session_with_a_worktree_has_its_branch_renamed_too() {
+        let dir = tempfile::tempdir().unwrap();
+        worktree::test_support::repository(dir.path());
+        worktree::create(dir.path(), "1").unwrap();
+        let naming = naming(&dir, vec![Ok(reply("Add names"))]).with_branch(dir.path().into());
+
+        naming.name("typed").await.unwrap();
+
+        let branch = worktree::branch(dir.path(), "1").unwrap();
+        assert_eq!(branch, "session/add-names");
     }
 
     #[tokio::test]
