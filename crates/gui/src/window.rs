@@ -10,7 +10,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime};
 
 use anyhow::Result;
-use iced::futures::future::BoxFuture;
+use iced::futures::future::{self, BoxFuture, FutureExt};
 use iced::widget::scrollable::Viewport;
 use iced::widget::text_editor::{Binding, KeyPress};
 use iced::widget::{
@@ -22,6 +22,7 @@ use iced::{
 use input::Input;
 use session::SessionView;
 use sstack::human_command::Command;
+use sstack::rebuild::Checkout;
 use sstack::running_harness::{
     Exit, InSession, Outcome, Phase, Refusal, RunningHarness, SessionState,
 };
@@ -60,11 +61,12 @@ const PILL_RADIUS: f32 = 999.0;
 /// How often the sidebar redraws how long each Session has waited.
 const TICK: Duration = Duration::from_secs(1);
 
-/// Builds the Harness Source for a Rebuild, ending in the new binary or in why the build failed.
+/// Builds the checkout of the Harness Source in the given directory for a Rebuild, ending in the
+/// new binary or in why the build failed.
 ///
 /// The window starts one when a Rebuild asks for it, and drops it to stop the build. Tests give
 /// the window one that never runs cargo.
-pub type Build = fn() -> BoxFuture<'static, Result<PathBuf, String>>;
+pub type Build = fn(PathBuf) -> BoxFuture<'static, Result<PathBuf, String>>;
 
 /// A Session readied for the window, with the reports it will send the window.
 pub struct Opened {
@@ -103,6 +105,14 @@ pub trait Sessions {
     /// # Errors
     /// Fails if the name could not be stored.
     fn rename(&mut self, id: &str, name: Option<&str>) -> Result<()>;
+
+    /// Returns the directory that a Rebuild of `checkout`, asked for from the Session with id
+    /// `id`, builds.
+    ///
+    /// # Errors
+    /// Fails, saying why for the person to read, if there is no such checkout to build, such as
+    /// the worktree of a Session that works in the main checkout.
+    fn harness_source(&self, checkout: Checkout, id: &str) -> Result<PathBuf, String>;
 }
 
 /// What the process does once the window has closed for a Rebuild.
@@ -496,7 +506,7 @@ impl Window {
             }
             Some(Outcome::Refused(refusal)) => self.notice(refusal_text(&refusal)),
             Some(Outcome::Command(command)) => self.human_command(&command),
-            Some(Outcome::StartBuild) => self.start_build(),
+            Some(Outcome::StartBuild(checkout)) => self.start_build(checkout, index),
             Some(Outcome::CancelBuild) => {
                 self.cancel_build();
                 Task::none()
@@ -696,10 +706,18 @@ impl Window {
         iced::exit()
     }
 
-    /// Starts building `sstack-gui` for a Rebuild, returning the task that runs the build and
-    /// reports its end as [`Message::Built`].
-    fn start_build(&mut self) -> Task<Message> {
-        let (build, handle) = Task::future((self.build)()).map(Message::Built).abortable();
+    /// Starts building `sstack-gui` from `checkout` for a Rebuild asked for in the Session at
+    /// position `index`, returning the task that runs the build and reports its end as
+    /// [`Message::Built`]. A checkout that cannot be built ends that way too, at once.
+    fn start_build(&mut self, checkout: Checkout, index: usize) -> Task<Message> {
+        let building = match self
+            .sessions
+            .harness_source(checkout, self.views[index].id())
+        {
+            Ok(source) => (self.build)(source),
+            Err(failure) => future::ready(Err(failure)).boxed(),
+        };
+        let (build, handle) = Task::future(building).map(Message::Built).abortable();
         self.building = Some(handle.abort_on_drop());
         build
     }

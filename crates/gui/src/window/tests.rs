@@ -15,7 +15,7 @@ use sstack::session_name::Naming;
 use tempfile::TempDir;
 
 use super::*;
-use crate::test_support::{bash_call, readied, reply, typed};
+use crate::test_support::{bash_call, readied, reply, typed, worktree_of};
 use crate::transcript::{Approval, Block, Decision};
 
 /// Opens a window on a new Session whose model gives the `script`ed responses in order.
@@ -122,8 +122,15 @@ const NEW_BINARY: &str = "/new/sstack-gui";
 
 /// A build that works at once without running cargo, for tests that need a Rebuild's build to
 /// finish by itself.
-fn built_at_once() -> BoxFuture<'static, Result<PathBuf, String>> {
+fn built_at_once(_source: PathBuf) -> BoxFuture<'static, Result<PathBuf, String>> {
     future::ready(Ok(PathBuf::from(NEW_BINARY))).boxed()
+}
+
+/// A build that works at once without running cargo, leaving the new binary in the checkout it
+/// was given, for tests that check which checkout a Rebuild builds.
+fn built_in_source(mut source: PathBuf) -> BoxFuture<'static, Result<PathBuf, String>> {
+    source.push("sstack-gui");
+    future::ready(Ok(source)).boxed()
 }
 
 /// Opens a window like [`window`], whose Rebuilds build with `build`.
@@ -161,6 +168,36 @@ async fn a_rebuild_builds_the_gui_and_ends_the_window_once_built() {
     assert_eq!(binary, Path::new(NEW_BINARY));
     assert_eq!(window.update(Message::Built(Ok(binary.clone()))).units(), 1);
     assert_eq!(relaunched(&window), Some(binary));
+}
+
+#[tokio::test]
+async fn a_rebuild_of_the_worktree_builds_and_relaunches_into_the_sessions_worktree() {
+    let (dir, mut window) = building_with(built_in_source, vec![]);
+    let worktree = worktree_of(dir.path(), "1");
+    std::fs::create_dir_all(&worktree).unwrap();
+
+    let built = produced(send(&mut window, "/rebuild --worktree")).await;
+
+    let [Message::Built(Ok(binary))] = built.as_slice() else {
+        panic!("the build should finish: {built:?}");
+    };
+    assert_eq!(binary, &worktree.join("sstack-gui"));
+    let _ = window.update(Message::Built(Ok(binary.clone())));
+    assert_eq!(relaunched(&window), Some(binary));
+}
+
+#[tokio::test]
+async fn a_rebuild_of_a_worktree_the_session_lacks_says_why_and_work_carries_on() {
+    let (_dir, mut window) = building_with(built_in_source, vec![]);
+
+    let built = produced(send(&mut window, "/rebuild --worktree")).await;
+    for message in built {
+        let _ = window.update(message);
+    }
+
+    assert!(!window.harness.phase().is_draining());
+    let failure = notice("the Session works in the main checkout");
+    assert_eq!(blocks(&window), [failure]);
 }
 
 #[tokio::test]

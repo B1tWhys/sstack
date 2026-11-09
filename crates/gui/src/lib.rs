@@ -21,7 +21,7 @@ use clap::Parser;
 use iced::futures::future::{BoxFuture, FutureExt};
 use iced::{Application, Program, Task};
 use reports::Reports;
-use sstack::rebuild::{self, Binary};
+use sstack::rebuild::{self, Binary, Checkout};
 use sstack::sandbox::Containers;
 use sstack::session_report::ReportingApprover;
 use sstack::session_setup::{
@@ -188,12 +188,16 @@ impl Sessions for LiveSessions {
     fn rename(&mut self, id: &str, name: Option<&str>) -> Result<()> {
         Ok(workspace::name_session(&self.directory, id, name)?)
     }
+
+    fn harness_source(&self, checkout: Checkout, id: &str) -> Result<PathBuf, String> {
+        rebuild::source(checkout, &worktree::path(&self.main, id))
+    }
 }
 
-/// Builds `sstack-gui` from the Harness Source for a Rebuild, ending in where the new binary is
-/// or in why the build failed.
-fn build_harness() -> BoxFuture<'static, Result<PathBuf, String>> {
-    rebuild::build(HARNESS).boxed()
+/// Builds `sstack-gui` from the checkout of the Harness Source at `source` for a Rebuild, ending
+/// in where the new binary is or in why the build failed.
+fn build_harness(source: PathBuf) -> BoxFuture<'static, Result<PathBuf, String>> {
+    rebuild::build(HARNESS, source).boxed()
 }
 
 /// Opens the window on the readied Sessions, which iced asks for once as it starts, along with

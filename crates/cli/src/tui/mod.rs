@@ -36,7 +36,7 @@ use crossterm::execute;
 use crossterm::style::Print;
 use event::{Event, EventReceiver, EventSender, SessionSender};
 use pane::Opened;
-use sstack::rebuild;
+use sstack::rebuild::{self, Checkout};
 use sstack::running_harness::Exit;
 use sstack::sandbox::Containers;
 use sstack::session_report::{ReportingApprover, SessionReport};
@@ -168,12 +168,15 @@ impl Sessions for LiveSessions<'_> {
         Ok(workspace::name_session(&self.directory, id, name)?)
     }
 
-    fn start_build(&mut self) {
+    fn start_build(&mut self, checkout: Checkout, id: &str) {
         let events = self.events.clone();
+        let source = rebuild::source(checkout, &worktree::path(&self.main, id));
         self.build = Some(tokio::spawn(async move {
-            let _ = events.send(Event::Report(SessionReport::BuildFinished(
-                rebuild::build(HARNESS).await,
-            )));
+            let built = match source {
+                Ok(source) => rebuild::build(HARNESS, source).await,
+                Err(failure) => Err(failure),
+            };
+            let _ = events.send(Event::Report(SessionReport::BuildFinished(built)));
         }));
     }
 

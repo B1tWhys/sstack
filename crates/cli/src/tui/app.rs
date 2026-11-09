@@ -15,6 +15,7 @@ use ratatui::backend::Backend;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::{Frame, Terminal};
 use sstack::human_command::Command;
+use sstack::rebuild::Checkout;
 use sstack::running_harness::{
     Exit, InSession, Outcome, Phase, Refusal, RunningHarness, SessionState,
 };
@@ -79,9 +80,10 @@ pub trait Sessions {
     /// Returns an error if the name could not be stored.
     fn rename(&mut self, id: &str, name: Option<&str>) -> Result<()>;
 
-    /// Starts building the Harness Source in the background, which ends in an
-    /// [`SessionReport::BuildFinished`].
-    fn start_build(&mut self);
+    /// Starts building `checkout` of the Harness Source in the background, which ends in an
+    /// [`SessionReport::BuildFinished`]. A [`Checkout::Worktree`] means the worktree of the
+    /// Session with id `id`.
+    fn start_build(&mut self, checkout: Checkout, id: &str);
 
     /// Stops the build, if one is running.
     fn cancel_build(&mut self);
@@ -260,7 +262,10 @@ impl App<'_> {
             Outcome::TurnStarted(text) => self.panes[index].turn_started(&text),
             Outcome::Refused(refusal) => self.notice(refusal_text(&refusal)),
             Outcome::Command(command) => self.command(&command),
-            Outcome::StartBuild => self.sessions.start_build(),
+            Outcome::StartBuild(checkout) => {
+                let id = self.panes[index].id().to_owned();
+                self.sessions.start_build(checkout, &id);
+            }
             Outcome::CancelBuild => self.sessions.cancel_build(),
             Outcome::Exit(exit) => return Some(exit),
         }
@@ -679,7 +684,7 @@ mod tests {
         /// The ids of the Sessions archived so far.
         archived: Rc<RefCell<Vec<String>>>,
         /// What has happened to builds so far.
-        builds: Rc<RefCell<Vec<&'static str>>>,
+        builds: Rc<RefCell<Vec<String>>>,
     }
 
     /// Returns where the Session with id `id` is stored in `dir`.
@@ -702,7 +707,7 @@ mod tests {
         /// The ids of the Sessions archived so far.
         archived: Rc<RefCell<Vec<String>>>,
         /// What has happened to builds so far.
-        builds: Rc<RefCell<Vec<&'static str>>>,
+        builds: Rc<RefCell<Vec<String>>>,
         /// Why opening fails, if it does.
         open_failure: Option<&'static str>,
         /// Why archiving is refused, if it is.
@@ -749,12 +754,16 @@ mod tests {
             Ok(workspace::name_session(&self.root, id, name)?)
         }
 
-        fn start_build(&mut self) {
-            self.builds.borrow_mut().push("started");
+        fn start_build(&mut self, checkout: Checkout, id: &str) {
+            let started = match checkout {
+                Checkout::Main => "started".to_owned(),
+                Checkout::Worktree => format!("started the worktree of {id}"),
+            };
+            self.builds.borrow_mut().push(started);
         }
 
         fn cancel_build(&mut self) {
-            self.builds.borrow_mut().push("cancelled");
+            self.builds.borrow_mut().push("cancelled".to_owned());
         }
     }
 
@@ -1715,6 +1724,14 @@ mod tests {
         let mut h = scripted(vec![]);
         assert_eq!(h.enter("/rebuild"), None);
         assert_eq!(*h.builds.borrow(), ["started"]);
+        assert_eq!(h.app.handle(built()), Some(Exit::Rebuild(binary())));
+    }
+
+    #[tokio::test]
+    async fn a_rebuild_of_the_worktree_builds_the_worktree_of_the_session_on_screen() {
+        let mut h = scripted(vec![]);
+        assert_eq!(h.enter("/rebuild --worktree"), None);
+        assert_eq!(*h.builds.borrow(), ["started the worktree of first"]);
         assert_eq!(h.app.handle(built()), Some(Exit::Rebuild(binary())));
     }
 

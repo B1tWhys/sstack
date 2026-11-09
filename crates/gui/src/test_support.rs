@@ -11,6 +11,7 @@ use iced::futures::future::{self, BoxFuture, FutureExt};
 use iced::widget::text_editor::{Action, Edit};
 use sstack::agent::{Agent, AgentConfig};
 use sstack::provider::scripted::{Scripted, ScriptedProvider};
+use sstack::rebuild::Checkout;
 use sstack::sandbox::Sandbox;
 use sstack::session::{AssistantEntry, Entry, SessionLog, StopReason, ToolCall, Usage};
 use sstack::session_report::ReportingApprover;
@@ -181,11 +182,28 @@ impl Sessions for TestSessions {
         }
         Ok(())
     }
+
+    /// Builds the test's directory as the main checkout, and the Session's worktree only if a
+    /// test made one with [`worktree_of`].
+    fn harness_source(&self, checkout: Checkout, id: &str) -> Result<PathBuf, String> {
+        let worktree = worktree_of(&self.dir, id);
+        match checkout {
+            Checkout::Main => Ok(self.dir.clone()),
+            Checkout::Worktree if worktree.is_dir() => Ok(worktree),
+            Checkout::Worktree => Err("the Session works in the main checkout".to_owned()),
+        }
+    }
+}
+
+/// Returns where a test keeps the worktree of the Session with id `id` stored in `dir`, which it
+/// has only once the test creates the directory.
+pub fn worktree_of(dir: &Path, id: &str) -> PathBuf {
+    dir.join("worktrees").join(id)
 }
 
 /// A build that never ends and never runs cargo, so that a test decides how a Rebuild's build
 /// ends by sending [`Message::Built`] itself.
-fn never_built() -> BoxFuture<'static, Result<PathBuf, String>> {
+fn never_built(_source: PathBuf) -> BoxFuture<'static, Result<PathBuf, String>> {
     future::pending().boxed()
 }
 

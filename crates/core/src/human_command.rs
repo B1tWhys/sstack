@@ -1,12 +1,15 @@
 //! Human Commands, told apart from input meant for the model.
 
+use crate::rebuild::Checkout;
+
 /// What a line entered by the person asks for.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Command<'a> {
     /// Text to send to the model.
     Prompt(&'a str),
-    /// The `/rebuild` Human Command.
-    Rebuild,
+    /// The `/rebuild` Human Command, which builds the main checkout, or with `--worktree` the
+    /// Session's own worktree.
+    Rebuild(Checkout),
     /// The `/new` Human Command, also spelled `/n`, which starts a Session in its own worktree.
     New,
     /// The `/new-main` Human Command, which starts a Session in the main checkout.
@@ -37,7 +40,7 @@ impl Command<'_> {
     pub fn changes_work(&self) -> bool {
         matches!(
             self,
-            Self::Prompt(_) | Self::Rebuild | Self::New | Self::NewMain | Self::Archive { .. }
+            Self::Prompt(_) | Self::Rebuild(_) | Self::New | Self::NewMain | Self::Archive { .. }
         )
     }
 }
@@ -49,7 +52,8 @@ impl Command<'_> {
 pub fn parse_command(line: &str) -> Command<'_> {
     match line.trim() {
         "" => Command::Empty,
-        "/rebuild" => Command::Rebuild,
+        "/rebuild" => Command::Rebuild(Checkout::Main),
+        "/rebuild --worktree" => Command::Rebuild(Checkout::Worktree),
         "/new" | "/n" => Command::New,
         "/new-main" => Command::NewMain,
         "/archive" => Command::Archive { force: false },
@@ -78,7 +82,11 @@ mod tests {
     #[test]
     fn lines_parse_into_commands() {
         assert_eq!(parse_command(" hello "), Command::Prompt("hello"));
-        assert_eq!(parse_command("/rebuild"), Command::Rebuild);
+        assert_eq!(parse_command("/rebuild"), Command::Rebuild(Checkout::Main));
+        assert_eq!(
+            parse_command("/rebuild --worktree"),
+            Command::Rebuild(Checkout::Worktree)
+        );
         assert_eq!(parse_command("/new"), Command::New);
         assert_eq!(parse_command("/n"), Command::New);
         assert_eq!(parse_command("/new-main"), Command::NewMain);
@@ -112,7 +120,7 @@ mod tests {
         assert!(Command::Prompt("hi").changes_work());
         assert!(Command::New.changes_work());
         assert!(Command::Archive { force: true }.changes_work());
-        assert!(Command::Rebuild.changes_work());
+        assert!(Command::Rebuild(Checkout::Worktree).changes_work());
         assert!(!Command::Quit.changes_work());
     }
 }

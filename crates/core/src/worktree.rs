@@ -11,6 +11,8 @@ use std::process::Command;
 
 /// The directory under the main checkout where sstack keeps its files.
 pub(crate) const DATA_DIR: &str = ".sstack";
+/// The directory under `DATA_DIR` that holds every Session's worktree.
+const WORKTREES_DIR: &str = "worktrees";
 /// The line that keeps `DATA_DIR` out of git, wherever a project's ignore rules live.
 const EXCLUDE_LINE: &str = ".sstack/";
 
@@ -27,7 +29,20 @@ pub struct GitError(pub String);
 /// Returns where the Session with id `id` has its worktree, which need not exist.
 #[must_use]
 pub fn path(main: &Path, id: &str) -> PathBuf {
-    main.join(DATA_DIR).join("worktrees").join(id)
+    main.join(DATA_DIR).join(WORKTREES_DIR).join(id)
+}
+
+/// Returns the main checkout that the worktree at `worktree` was made from, or nothing if
+/// `worktree` is not where a Session's worktree goes. It reads only the path, so it still answers
+/// once the worktree has been deleted.
+#[must_use]
+pub fn main_of(worktree: &Path) -> Option<&Path> {
+    let worktrees = worktree.parent()?;
+    let data = worktrees.parent()?;
+    let named = |dir: &Path, name: &str| dir.file_name().is_some_and(|found| found == name);
+    (named(worktrees, WORKTREES_DIR) && named(data, DATA_DIR))
+        .then(|| data.parent())
+        .flatten()
 }
 
 /// The start of the name of every Session's branch.
@@ -242,6 +257,15 @@ mod tests {
         remove(dir.path(), "2").unwrap();
         let gone = ["rev-parse", "--verify", "session/add-session-names-2"];
         assert!(git(dir.path(), &gone).is_err());
+    }
+
+    #[test]
+    fn a_worktree_path_leads_back_to_its_main_checkout() {
+        let main = Path::new("/projects/app");
+        assert_eq!(main_of(&path(main, "7")), Some(main));
+        assert_eq!(main_of(main), None);
+        assert_eq!(main_of(Path::new("/projects/worktrees/7")), None);
+        assert_eq!(main_of(Path::new("/7")), None);
     }
 
     #[test]

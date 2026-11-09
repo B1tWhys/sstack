@@ -107,5 +107,5 @@ Where a Skill was found: the project, a directory nested inside it, or the perso
 _Avoid_: Source, level, workspace
 
 **Rebuild**:
-The Human Command that builds the Harness Source and, only if that succeeds, relaunches into the same Session.
+The Human Command that builds the Harness Source, from the main checkout or from the Session's worktree, and only if that succeeds relaunches into the same Session.
 _Avoid_: Restart, reload

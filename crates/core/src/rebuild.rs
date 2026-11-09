@@ -5,6 +5,8 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use crate::worktree;
+
 /// How many lines of a failed build to show the person.
 const MAX_ERROR_LINES: usize = 20;
 
@@ -19,9 +21,64 @@ pub struct Binary {
     pub name: &'static str,
 }
 
-/// Returns the Harness Source this code was built from, which every binary in it shares.
+/// Which checkout of the Harness Source a Rebuild builds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Checkout {
+    /// The main checkout, which has the work landed so far. A Running Harness built from a
+    /// Session's worktree comes back to it, even once that worktree is gone.
+    Main,
+    /// The worktree of the Session the person asked from, so that they can try its work before
+    /// landing it.
+    Worktree,
+}
+
+/// Returns the checkout of the Harness Source this code was built from, which every binary in it
+/// shares. It may be a Session's worktree.
 fn source_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+    let core = Path::new(env!("CARGO_MANIFEST_DIR"));
+    core.ancestors().nth(2).unwrap_or(core).to_owned()
+}
+
+/// Returns the directory to build for a Rebuild of `checkout`, asked for from a Session whose
+/// worktree belongs at `worktree`, as [`worktree::path`] gives, whether or not it has one.
+///
+/// # Errors
+/// Fails for [`Checkout::Worktree`] if the Session's project is not the Harness Source this code
+/// was built from, or if the Session has no worktree.
+pub fn source(checkout: Checkout, worktree: &Path) -> Result<PathBuf, String> {
+    source_from(&source_dir(), checkout, worktree)
+}
+
+/// Returns what [`source`] does, for code built from the checkout `built_from`.
+fn source_from(built_from: &Path, checkout: Checkout, worktree: &Path) -> Result<PathBuf, String> {
+    let home = worktree::main_of(built_from).unwrap_or(built_from);
+    match checkout {
+        Checkout::Main => Ok(home.to_owned()),
+        Checkout::Worktree => worktree_source(home, worktree),
+    }
+}
+
+/// Returns `worktree`, a Session's worktree, if it is one of the Harness Source whose main
+/// checkout is `home`.
+fn worktree_source(home: &Path, worktree: &Path) -> Result<PathBuf, String> {
+    let main = worktree::main_of(worktree);
+    if !main.is_some_and(|main| same_directory(home, main)) {
+        return Err(format!(
+            "cannot build this Session's worktree: this project is not the Harness Source at {}",
+            home.display()
+        ));
+    }
+    if !worktree.is_dir() {
+        return Err(
+            "cannot build this Session's worktree: it works in the main checkout".to_owned(),
+        );
+    }
+    Ok(worktree.to_owned())
+}
+
+/// Returns whether `a` and `b` name the same existing directory, however each is spelled.
+fn same_directory(a: &Path, b: &Path) -> bool {
+    matches!((a.canonicalize(), b.canonicalize()), (Ok(a), Ok(b)) if a == b)
 }
 
 /// Builds the command that compiles `package` from `source`.
@@ -70,14 +127,14 @@ fn profile() -> (&'static str, &'static str) {
     }
 }
 
-/// Builds `binary` from the Harness Source with the profile the running code was built with,
-/// returning where the new binary is, or what went wrong.
+/// Builds `binary` from the checkout of the Harness Source at `source`, which [`source`] gives,
+/// with the profile the running code was built with. Returns where the new binary is, or what
+/// went wrong. Each checkout builds into its own `target` directory.
 ///
 /// # Errors
 /// Returns the end of cargo's output if the build fails, or why cargo could not start.
-pub async fn build(binary: Binary) -> Result<PathBuf, String> {
+pub async fn build(binary: Binary, source: PathBuf) -> Result<PathBuf, String> {
     let (profile, directory) = profile();
-    let source = source_dir();
     run_build(build_command(&source, binary.package, profile)).await?;
     Ok(binary_path(&source, directory, binary.name))
 }
@@ -134,6 +191,40 @@ mod tests {
     fn this_test_binary_uses_the_dev_profile() {
         assert_eq!(profile(), ("dev", "debug"));
         assert!(source_dir().join("Cargo.toml").exists());
+        assert!(source_dir().join("crates/core").is_dir());
+    }
+
+    #[test]
+    fn the_main_checkout_is_built_even_by_code_built_in_a_worktree() {
+        let home = tempfile::tempdir().unwrap();
+        let built_in_worktree = worktree::path(home.path(), "7");
+        let elsewhere = Path::new("/other");
+        for built_from in [home.path(), &built_in_worktree] {
+            let built = source_from(built_from, Checkout::Main, elsewhere);
+            assert_eq!(built.as_deref(), Ok(home.path()));
+        }
+    }
+
+    #[test]
+    fn a_sessions_worktree_is_built_only_if_it_is_one_of_the_harness_source() {
+        let home = tempfile::tempdir().unwrap();
+        let worktree = worktree::path(home.path(), "7");
+        std::fs::create_dir_all(&worktree).unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        let build =
+            |built_from: &Path, asking: &Path| source_from(built_from, Checkout::Worktree, asking);
+
+        assert_eq!(build(home.path(), &worktree), Ok(worktree.clone()));
+        assert_eq!(build(&worktree, &worktree), Ok(worktree.clone()));
+        let none = build(home.path(), &worktree::path(home.path(), "8")).unwrap_err();
+        assert!(none.contains("main checkout"), "{none}");
+        let other = worktree::path(elsewhere.path(), "7");
+        std::fs::create_dir_all(&other).unwrap();
+        let other_project = build(home.path(), &other).unwrap_err();
+        assert!(
+            other_project.contains("not the Harness Source"),
+            "{other_project}"
+        );
     }
 
     #[test]

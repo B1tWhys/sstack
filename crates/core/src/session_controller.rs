@@ -217,6 +217,7 @@ mod tests {
     use crate::agent::{Agent, AgentConfig};
     use crate::human_command::Command;
     use crate::provider::scripted::ScriptedProvider;
+    use crate::rebuild::Checkout;
     use crate::running_harness::{Exit, RunningHarness};
     use crate::session::{AssistantEntry, Entry, SessionLog, StopReason, Usage};
     use crate::tools::project::Project;
@@ -361,11 +362,25 @@ mod tests {
         let asked = harness
             .in_session(&mut session, &mut NoOtherSessions)
             .submit("/rebuild");
-        assert_eq!(asked, Some(Outcome::StartBuild));
+        assert_eq!(asked, Some(Outcome::StartBuild(Checkout::Main)));
 
         let binary = PathBuf::from("/bin/sstack");
         let built = harness.build_finished(Some(binary.clone()), &mut session);
         assert_eq!(built, Some(Outcome::Exit(Exit::Rebuild(binary))));
+    }
+
+    #[tokio::test]
+    async fn a_rebuild_of_the_worktree_asks_for_that_checkout_to_be_built() {
+        let (dir, _) = git_project();
+        let mut session = controller(&dir, "a");
+        let mut harness = RunningHarness::default();
+
+        let asked = harness
+            .in_session(&mut session, &mut NoOtherSessions)
+            .submit("/rebuild --worktree");
+
+        assert_eq!(asked, Some(Outcome::StartBuild(Checkout::Worktree)));
+        assert!(harness.phase().is_rebuilding());
     }
 
     #[tokio::test]

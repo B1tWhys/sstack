@@ -9,6 +9,7 @@ use std::mem;
 use std::path::PathBuf;
 
 use crate::human_command::{Command, parse_command};
+use crate::rebuild::Checkout;
 use crate::session_controller::{OpenSessions, SessionController};
 use crate::session_report::SessionReport;
 
@@ -156,8 +157,8 @@ pub enum Phase {
 /// Something that moves the Running Harness between [`Phase`]s.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Trigger {
-    /// The person asked for a Rebuild.
-    RebuildAsked,
+    /// The person asked for a Rebuild of this checkout.
+    RebuildAsked(Checkout),
     /// The person asked to quit.
     QuitAsked,
     /// No Session has a Turn running.
@@ -175,8 +176,9 @@ pub enum Effect {
     None,
     /// A request for Turns to stop at the end of their Step.
     Drain,
-    /// A request for Turns to stop at the end of their Step, and the start of a build.
-    DrainAndBuild,
+    /// A request for Turns to stop at the end of their Step, and the start of a build of this
+    /// checkout.
+    DrainAndBuild(Checkout),
     /// A return to normal work, in which Turns carry on and any build stops.
     Abandon,
     /// The end of the Running Harness.
@@ -208,9 +210,9 @@ impl Phase {
     /// Returns what a Running Harness working as normal does on `trigger`.
     fn after_running(trigger: &Trigger) -> (Self, Effect) {
         match trigger {
-            Trigger::RebuildAsked => (
+            Trigger::RebuildAsked(checkout) => (
                 Self::DrainingToRebuild { binary: None },
-                Effect::DrainAndBuild,
+                Effect::DrainAndBuild(*checkout),
             ),
             Trigger::QuitAsked => (Self::DrainingToQuit, Effect::Drain),
             _ => (Self::Running, Effect::None),
@@ -306,9 +308,10 @@ pub enum Outcome<'a> {
     /// interface keeps its Sessions: [`Command::New`], [`Command::NewMain`],
     /// [`Command::Archive`], [`Command::Vim`] or [`Command::Rename`]. No other comes back.
     Command(Command<'a>),
-    /// A request to start building the Harness Source for a Rebuild, whose result the interface
-    /// passes to [`RunningHarness::build_finished`].
-    StartBuild,
+    /// A request to start building this checkout of the Harness Source for a Rebuild, whose
+    /// result the interface passes to [`RunningHarness::build_finished`]. A
+    /// [`Checkout::Worktree`] means the worktree of the Session the person asked from.
+    StartBuild(Checkout),
     /// A request to stop the build, if one is running.
     CancelBuild,
     /// The end of the Running Harness.
@@ -405,9 +408,9 @@ impl RunningHarness {
                 set_paused(sessions, true);
                 self.settle(sessions)
             }
-            Effect::DrainAndBuild => {
+            Effect::DrainAndBuild(checkout) => {
                 set_paused(sessions, true);
-                Some(Outcome::StartBuild)
+                Some(Outcome::StartBuild(checkout))
             }
             Effect::Abandon => {
                 resume(sessions);
@@ -446,7 +449,7 @@ impl InSession<'_> {
         match command {
             Command::Prompt(text) => Some(self.sessions.focus.start_turn(text.to_owned(), text)),
             Command::Unknown(line) => Some(self.harness.run_skill(line, self.sessions.focus)),
-            Command::Rebuild => self.advance(Trigger::RebuildAsked),
+            Command::Rebuild(checkout) => self.advance(Trigger::RebuildAsked(checkout)),
             Command::Quit => self.quit(),
             Command::Empty => None,
             command => Some(Outcome::Command(command)),
@@ -608,9 +611,9 @@ mod tests {
         let transitions = [
             (
                 Phase::Running,
-                Trigger::RebuildAsked,
+                Trigger::RebuildAsked(Checkout::Worktree),
                 rebuilding(),
-                Effect::DrainAndBuild,
+                Effect::DrainAndBuild(Checkout::Worktree),
             ),
             (
                 Phase::Running,
@@ -680,9 +683,9 @@ mod tests {
             (Phase::Running, Trigger::Settled),
             (Phase::Running, Trigger::Interrupted),
             (Phase::Running, Trigger::BuildFinished(None)),
-            (Phase::DrainingToQuit, Trigger::RebuildAsked),
+            (Phase::DrainingToQuit, Trigger::RebuildAsked(Checkout::Main)),
             (rebuilding.clone(), Trigger::Settled),
-            (rebuilding.clone(), Trigger::RebuildAsked),
+            (rebuilding.clone(), Trigger::RebuildAsked(Checkout::Main)),
             (rebuilding, Trigger::QuitAsked),
         ];
         for (phase, trigger) in ignored {
