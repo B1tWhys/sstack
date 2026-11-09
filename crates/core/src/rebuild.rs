@@ -118,25 +118,22 @@ fn tail(text: &str) -> String {
     lines[lines.len().saturating_sub(MAX_ERROR_LINES)..].join("\n")
 }
 
-/// Returns the cargo profile this binary was built with, and its output directory.
-fn profile() -> (&'static str, &'static str) {
-    if cfg!(debug_assertions) {
-        ("dev", "debug")
-    } else {
-        ("release", "release")
-    }
-}
+/// The cargo profile a Rebuild builds with, whatever the running binary was built with. It is
+/// the one tests build with, so a Rebuild after a test run can reuse much of its work.
+const PROFILE: &str = "dev";
+
+/// The directory under `target` where cargo puts what [`PROFILE`] builds.
+const PROFILE_DIR: &str = "debug";
 
 /// Builds `binary` from the checkout of the Harness Source at `source`, which [`source`] gives,
-/// with the profile the running code was built with. Returns where the new binary is, or what
-/// went wrong. Each checkout builds into its own `target` directory.
+/// with the `dev` profile even if the running code is a release build. Returns where the new
+/// binary is, or what went wrong. Each checkout builds into its own `target` directory.
 ///
 /// # Errors
 /// Returns the end of cargo's output if the build fails, or why cargo could not start.
 pub async fn build(binary: Binary, source: PathBuf) -> Result<PathBuf, String> {
-    let (profile, directory) = profile();
-    run_build(build_command(&source, binary.package, profile)).await?;
-    Ok(binary_path(&source, directory, binary.name))
+    run_build(build_command(&source, binary.package, PROFILE)).await?;
+    Ok(binary_path(&source, PROFILE_DIR, binary.name))
 }
 
 /// Replaces this process with `binary`. Only returns if that fails.
@@ -188,8 +185,7 @@ mod tests {
     }
 
     #[test]
-    fn this_test_binary_uses_the_dev_profile() {
-        assert_eq!(profile(), ("dev", "debug"));
+    fn this_test_binary_is_built_from_the_harness_source() {
         assert!(source_dir().join("Cargo.toml").exists());
         assert!(source_dir().join("crates/core").is_dir());
     }
