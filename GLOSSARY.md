@@ -11,7 +11,7 @@ One durable conversation between a person and the agent, recorded as an append-o
 _Avoid_: Chat, thread, conversation
 
 **Session Name**:
-What a Session is called in the list of Sessions: the name the person gave it with `/rename`, or else the first thing they said in it.
+What a person knows a Session by: the name they gave it with `/rename`, or else a short summary of the first thing they said in it.
 _Avoid_: Title, label
 
 **Turn**:
