@@ -870,7 +870,10 @@ async fn an_answered_question_shrinks_to_its_tool_line_but_is_kept_whole() {
     assert!(blocks(&window).contains(&allowed));
     let mut ui = simulator(window.view());
     let line = r#"Tool: bash {"command":"cat <<EOF > ran\none\ntwo\nEOF"} (allowed)"#;
-    assert!(ui.find(line).is_ok(), "the call should show as one line");
+    assert!(
+        ui.find(line).is_ok(),
+        "the call should show on its tool line"
+    );
     for gone in [command, HOST_NOTE, "Allow", "Deny"] {
         assert!(ui.find(gone).is_err(), "{gone} should no longer be shown");
     }
