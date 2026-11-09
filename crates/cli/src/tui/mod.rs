@@ -9,6 +9,7 @@
 //! [`event::EventSender`].
 
 mod app;
+mod archiver;
 mod component;
 mod components;
 mod editor;
@@ -20,12 +21,13 @@ mod test_support;
 mod theme;
 
 use std::io::{self, IsTerminal};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
 
 use anyhow::{Result, bail, ensure};
 use app::{App, Sessions};
+use archiver::Archiver;
 use crossterm::cursor::SetCursorStyle;
 use crossterm::event::{
     DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
@@ -70,7 +72,9 @@ pub async fn run(args: &Args) -> Result<ExitCode> {
         started_in: started_in.clone(),
         build: None,
         containers: Arc::new(Containers::detect()),
+        archiver: Archiver::default(),
     };
+    let archiver = sessions.archiver.clone();
     let stored = listed_sessions(&main, &sessions.directory)?;
     let first = sessions.open(starting_session(args.resume.as_deref(), &stored))?;
     let mut app = App::builder()
@@ -84,9 +88,11 @@ pub async fn run(args: &Args) -> Result<ExitCode> {
     app.continue_parked();
     input::spawn(sender);
     while let Exit::Rebuild(binary) = on_screen(&mut app, &mut events).await? {
+        archiver.finish().await;
         let failure = rebuild::relaunch(&binary, &args.relaunch(app.session()));
         app.relaunch_failed(&failure.to_string());
     }
+    archiver.finish().await;
     Ok(ExitCode::SUCCESS)
 }
 
@@ -107,6 +113,8 @@ struct LiveSessions<'a> {
     containers: Arc<Containers>,
     /// The build in progress. Aborting it stops the build.
     build: Option<JoinHandle<()>>,
+    /// Where Sessions are put away in the background.
+    archiver: Archiver,
 }
 
 impl Sessions for LiveSessions<'_> {
@@ -147,10 +155,13 @@ impl Sessions for LiveSessions<'_> {
         }
     }
 
-    fn archive(&mut self, id: &str) -> Result<()> {
-        worktree::remove(&self.main, id)?;
-        workspace::archive_session(&self.directory, id)?;
-        Ok(())
+    fn archive(&mut self, id: &str) {
+        let (main, directory) = (self.main.clone(), self.directory.clone());
+        let (events, id) = (self.events.clone(), id.to_owned());
+        self.archiver.start(move || {
+            let outcome = put_away(&main, &directory, &id).map_err(|error| error.to_string());
+            let _ = events.send(Event::Archived { id, outcome });
+        });
     }
 
     fn rename(&mut self, id: &str, name: Option<&str>) -> Result<()> {
@@ -171,6 +182,18 @@ impl Sessions for LiveSessions<'_> {
             build.abort();
         }
     }
+}
+
+/// Deletes the worktree of the Session with id `id` from the project checked out at `main`, and
+/// moves its log out of `directory` into the archive. Blocks until done, which can take seconds.
+///
+/// # Errors
+/// Returns an error if git refuses to delete the worktree, or the log cannot be moved. If the
+/// worktree survives, the log stays where it was.
+fn put_away(main: &Path, directory: &Path, id: &str) -> Result<()> {
+    worktree::remove(main, id)?;
+    workspace::archive_session(directory, id)?;
+    Ok(())
 }
 
 /// Refuses to start without a terminal, rather than take over one the harness was not given.
@@ -250,6 +273,20 @@ impl Drop for SavedTitle {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn putting_away_moves_the_log_into_the_archive() {
+        let dir = tempfile::tempdir().unwrap();
+        let directory = dir.path().join("sessions");
+        std::fs::create_dir_all(&directory).unwrap();
+        let log = workspace::session_path(&directory, "1");
+        std::fs::write(&log, "").unwrap();
+
+        put_away(dir.path(), &directory, "1").unwrap();
+
+        assert!(!log.exists());
+        assert!(workspace::restore_session(&directory, "1").unwrap());
+    }
 
     #[test]
     fn only_a_terminal_can_run_interactively() {

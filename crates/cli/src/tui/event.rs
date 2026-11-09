@@ -45,6 +45,13 @@ pub enum Event {
     Report(SessionReport),
     /// The nvim behind the Session's input reported something.
     Vim(VimEvent),
+    /// Putting a Session away in the background finished.
+    Archived {
+        /// The id of the Session that was being put away.
+        id: String,
+        /// Nothing if the Session is gone, or why it could not be put away.
+        outcome: Result<(), String>,
+    },
 }
 
 /// The channel a Session's agent uses to report to the [`App`](crate::tui::app::App), which keeps

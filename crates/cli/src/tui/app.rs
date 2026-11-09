@@ -67,11 +67,10 @@ pub trait Sessions {
     /// Returns an error if there is work to lose, or if that cannot be told.
     fn check_archive(&self, id: &str) -> Result<()>;
 
-    /// Puts the Session with id `id` away, deleting its worktree and any work there.
-    ///
-    /// # Errors
-    /// Returns an error if the Session could not be put away.
-    fn archive(&mut self, id: &str) -> Result<()>;
+    /// Starts putting the Session with id `id` away in the background, deleting its worktree and
+    /// any work there, which ends in an [`Event::Archived`]. Returns at once, because deleting a
+    /// worktree can take seconds.
+    fn archive(&mut self, id: &str);
 
     /// Stores `name` as the Session Name of the Session with id `id`, so that it lasts beyond this
     /// run. With `None`, the Session is known by its first prompt again.
@@ -95,6 +94,9 @@ pub struct App<'a> {
     panes: Vec<Pane>,
     /// The position in `panes` of the Session on screen.
     shown: usize,
+    /// Sessions taken off the list while they are put away in the background, kept so that one
+    /// that cannot be put away can come back.
+    archiving: Vec<Pane>,
     /// The rules every open Session follows together, such as on the way to a Rebuild.
     harness: RunningHarness,
     /// The list of Sessions.
@@ -136,6 +138,7 @@ impl<'a> App<'a> {
         Self {
             panes,
             shown,
+            archiving: Vec::new(),
             harness: RunningHarness::default(),
             sidebar: Sidebar::default(),
             sessions,
@@ -220,6 +223,7 @@ impl App<'_> {
                 return self.build_finished(outcome);
             }
             Event::Click { column, row } => self.click(column, row),
+            Event::Archived { id, outcome } => self.archived(&id, outcome),
             event => self.panes[self.shown].update(&event),
         }
         None
@@ -461,7 +465,7 @@ impl App<'_> {
         }
         self.move_on();
         if self.shown != leaving {
-            self.finish_archiving(leaving, &id);
+            self.put_away(leaving, &id);
         }
     }
 
@@ -475,15 +479,26 @@ impl App<'_> {
         }
     }
 
-    /// Puts away the Session at position `leaving`, whose id is `id`, now that it is off screen.
-    fn finish_archiving(&mut self, leaving: usize, id: &str) {
-        if let Err(error) = self.sessions.archive(id) {
-            self.notice(format!("not archived: {error}"));
-            return;
-        }
-        self.panes.remove(leaving);
+    /// Takes the Session at position `leaving`, whose id is `id`, off the list now that it is off
+    /// screen, and starts putting it away.
+    fn put_away(&mut self, leaving: usize, id: &str) {
+        self.sessions.archive(id);
+        self.archiving.push(self.panes.remove(leaving));
         if self.shown > leaving {
             self.shown -= 1;
+        }
+    }
+
+    /// Acts on the end of putting away the Session with id `id`: forgets it, or if that failed,
+    /// lists it again and says why.
+    fn archived(&mut self, id: &str, outcome: Result<(), String>) {
+        let Some(index) = self.archiving.iter().position(|pane| pane.id() == id) else {
+            return;
+        };
+        let pane = self.archiving.remove(index);
+        if let Err(error) = outcome {
+            self.panes.push(pane);
+            self.notice(format!("not archived: {error}"));
         }
     }
 
@@ -692,8 +707,9 @@ mod tests {
         open_failure: Option<&'static str>,
         /// Why archiving is refused, if it is.
         refusal: Option<&'static str>,
-        /// Why archiving fails, if it does.
-        archive_failure: Option<&'static str>,
+        /// Whether archives stay unfinished until the test says how they went. Otherwise each one
+        /// reports success on the event channel.
+        hold_archives: bool,
         /// Why storing a Session Name fails, if it does.
         rename_failure: Option<&'static str>,
     }
@@ -719,12 +735,11 @@ mod tests {
             self.refusal.map_or(Ok(()), |refusal| Err(anyhow!(refusal)))
         }
 
-        fn archive(&mut self, id: &str) -> Result<()> {
-            if let Some(failure) = self.archive_failure {
-                bail!(failure);
-            }
+        fn archive(&mut self, id: &str) {
             self.archived.borrow_mut().push(id.to_owned());
-            Ok(())
+            if !self.hold_archives {
+                let _ = self.sender.send(archived(id, Ok(())));
+            }
         }
 
         fn rename(&mut self, id: &str, name: Option<&str>) -> Result<()> {
@@ -793,7 +808,7 @@ mod tests {
             builds: Rc::clone(&builds),
             open_failure: None,
             refusal: None,
-            archive_failure: None,
+            hold_archives: false,
             rename_failure: None,
         };
         adjust(&mut sessions);
@@ -1460,6 +1475,8 @@ mod tests {
         let mut h = harness(Arc::new(NeverResponds));
         let gone = Event::Session("gone".into(), Box::new(Event::Resize));
         assert_eq!(h.app.handle(gone), None);
+        assert_eq!(h.app.handle(archived("gone", Err("no such Session"))), None);
+        assert!(!h.screen().contains("not archived"));
     }
 
     #[test]
@@ -1610,21 +1627,49 @@ mod tests {
         assert_eq!(*h.archived.borrow(), ["first"]);
     }
 
-    #[tokio::test]
-    async fn a_failed_archive_keeps_the_session() {
+    /// Returns the report that putting away the Session with id `id` ended in `outcome`.
+    fn archived(id: &str, outcome: Result<(), &str>) -> Event {
+        Event::Archived {
+            id: id.to_owned(),
+            outcome: outcome.map_err(str::to_owned),
+        }
+    }
+
+    /// Starts an [`App`] with one stored Session as well as the new one, whose archives stay
+    /// unfinished until the test reports how they went.
+    fn holding_archives() -> Harness {
         let dir = tempfile::tempdir().unwrap();
         let stored = vec![summary(&dir, "older", 100)];
-        let mut h = start_with()
+        start_with()
             .dir(dir)
             .provider(Arc::new(NeverResponds))
             .stored(stored)
-            .adjust(|sessions| sessions.archive_failure = Some("git said no"))
-            .call();
+            .adjust(|sessions| sessions.hold_archives = true)
+            .call()
+    }
+
+    #[tokio::test]
+    async fn an_archive_leaves_the_list_before_it_finishes() {
+        let mut h = holding_archives();
 
         h.press('x');
 
-        assert_eq!(h.app.panes.len(), 2);
+        assert_eq!(*h.archived.borrow(), ["first"]);
         assert_eq!(h.shown(), "older");
+        assert_eq!(sidebar_order(&mut h), ["older"]);
+        assert_eq!(h.app.handle(archived("first", Ok(()))), None);
+        assert_eq!(sidebar_order(&mut h), ["older"]);
+    }
+
+    #[tokio::test]
+    async fn a_failed_archive_lists_the_session_again() {
+        let mut h = holding_archives();
+        h.press('x');
+
+        assert_eq!(h.app.handle(archived("first", Err("git said no"))), None);
+
+        assert_eq!(h.shown(), "older");
+        assert_eq!(sidebar_order(&mut h), ["older", "new session"]);
         assert!(h.screen().contains("not archived: git said no"));
     }
 
