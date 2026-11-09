@@ -170,6 +170,15 @@ impl SessionLog {
     }
 }
 
+impl Drop for SessionLog {
+    /// Frees the Session at once, even while a child process that is still starting holds a
+    /// copy of the file, which would otherwise keep it claimed until that child runs its
+    /// program.
+    fn drop(&mut self) {
+        let _ = self.file.unlock();
+    }
+}
+
 /// Returns the part of a log's `contents` that was fully recorded, without any partial entry a
 /// crash or a write in progress left at the end.
 fn recorded(contents: &str) -> &str {
@@ -289,6 +298,21 @@ mod tests {
             entries,
             vec![user, assistant_entry(), tool, Entry::TurnCancelled]
         );
+    }
+
+    /// A child process that is still starting holds a copy of every open file until it runs
+    /// its program, and a clone shares the open file the same way.
+    #[test]
+    fn a_dropped_log_frees_the_session_even_while_a_copy_of_its_file_is_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.jsonl");
+        let log = SessionLog::create(&path).unwrap();
+        let copy = log.file.try_clone().unwrap();
+
+        drop(log);
+
+        assert!(SessionLog::open(&path).is_ok());
+        drop(copy);
     }
 
     #[test]
