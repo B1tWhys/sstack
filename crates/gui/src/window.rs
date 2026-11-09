@@ -13,8 +13,12 @@ use anyhow::Result;
 use iced::futures::future::BoxFuture;
 use iced::widget::scrollable::Viewport;
 use iced::widget::text_editor::{Binding, KeyPress};
-use iced::widget::{button, column, operation, row, scrollable, text, text_editor};
-use iced::{Element, Fill, Size, Subscription, Task, clipboard, keyboard, task, time, window};
+use iced::widget::{
+    button, column, container, operation, row, scrollable, stack, text, text_editor,
+};
+use iced::{
+    Element, Fill, Size, Subscription, Task, Theme, clipboard, keyboard, task, time, window,
+};
 use input::Input;
 use session::SessionView;
 use sstack::human_command::Command;
@@ -43,6 +47,15 @@ const FOLLOW_SLACK: f32 = 1.0;
 
 /// Space between the parts of the window, and around them, in logical pixels.
 const SPACING: f32 = 10.0;
+
+/// What the pill says that floats over the transcript while a question waits out of view.
+const WAITING: &str = "Waiting for your approval";
+
+/// The size of the pill's words, in logical pixels, a little smaller than the rest of the window.
+const PILL_TEXT: f32 = 14.0;
+
+/// How round the pill's corners are, in logical pixels: enough to round its ends fully.
+const PILL_RADIUS: f32 = 999.0;
 
 /// How often the sidebar redraws how long each Session has waited.
 const TICK: Duration = Duration::from_secs(1);
@@ -164,6 +177,9 @@ pub enum Message {
     CloseRequested,
     /// The build a Rebuild started finished, with the new binary or why it failed.
     Built(Result<PathBuf, String>),
+    /// The person asked to see the newest output, as the pill over an open question that is
+    /// out of view offers.
+    JumpToEnd,
     /// The person scrolled the transcript.
     Scrolled {
         /// Whether the newest output is in view.
@@ -248,6 +264,7 @@ impl Window {
                 self.view_mut().answer(allowed);
                 Task::none()
             }
+            Message::JumpToEnd => self.jump_to_end(),
             Message::Interrupt => self.interrupt(),
             Message::Built(built) => self.built(built),
             Message::Rebuild => self.command("/rebuild"),
@@ -286,7 +303,8 @@ impl Window {
     }
 
     /// Draws the Session on screen: its transcript with any questions for the person, what the
-    /// Running Harness is doing on its way out, and the prompt with its buttons. The button that
+    /// Running Harness is doing on its way out, and the prompt with its buttons. A pill floats
+    /// over the bottom of the transcript while a question waits out of view. The button that
     /// archives the Session does nothing while a Turn runs in it.
     fn session_view(&self) -> Element<'_, Message> {
         let view = self.view_ref();
@@ -297,6 +315,7 @@ impl Window {
             })
             .height(Fill)
             .width(Fill);
+        let transcript = stack![transcript].push(waiting_pill(view));
         let prompt = match &view.prompt {
             Input::Plain(content) => text_editor(content)
                 .id(PROMPT)
@@ -648,6 +667,13 @@ impl Window {
         }
     }
 
+    /// Brings the newest output of the Session on screen into view and follows it again,
+    /// returning the task that scrolls there.
+    fn jump_to_end(&mut self) -> Task<Message> {
+        self.view_mut().scrolled(true);
+        operation::snap_to_end(TRANSCRIPT)
+    }
+
     /// Returns the task that brings the newest output of the Session on screen into view, if
     /// `changed` says its transcript changed while following it.
     fn follow(&self, changed: bool) -> Task<Message> {
@@ -736,6 +762,31 @@ impl OpenSessions for Views<'_> {
             view.control(&mut *visit);
         }
     }
+}
+
+/// Draws the pill that floats at the bottom of `view`'s transcript while a question waits for
+/// the person out of view, if one does. Pressing it jumps to the newest output, where the
+/// question is.
+fn waiting_pill(view: &SessionView) -> Option<Element<'_, Message>> {
+    (view.asking() && !view.following()).then(|| {
+        let pill = button(text(WAITING).size(PILL_TEXT))
+            .on_press(Message::JumpToEnd)
+            .padding([4, 12])
+            .style(pill_style);
+        container(pill)
+            .center_x(Fill)
+            .align_bottom(Fill)
+            .padding(SPACING)
+            .into()
+    })
+}
+
+/// Styles the pill over the transcript as a button of the theme's main color with round ends,
+/// in its `status`.
+fn pill_style(theme: &Theme, status: button::Status) -> button::Style {
+    let mut style = button::primary(theme, status);
+    style.border.radius = PILL_RADIUS.into();
+    style
 }
 
 /// Returns what the window says about the Running Harness being on its way out in `phase`, if it

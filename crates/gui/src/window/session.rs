@@ -275,6 +275,12 @@ impl SessionView {
         self.transcript.report(report)
     }
 
+    /// Returns whether the Session's Turn is waiting for the person to answer a question about a
+    /// shell command.
+    pub fn asking(&self) -> bool {
+        !self.questions.is_empty()
+    }
+
     /// Answers the oldest open question about a shell command, if there is one: `allowed` says
     /// whether the command may run.
     pub fn answer(&mut self, allowed: bool) {

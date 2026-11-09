@@ -857,6 +857,39 @@ async fn a_question_too_long_for_the_window_leaves_the_prompt_on_screen() {
 }
 
 #[tokio::test]
+async fn a_pill_shows_only_while_a_question_waits_out_of_view() {
+    let (_dir, mut window) = window(vec![Ok(bash_call("touch ran")), Ok(reply("ok"))]);
+    let mut reports = reports(&window);
+    let _ = send(&mut window, "go");
+    until_asked(&mut window, &mut reports).await;
+    assert!(simulator(window.view()).find(WAITING).is_err());
+
+    let _ = window.update(Message::Scrolled { at_end: false });
+    assert!(simulator(window.view()).find(WAITING).is_ok());
+
+    let _ = window.update(Message::Answer(false));
+    assert!(simulator(window.view()).find(WAITING).is_err());
+}
+
+#[tokio::test]
+async fn pressing_the_pill_jumps_to_the_newest_output() {
+    let (_dir, mut window) = window(vec![Ok(bash_call("touch ran"))]);
+    let mut reports = reports(&window);
+    let _ = send(&mut window, "go");
+    until_asked(&mut window, &mut reports).await;
+    let _ = window.update(Message::Scrolled { at_end: false });
+
+    let mut ui = simulator(window.view());
+    let _ = ui.click(WAITING).unwrap();
+    let pressed: Vec<_> = ui.into_messages().collect();
+    assert!(matches!(pressed.as_slice(), [Message::JumpToEnd]));
+
+    assert_eq!(window.update(Message::JumpToEnd).units(), 1);
+    assert!(window.view_ref().following());
+    assert!(simulator(window.view()).find(WAITING).is_err());
+}
+
+#[tokio::test]
 async fn a_denied_call_says_so_on_its_line() {
     let (_dir, mut window) = window(vec![Ok(bash_call("touch ran")), Ok(reply("ok"))]);
     let mut reports = reports(&window);
