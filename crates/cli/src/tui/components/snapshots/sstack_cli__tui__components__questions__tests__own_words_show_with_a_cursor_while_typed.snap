@@ -1,0 +1,14 @@
+---
+source: crates/cli/src/tui/components/questions.rs
+expression: shown.backend()
+---
+"         ┌ Question: Name ────────────────────────┐         "
+"         │Which Name?                             │         "
+"         │                                        │         "
+"         │  1. a                                  │         "
+"         │> 2. Own answer: sstack_                │         "
+"         │                                        │         "
+"         │Up/Down choose, Enter confirms,         │         "
+"         │Shift-Tab goes back, Esc answers in the │         "
+"         │chat                                    │         "
+"         └────────────────────────────────────────┘         "

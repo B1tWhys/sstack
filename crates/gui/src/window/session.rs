@@ -7,12 +7,13 @@ use std::time::SystemTime;
 use iced::Subscription;
 use iced::widget::text_editor;
 use sstack::agent::TurnEnd;
+use sstack::question::Answer;
 use sstack::queue::Waits;
 use sstack::running_harness::SessionState;
 use sstack::session::{self, Entry};
 use sstack::session_controller::SessionController;
 use sstack::session_name;
-use sstack::session_report::{ApprovalRequest, SessionReport};
+use sstack::session_report::{ApprovalRequest, QuestionRequest, SessionReport};
 use sstack::turn_runner::AgentHandle;
 use sstack::vim::VimEvent;
 use sstack::workspace::{self, SessionSummary};
@@ -20,6 +21,7 @@ use sstack::workspace::{self, SessionSummary};
 use super::input::Input;
 use super::sidebar::{Activity, Row};
 use super::{Message, Opened};
+use crate::asked::Asking;
 use crate::reports::Reports;
 use crate::transcript::Transcript;
 
@@ -63,7 +65,11 @@ pub struct SessionView {
     /// Questions about shell commands that the Session's Turn is waiting on, oldest first, which
     /// the transcript shows and the person answers in that order. Dropping one unanswered, as
     /// closing the window does, denies it.
-    questions: VecDeque<ApprovalRequest>,
+    approvals: VecDeque<ApprovalRequest>,
+    /// The model's Questions that the Session's Turn is waiting on, oldest first, which the
+    /// transcript shows and the person answers in that order. Dropping one unanswered, as closing
+    /// the window does, gives the model no answer.
+    asked: VecDeque<QuestionRequest>,
     /// Whether the transcript keeps its newest output in view as more arrives. It stops once the
     /// person scrolls back, and starts again when they scroll to the end, start a Turn or come
     /// back to the Session.
@@ -103,7 +109,8 @@ impl SessionView {
             unseen: None,
             prompt: Input::default(),
             transcript: Transcript::default(),
-            questions: VecDeque::new(),
+            approvals: VecDeque::new(),
+            asked: VecDeque::new(),
             following: true,
         }
     }
@@ -228,7 +235,7 @@ impl SessionView {
     fn activity(&self) -> Activity {
         match (self.state(), self.unseen) {
             (SessionState::Working, _) => Activity::Working,
-            (SessionState::AwaitingApproval, _) => Activity::Blocked,
+            (SessionState::AwaitingAnswer, _) => Activity::Blocked,
             (SessionState::Idle, Some(Unseen::Failed)) => Activity::Failed,
             (SessionState::Idle, Some(Unseen::Finished)) => Activity::Done,
             (SessionState::Idle, None) => Activity::Idle,
@@ -254,7 +261,8 @@ impl SessionView {
     /// for the Running Harness to work out.
     pub fn observe(&mut self, report: &SessionReport, on_screen: bool) -> bool {
         match report {
-            SessionReport::Approval(question) => self.questions.push_back(question.clone()),
+            SessionReport::Approval(question) => self.approvals.push_back(question.clone()),
+            SessionReport::Question(request) => self.asked.push_back(request.clone()),
             SessionReport::Resumed(entries) => {
                 self.first_prompt = self.first_prompt.take().or(first_prompt(entries));
             }
@@ -263,7 +271,8 @@ impl SessionView {
             }
             SessionReport::TurnEnded(Ok(TurnEnd::Paused)) => {}
             SessionReport::TurnEnded(outcome) => {
-                self.questions.clear();
+                self.approvals.clear();
+                self.asked.clear();
                 self.unseen = (!on_screen).then_some(if outcome.is_ok() {
                     Unseen::Finished
                 } else {
@@ -276,19 +285,64 @@ impl SessionView {
     }
 
     /// Returns whether the Session's Turn is waiting for the person to answer a question about a
-    /// shell command.
+    /// shell command or the model's Questions.
     pub fn asking(&self) -> bool {
-        !self.questions.is_empty()
+        !self.approvals.is_empty() || !self.asked.is_empty()
     }
 
     /// Answers the oldest open question about a shell command, if there is one: `allowed` says
     /// whether the command may run.
     pub fn answer(&mut self, allowed: bool) {
-        if let Some(question) = self.questions.pop_front() {
+        if let Some(question) = self.approvals.pop_front() {
             question.reply.send(allowed);
             self.transcript.answered(allowed);
             self.control(SessionController::answered);
         }
+    }
+
+    /// Picks `row` of the Question at position `question` among the model's open Questions.
+    pub fn choose(&mut self, question: usize, row: usize) {
+        if let Some(asked) = self.transcript.open_questions() {
+            asked.choose(question, row);
+        }
+    }
+
+    /// Sets the person's own words for the Question at position `question` among the model's
+    /// open Questions.
+    pub fn write(&mut self, question: usize, words: String) {
+        if let Some(asked) = self.transcript.open_questions() {
+            asked.write(question, words);
+        }
+    }
+
+    /// Sends the person's answers to the model's oldest open Questions, if every one of them has
+    /// an answer.
+    pub fn send_answers(&mut self) {
+        let answers = self
+            .transcript
+            .open_questions()
+            .and_then(|asked| asked.answers());
+        if let Some(answers) = answers {
+            self.settle(Some(answers));
+        }
+    }
+
+    /// Tells the model that the person would rather answer its oldest open Questions in the
+    /// conversation.
+    pub fn decline(&mut self) {
+        self.settle(None);
+    }
+
+    /// Gives the model's oldest open Questions `answers`, or none, and lets the Turn go on.
+    fn settle(&mut self, answers: Option<Vec<Answer>>) {
+        let Some(request) = self.asked.pop_front() else {
+            return;
+        };
+        if let Some(asked) = self.transcript.open_questions() {
+            asked.state = answers.clone().map_or(Asking::Declined, Asking::Answered);
+        }
+        request.reply.send(answers);
+        self.control(SessionController::answered);
     }
 
     /// Changes the plain prompt as the person asked.

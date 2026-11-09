@@ -10,7 +10,7 @@ use sstack::agent::{Agent, AgentConfig};
 use sstack::provider::Provider;
 use sstack::sandbox::Sandbox;
 use sstack::session::{AssistantEntry, SessionLog, StopReason, ToolCall, Usage};
-use sstack::session_report::ReportingApprover;
+use sstack::session_report::{ReportingApprover, ReportingAsker};
 use sstack::skills::{self, Location, Scope};
 use sstack::tools::project::Project;
 use sstack::tools::{Approver, ToolBox};
@@ -94,6 +94,29 @@ pub fn bash_call(command: &str) -> AssistantEntry {
     }
 }
 
+/// Returns a model response asking the person `question`, with `choices`, recommending the first.
+pub fn ask_call(question: &str, choices: &[&str]) -> AssistantEntry {
+    let options: Vec<_> = choices
+        .iter()
+        .map(|label| serde_json::json!({ "label": label }))
+        .collect();
+    let input = serde_json::json!({ "questions": [{
+        "header": "Pick",
+        "question": question,
+        "options": options,
+        "recommended": 0,
+    }]});
+    AssistantEntry {
+        tool_calls: vec![ToolCall {
+            id: "1".into(),
+            name: "ask".into(),
+            input,
+        }],
+        stop: StopReason::ToolUse,
+        ..reply("")
+    }
+}
+
 /// Opens the Session stored at `path`, new or existing, with an agent working in its directory
 /// and reporting to `events`.
 pub fn opened(path: &Path, provider: Arc<dyn Provider>, events: &EventSender) -> Opened {
@@ -106,7 +129,11 @@ pub fn opened(path: &Path, provider: Arc<dyn Provider>, events: &EventSender) ->
     } else {
         (SessionLog::create(path).unwrap(), vec![])
     };
-    let config = agent_config(path.parent().unwrap(), provider, approver);
+    let asker = Arc::new(ReportingAsker::new(
+        SessionSender::new(&id, events.clone()).reporter(),
+    ));
+    let mut config = agent_config(path.parent().unwrap(), provider, approver);
+    config.tools = config.tools.with_asker(Some(asker));
     let agent = Agent::new(config, log, entries).unwrap();
     Opened {
         agent: AgentHandle::spawn(agent, SessionSender::new(&id, events.clone()).reporter()),

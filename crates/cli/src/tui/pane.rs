@@ -19,7 +19,7 @@ use sstack::turn_runner::AgentHandle;
 use sstack::workspace::{self, SessionSummary};
 
 use super::component::{Component, KeyOutcome};
-use super::components::{Activity, Approval, Input, Row, Status, Transcript};
+use super::components::{Activity, Approval, Input, Questions, Row, Status, Transcript};
 use super::event::{Event, SessionSender};
 
 /// A Session the harness has started an agent for.
@@ -77,6 +77,8 @@ pub struct Pane {
     unseen: Option<Unseen>,
     /// The questions about shell commands, shown over everything else.
     approval: Approval,
+    /// The model's Questions, shown over everything else.
+    questions: Questions,
     /// Where the person types.
     input: Input,
     /// The Session so far.
@@ -119,6 +121,7 @@ impl Pane {
             waits: Waits::since(waiting_since),
             unseen: None,
             approval: Approval::default(),
+            questions: Questions::default(),
             input: Input::default(),
             transcript: Transcript::default(),
         }
@@ -204,7 +207,7 @@ impl Pane {
     fn activity(&self) -> Activity {
         match (self.state(), self.unseen) {
             (SessionState::Working, _) => Activity::Working,
-            (SessionState::AwaitingApproval, _) => Activity::Blocked,
+            (SessionState::AwaitingAnswer, _) => Activity::Blocked,
             (SessionState::Idle, Some(Unseen::Failed)) => Activity::Failed,
             (SessionState::Idle, Some(Unseen::Finished)) => Activity::Done,
             (SessionState::Idle, None) => Activity::Idle,
@@ -246,9 +249,10 @@ impl Pane {
     }
 
     /// Returns every component, topmost first, which is the order key presses are offered in.
-    fn components(&mut self) -> [&mut dyn Component; 4] {
+    fn components(&mut self) -> [&mut dyn Component; 5] {
         [
             &mut self.approval,
+            &mut self.questions,
             &mut self.input,
             &mut self.transcript,
             &mut self.status,
@@ -286,6 +290,13 @@ impl Pane {
     /// Notes that the person answered about a shell command.
     pub fn answered(&mut self) {
         self.control(SessionController::answered);
+    }
+
+    /// Notes that the person answered the model's Questions or declined to, recording `note` in
+    /// the transcript.
+    pub fn questions_answered(&mut self, note: String) {
+        self.answered();
+        self.update(&Event::Report(SessionReport::Notice(note)));
     }
 
     /// Notes that a Turn started on `text`. The person's first input also names the Session,
@@ -327,6 +338,7 @@ impl Pane {
         self.status.render(frame, status);
         self.input.render(frame, input);
         self.approval.render(frame, area);
+        self.questions.render(frame, area);
     }
 }
 

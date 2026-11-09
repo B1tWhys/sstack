@@ -363,6 +363,7 @@ impl App<'_> {
             Action::Submit(line) => return self.submit(&line),
             Action::Interrupt => return self.drive(self.shown, Happened::Interrupted),
             Action::ApprovalAnswered => self.panes[self.shown].answered(),
+            Action::QuestionsAnswered(note) => self.panes[self.shown].questions_answered(note),
             Action::NextSession => self.step(1),
             Action::PreviousSession => self.step(-1),
             Action::LongestWaiting => self.show_longest_waiting(),
@@ -648,7 +649,9 @@ fn global_action(key: KeyEvent) -> Option<Action> {
 mod tests {
     use super::*;
     use crate::tui::event::EventSender;
-    use crate::tui::test_support::{alt, bash_call, ctrl, drawn, key, opened, reply, rows};
+    use crate::tui::test_support::{
+        alt, ask_call, bash_call, ctrl, drawn, key, opened, reply, rows,
+    };
     use anyhow::{anyhow, bail};
     use async_trait::async_trait;
     use insta::assert_snapshot;
@@ -1053,6 +1056,31 @@ mod tests {
 
         assert!(h.dir.path().join("ran").exists());
         assert_snapshot!(h.drawn_at(NARROW));
+    }
+
+    #[tokio::test]
+    async fn the_models_questions_are_answered_and_the_answers_reach_it() {
+        let script = vec![
+            Ok(ask_call("Which store?", &["Files", "SQLite"])),
+            Ok(reply("noted")),
+        ];
+        let mut h = scripted(script);
+        h.enter("grill me");
+        h.until(|event| matches!(event, Event::Report(SessionReport::Question(_))))
+            .await;
+        assert_eq!(h.app.panes[0].state(), SessionState::AwaitingAnswer);
+        assert_snapshot!(h.drawn_at(NARROW));
+
+        h.app.handle(Event::Key(key(KeyCode::Down)));
+        h.app.handle(Event::Key(key(KeyCode::Enter)));
+        assert_eq!(h.app.panes[0].state(), SessionState::Working);
+        h.until_turn_ends().await;
+
+        let answered = h.session().into_iter().any(|entry| {
+            matches!(entry, Entry::ToolResult { output, is_error: false, .. } if output == "Pick: SQLite")
+        });
+        assert!(answered, "{:#?}", h.session());
+        assert!(h.screen().contains("[answered] Pick: SQLite"));
     }
 
     /// A Provider that never answers, so that a Turn stays running until it is cancelled.
@@ -1843,7 +1871,7 @@ mod tests {
 
         assert!(!h.app.harness.phase().is_draining());
         assert_eq!(*h.builds.borrow(), ["started", "cancelled"]);
-        assert_eq!(h.app.panes[0].state(), SessionState::AwaitingApproval);
+        assert_eq!(h.app.panes[0].state(), SessionState::AwaitingAnswer);
         h.approve();
         h.until_turn_ends().await;
         assert_eq!(h.app.panes[0].state(), SessionState::Idle);

@@ -34,7 +34,9 @@ use sstack::session_setup::{Place, Run, Start};
 use sstack::vim::VimEvent;
 use sstack::workspace::SessionSummary;
 
+use crate::asked::Controls;
 use crate::reports::Reports;
+use crate::transcript::Handlers;
 use crate::vim_prompt::KeyOutcome;
 
 /// The id of the prompt, by which tests find it.
@@ -51,7 +53,7 @@ const FOLLOW_SLACK: f32 = 1.0;
 const SPACING: f32 = 10.0;
 
 /// What the pill says that floats over the transcript while a question waits out of view.
-const WAITING: &str = "Waiting for your approval";
+const WAITING: &str = "Waiting for your answer";
 
 /// The size of the pill's words, in logical pixels, a little smaller than the rest of the window.
 const PILL_TEXT: f32 = 14.0;
@@ -76,7 +78,8 @@ pub struct Opened {
     /// Where the window reads the Session's reports.
     pub reports: Reports,
     /// Where the Session's reports go, which the window hands the Turns it runs. The Session's
-    /// Approver must ask through the same reports, or the window never sees its questions.
+    /// Approver and Asker must ask through the same reports, or the window never sees their
+    /// questions.
     pub sender: ReportSender,
 }
 
@@ -181,6 +184,24 @@ pub enum Message {
     Answer(bool),
     /// The person clicked a link in a reply, which leads to this address.
     OpenLink(String),
+    /// The person picked a row of one of the model's open Questions.
+    Choose {
+        /// The position of the Question in its set.
+        question: usize,
+        /// The row picked: a choice, or after every choice, the person's own words.
+        row: usize,
+    },
+    /// The person changed their own words for one of the model's open Questions.
+    Write {
+        /// The position of the Question in its set.
+        question: usize,
+        /// Everything they have written for it now.
+        words: String,
+    },
+    /// The person sent their answers to the model's open Questions.
+    SendAnswers,
+    /// The person chose to answer the model's open Questions in the conversation instead.
+    Decline,
     /// The person asked to interrupt.
     Interrupt,
     /// The person asked for a Rebuild, as `/rebuild` does.
@@ -278,6 +299,13 @@ impl Window {
                 Task::none()
             }
             Message::OpenLink(uri) => self.open_link(&uri),
+            message @ (Message::Choose { .. }
+            | Message::Write { .. }
+            | Message::SendAnswers
+            | Message::Decline) => {
+                self.questions(message);
+                Task::none()
+            }
             Message::JumpToEnd => self.jump_to_end(),
             Message::Interrupt => self.interrupt(),
             Message::Built(built) => self.built(built),
@@ -295,6 +323,18 @@ impl Window {
             self.view_mut().notice(failure);
         }
         Task::none()
+    }
+
+    /// Acts on what the person did to the model's open Questions in the Session on screen.
+    fn questions(&mut self, message: Message) {
+        let view = self.view_mut();
+        match message {
+            Message::Choose { question, row } => view.choose(question, row),
+            Message::Write { question, words } => view.write(question, words),
+            Message::SendAnswers => view.send_answers(),
+            Message::Decline => view.decline(),
+            _ => {}
+        }
     }
 
     /// Acts on a request to show another Session, or to start a new one.
@@ -332,7 +372,17 @@ impl Window {
     /// archives the Session does nothing while a Turn runs in it.
     fn session_view(&self) -> Element<'_, Message> {
         let view = self.view_ref();
-        let transcript = scrollable(view.transcript.view(Message::Answer, Message::OpenLink))
+        let handlers = Handlers {
+            answer: Message::Answer,
+            open: Message::OpenLink,
+            questions: Controls {
+                choose: |question, row| Message::Choose { question, row },
+                write: |question, words| Message::Write { question, words },
+                send: Message::SendAnswers,
+                decline: Message::Decline,
+            },
+        };
+        let transcript = scrollable(view.transcript.view(&handlers))
             .id(TRANSCRIPT)
             .on_scroll(|viewport| Message::Scrolled {
                 at_end: at_end(&viewport),

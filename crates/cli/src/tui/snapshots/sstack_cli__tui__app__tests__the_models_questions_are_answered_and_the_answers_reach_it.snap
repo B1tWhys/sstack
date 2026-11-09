@@ -1,0 +1,16 @@
+---
+source: crates/cli/src/tui/app.rs
+expression: h.drawn_at(NARROW)
+---
+"                                                            "
+"> grill m┌ Question: Pick ────────────────────────┐         "
+"         │Which store?                            │         "
+"[ask] {"q│                                        │ich      "
+"store?","│> 1. Files (recommended)                │te"}],"re"
+"commended│  2. SQLite                             │         "
+"         │  3. Own answer:                        │         "
+"         │                                        │         "
+"session f│Up/Down choose, Enter confirms,         │itch | Al"
+"┌────────│Shift-Tab goes back, Esc answers in the │────────┐"
+"│>       │chat                                    │        │"
+"└────────└────────────────────────────────────────┘────────┘"

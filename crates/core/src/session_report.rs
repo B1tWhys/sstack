@@ -11,6 +11,7 @@ use async_trait::async_trait;
 use tokio::sync::oneshot;
 
 use crate::agent::{AgentEvent, TurnEnd};
+use crate::question::{Answer, Asker, Question};
 use crate::session::Entry;
 use crate::tools::Approver;
 
@@ -30,6 +31,8 @@ pub enum SessionReport {
     TurnEnded(Result<TurnEnd, String>),
     /// The model wants to run a shell command, and the Turn is waiting for the person to decide.
     Approval(ApprovalRequest),
+    /// The model put Questions to the person, and the Turn is waiting for their answers.
+    Question(QuestionRequest),
     /// The Rebuild's build finished, with the new binary or what went wrong.
     BuildFinished(Result<PathBuf, String>),
     /// The Running Harness has something to tell the person, such as a mistyped Human Command.
@@ -68,6 +71,16 @@ pub struct ApprovalRequest {
     pub note: Option<String>,
     /// Where the person's decision goes. Dropping it unanswered denies the command.
     pub reply: Reply<bool>,
+}
+
+/// The model's Questions to the person, waiting for answers.
+#[derive(Debug, Clone)]
+pub struct QuestionRequest {
+    /// The Questions, in the order the person answers them.
+    pub questions: Vec<Question>,
+    /// Where the answers go: one for each Question, in order, or `None` if the person would
+    /// rather answer in the conversation. Dropping it unanswered counts as `None`.
+    pub reply: Reply<Option<Vec<Answer>>>,
 }
 
 /// A reply to a question that another task is waiting on.
@@ -126,6 +139,34 @@ impl Approver for ReportingApprover {
     }
 }
 
+/// The Asker that puts the model's Questions to the person in the interface, while the Turn
+/// waits.
+///
+/// The person gives no answer if the interface drops the Questions unanswered, such as when the
+/// Turn is cancelled or the interface has gone.
+pub struct ReportingAsker {
+    /// Where Questions are sent for the interface to show.
+    reports: ReportSender,
+}
+
+impl ReportingAsker {
+    /// Creates an asker that asks through the interface receiving `reports`.
+    #[must_use]
+    pub fn new(reports: ReportSender) -> Self {
+        Self { reports }
+    }
+}
+
+#[async_trait]
+impl Asker for ReportingAsker {
+    async fn ask(&self, questions: Vec<Question>) -> Option<Vec<Answer>> {
+        let (reply, answer) = Reply::new();
+        let request = QuestionRequest { questions, reply };
+        self.reports.send(SessionReport::Question(request));
+        answer.await.ok().flatten()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -179,6 +220,39 @@ mod tests {
         request.reply.send(true);
 
         assert!(asking.await.unwrap());
+    }
+
+    fn question() -> Question {
+        Question {
+            header: "Name".into(),
+            text: "What name?".into(),
+            choices: vec![],
+            recommended: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn the_answers_given_in_the_interface_go_back_to_the_model() {
+        let (reports, mut received) = channel();
+        let asker = ReportingAsker::new(reports);
+        let asking = tokio::spawn(async move { asker.ask(vec![question()]).await });
+
+        let Some(SessionReport::Question(request)) = received.recv().await else {
+            panic!("expected questions");
+        };
+        assert_eq!(request.questions, [question()]);
+        request.reply.send(Some(vec![Answer::Own("sstack".into())]));
+
+        let answers = asking.await.unwrap();
+        assert_eq!(answers, Some(vec![Answer::Own("sstack".into())]));
+    }
+
+    #[tokio::test]
+    async fn nobody_to_answer_gives_no_answers() {
+        let (reports, received) = channel();
+        drop(received);
+        let asker = ReportingAsker::new(reports);
+        assert_eq!(asker.ask(vec![question()]).await, None);
     }
 
     #[tokio::test]

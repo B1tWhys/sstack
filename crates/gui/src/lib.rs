@@ -3,6 +3,7 @@
 //! Sessions, Providers, tools and the agent loop are in [`sstack`]. The window turns what the
 //! person does into calls on core and draws what core reports about the Session.
 
+mod asked;
 mod hint;
 mod inbox;
 mod reports;
@@ -22,9 +23,10 @@ use clap::Parser;
 use iced::futures::future::{BoxFuture, FutureExt};
 use iced::{Application, Program, Task};
 use reports::Reports;
+use sstack::question::Asker;
 use sstack::rebuild::{self, Binary, Checkout};
 use sstack::sandbox::Containers;
-use sstack::session_report::ReportingApprover;
+use sstack::session_report::{ReportingApprover, ReportingAsker};
 use sstack::session_setup::{
     LATEST, Start, listed_sessions, main_checkout, prepare, sessions_directory, starting_session,
 };
@@ -155,16 +157,18 @@ struct LiveSessions {
 
 impl Sessions for LiveSessions {
     /// Readies the Session `start` asks for. Shell commands that the Sandbox cannot run are asked
-    /// about in the window.
+    /// about in the window, and the model's Questions are put to the person there.
     fn open(&mut self, start: Start<'_>) -> Result<Opened> {
         let (reports, sender) = Reports::new();
         let approver = Arc::new(ReportingApprover::new(sender.clone()));
+        let asker: Arc<dyn Asker> = Arc::new(ReportingAsker::new(sender.clone()));
         let run = prepare()
             .start(start)
             .directory(&self.started_in)
             .maybe_connection(self.connection.as_deref())
             .maybe_model(self.model.as_deref())
             .approver(|_| approver)
+            .asker(|_| Some(asker))
             .containers(Arc::clone(&self.containers))
             .call()?;
         Ok(Opened {

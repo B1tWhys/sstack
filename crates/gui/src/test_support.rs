@@ -14,7 +14,7 @@ use sstack::provider::scripted::{Scripted, ScriptedProvider};
 use sstack::rebuild::Checkout;
 use sstack::sandbox::Sandbox;
 use sstack::session::{AssistantEntry, Entry, SessionLog, StopReason, ToolCall, Usage};
-use sstack::session_report::ReportingApprover;
+use sstack::session_report::{ReportingApprover, ReportingAsker};
 use sstack::session_setup::{Run, Start};
 use sstack::tools::ToolBox;
 use sstack::tools::project::Project;
@@ -47,6 +47,29 @@ pub fn bash_call(command: &str) -> AssistantEntry {
     }
 }
 
+/// Returns a model response asking the person `question`, with `choices`, recommending the first.
+pub fn ask_call(question: &str, choices: &[&str]) -> AssistantEntry {
+    let options: Vec<_> = choices
+        .iter()
+        .map(|label| serde_json::json!({ "label": label }))
+        .collect();
+    let input = serde_json::json!({ "questions": [{
+        "header": "Pick",
+        "question": question,
+        "options": options,
+        "recommended": 0,
+    }]});
+    AssistantEntry {
+        tool_calls: vec![ToolCall {
+            id: "1".into(),
+            name: "ask".into(),
+            input,
+        }],
+        stop: StopReason::ToolUse,
+        ..reply("")
+    }
+}
+
 /// Returns where the Session with id `id` is stored in `dir`.
 pub fn path_of(dir: &Path, id: &str) -> PathBuf {
     dir.join(id).with_extension("jsonl")
@@ -61,8 +84,8 @@ pub fn store(dir: &Path, id: &str, entries: &[Entry]) {
 }
 
 /// Opens the Session stored at `path`, working in `dir`, whose model gives the `script`ed
-/// responses in order. Shell commands are asked about through the Session's reports, as they
-/// are outside tests.
+/// responses in order. Shell commands are asked about, and the model's Questions put, through the
+/// Session's reports, as they are outside tests.
 fn open_stored(dir: &Path, path: PathBuf, script: Vec<Scripted>) -> Opened {
     let (log, entries) = SessionLog::open(&path).unwrap();
     let (reports, sender) = Reports::new();
@@ -74,7 +97,8 @@ fn open_stored(dir: &Path, path: PathBuf, script: Vec<Scripted>) -> Opened {
             .project(Arc::new(Project::new(dir).unwrap()))
             .sandbox(Arc::new(Sandbox::disabled()))
             .approver(Arc::new(ReportingApprover::new(sender.clone())))
-            .call(),
+            .call()
+            .with_asker(Some(Arc::new(ReportingAsker::new(sender.clone())))),
         context_limit: 1000,
     };
     let run = Run {

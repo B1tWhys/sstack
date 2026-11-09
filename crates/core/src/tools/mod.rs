@@ -1,5 +1,7 @@
 //! The tools the model can use to work on a project.
 
+/// The tool that puts Questions to the person.
+mod ask;
 /// The tool that runs shell commands.
 mod bash;
 /// The tools that read and change files.
@@ -20,6 +22,7 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use crate::provider::ToolSpec;
+use crate::question::Asker;
 use crate::sandbox::Sandbox;
 use crate::session::ToolCall;
 use crate::skills::Skill;
@@ -125,6 +128,16 @@ impl ToolBox {
     pub fn with_skills(mut self, skills: Vec<Skill>) -> Self {
         if !skills.is_empty() {
             self.tools.push(Box::new(skill::UseSkill::new(skills)));
+        }
+        self
+    }
+
+    /// Adds the ability to put Questions to the person through `asker`. With none, as when
+    /// nobody is there to answer, offers nothing new.
+    #[must_use]
+    pub fn with_asker(mut self, asker: Option<Arc<dyn Asker>>) -> Self {
+        if let Some(asker) = asker {
+            self.tools.push(Box::new(ask::Ask::new(asker)));
         }
         self
     }
@@ -271,5 +284,33 @@ mod tests {
         };
         let tools = tools.with_skills(vec![skill]);
         assert!(tools.specs().iter().any(|spec| spec.name == "skill"));
+    }
+
+    #[test]
+    fn offers_the_ask_tool_only_with_someone_to_ask() {
+        /// An Asker that never answers.
+        struct Silent;
+
+        #[async_trait]
+        impl Asker for Silent {
+            async fn ask(
+                &self,
+                _questions: Vec<crate::question::Question>,
+            ) -> Option<Vec<crate::question::Answer>> {
+                None
+            }
+        }
+
+        let (_dir, project) = git_project();
+        let tools = ToolBox::standard()
+            .project(project)
+            .sandbox(disabled())
+            .approver(Arc::new(DenyAll))
+            .call()
+            .with_asker(None);
+        assert!(!tools.specs().iter().any(|spec| spec.name == "ask"));
+
+        let tools = tools.with_asker(Some(Arc::new(Silent)));
+        assert!(tools.specs().iter().any(|spec| spec.name == "ask"));
     }
 }

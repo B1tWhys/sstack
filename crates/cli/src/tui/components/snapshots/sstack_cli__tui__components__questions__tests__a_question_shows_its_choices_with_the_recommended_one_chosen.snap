@@ -1,0 +1,18 @@
+---
+source: crates/cli/src/tui/components/questions.rs
+expression: shown.backend()
+---
+"                                                            "
+"         ┌ Question 1 of 2: Storage ──────────────┐         "
+"         │Which Storage?                          │         "
+"         │                                        │         "
+"         │> 1. Files (recommended)                │         "
+"         │     One per Session                    │         "
+"         │  2. SQLite                             │         "
+"         │  3. Own answer:                        │         "
+"         │                                        │         "
+"         │Up/Down choose, Enter confirms,         │         "
+"         │Shift-Tab goes back, Esc answers in the │         "
+"         │chat                                    │         "
+"         └────────────────────────────────────────┘         "
+"                                                            "

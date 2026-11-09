@@ -23,12 +23,12 @@ use crate::session_report::SessionReport;
 ///    |  Idle  | <----------------- | Working | --------> | Parked |
 ///    +--------+                    +---------+ <-------- +--------+
 ///        ^                           ^     |    continued or
-///        |              approval     |     |    turn started
-///        |              answered     |     | approval
-///        |                           |     | requested
-///        |    turn ended     +------------------+
-///        +------------------ | AwaitingApproval |
-///                            +------------------+
+///        |                           |     |    turn started
+///        |              answered     |     | asked
+///        |                           |     |
+///        |    turn ended     +----------------+
+///        +------------------ | AwaitingAnswer |
+///                            +----------------+
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionState {
@@ -36,8 +36,9 @@ pub enum SessionState {
     Idle,
     /// A Turn is running without needing the person.
     Working,
-    /// A Turn cannot continue until the person answers about a shell command.
-    AwaitingApproval,
+    /// A Turn cannot continue until the person answers a question: whether a shell command may
+    /// run, or the model's Questions.
+    AwaitingAnswer,
     /// A Turn stopped between Steps so that the Running Harness could stop, and will carry on.
     Parked,
 }
@@ -47,10 +48,11 @@ pub enum SessionState {
 pub enum SessionEvent {
     /// A Turn was started.
     TurnStarted,
-    /// The running Turn asked the person about a shell command.
-    ApprovalRequested,
-    /// The person answered about a shell command.
-    ApprovalAnswered,
+    /// The running Turn asked the person whether a shell command may run, or put Questions to
+    /// them.
+    Asked,
+    /// The person answered what the running Turn asked.
+    Answered,
     /// The running Turn ended, however that came about.
     TurnEnded,
     /// The running Turn stopped between Steps, as asked.
@@ -66,7 +68,7 @@ impl SessionState {
         match self {
             Self::Idle => Self::after_idle(event),
             Self::Working => Self::after_working(event),
-            Self::AwaitingApproval => Self::after_awaiting_approval(event),
+            Self::AwaitingAnswer => Self::after_awaiting_answer(event),
             Self::Parked => Self::after_parked(event),
         }
     }
@@ -82,7 +84,7 @@ impl SessionState {
     /// Returns what a working Session does on `event`.
     fn after_working(event: SessionEvent) -> Self {
         match event {
-            SessionEvent::ApprovalRequested => Self::AwaitingApproval,
+            SessionEvent::Asked => Self::AwaitingAnswer,
             SessionEvent::TurnEnded => Self::Idle,
             SessionEvent::Parked => Self::Parked,
             _ => Self::Working,
@@ -90,11 +92,11 @@ impl SessionState {
     }
 
     /// Returns what a Session waiting on the person does on `event`.
-    fn after_awaiting_approval(event: SessionEvent) -> Self {
+    fn after_awaiting_answer(event: SessionEvent) -> Self {
         match event {
-            SessionEvent::ApprovalAnswered => Self::Working,
+            SessionEvent::Answered => Self::Working,
             SessionEvent::TurnEnded => Self::Idle,
-            _ => Self::AwaitingApproval,
+            _ => Self::AwaitingAnswer,
         }
     }
 
@@ -110,13 +112,13 @@ impl SessionState {
     /// Returns whether a Turn is running, which a Rebuild or a quit has to wait for.
     #[must_use]
     pub fn in_turn(self) -> bool {
-        matches!(self, Self::Working | Self::AwaitingApproval)
+        matches!(self, Self::Working | Self::AwaitingAnswer)
     }
 
     /// Returns whether the Session is held up by the person rather than by the agent.
     #[must_use]
     pub fn is_waiting(self) -> bool {
-        matches!(self, Self::Idle | Self::AwaitingApproval)
+        matches!(self, Self::Idle | Self::AwaitingAnswer)
     }
 }
 
@@ -537,20 +539,18 @@ fn resume(sessions: &mut dyn OpenSessions) {
 
 #[cfg(test)]
 mod tests {
-    use super::SessionEvent::{
-        ApprovalAnswered, ApprovalRequested, Continued, TurnEnded, TurnStarted,
-    };
-    use super::SessionState::{AwaitingApproval, Idle, Parked, Working};
+    use super::SessionEvent::{Answered, Asked, Continued, TurnEnded, TurnStarted};
+    use super::SessionState::{AwaitingAnswer, Idle, Parked, Working};
     use super::*;
 
     #[test]
     fn sessions_follow_their_transitions() {
         let transitions = [
             (Idle, TurnStarted, Working),
-            (Working, ApprovalRequested, AwaitingApproval),
+            (Working, Asked, AwaitingAnswer),
             (Working, TurnEnded, Idle),
-            (AwaitingApproval, ApprovalAnswered, Working),
-            (AwaitingApproval, TurnEnded, Idle),
+            (AwaitingAnswer, Answered, Working),
+            (AwaitingAnswer, TurnEnded, Idle),
             (Working, SessionEvent::Parked, Parked),
             (Parked, Continued, Working),
             (Parked, TurnStarted, Working),
@@ -563,15 +563,15 @@ mod tests {
     #[test]
     fn events_that_mean_nothing_change_nothing() {
         let ignored = [
-            (Idle, ApprovalRequested),
-            (Idle, ApprovalAnswered),
+            (Idle, Asked),
+            (Idle, Answered),
             (Idle, TurnEnded),
             (Working, TurnStarted),
-            (Working, ApprovalAnswered),
-            (AwaitingApproval, TurnStarted),
-            (AwaitingApproval, ApprovalRequested),
+            (Working, Answered),
+            (AwaitingAnswer, TurnStarted),
+            (AwaitingAnswer, Asked),
             (Idle, SessionEvent::Parked),
-            (AwaitingApproval, SessionEvent::Parked),
+            (AwaitingAnswer, SessionEvent::Parked),
             (Parked, TurnEnded),
         ];
         for (state, event) in ignored {
@@ -583,11 +583,11 @@ mod tests {
     fn a_turn_lasts_until_it_ends_and_only_the_person_can_be_waited_on() {
         assert!(!Idle.in_turn());
         assert!(Working.in_turn());
-        assert!(AwaitingApproval.in_turn());
+        assert!(AwaitingAnswer.in_turn());
         assert!(!Parked.in_turn());
         assert!(Idle.is_waiting());
         assert!(!Working.is_waiting());
-        assert!(AwaitingApproval.is_waiting());
+        assert!(AwaitingAnswer.is_waiting());
         assert!(!Parked.is_waiting());
     }
 
@@ -595,7 +595,7 @@ mod tests {
     fn ctrl_c_only_ever_affects_the_session_on_screen() {
         assert_eq!(interrupt(Working, false), Interrupt::CancelTurn);
         assert_eq!(interrupt(Working, true), Interrupt::CancelTurn);
-        assert_eq!(interrupt(AwaitingApproval, true), Interrupt::CancelTurn);
+        assert_eq!(interrupt(AwaitingAnswer, true), Interrupt::CancelTurn);
         assert_eq!(interrupt(Idle, false), Interrupt::Quit);
         assert_eq!(interrupt(Idle, true), Interrupt::RefuseToQuit);
     }

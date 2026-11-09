@@ -88,9 +88,10 @@ impl SessionController {
         self.state
     }
 
-    /// Notes that the person answered the Session's question about a shell command.
+    /// Notes that the person answered what the Session's Turn asked: whether a shell command may
+    /// run, or its Questions.
     pub fn answered(&mut self) {
-        self.moved(SessionEvent::ApprovalAnswered);
+        self.moved(SessionEvent::Answered);
     }
 
     /// Carries on the Turn that parked, if there is one. An interface calls this once it has
@@ -116,7 +117,7 @@ impl SessionController {
                 self.naming = NameWork::Unwanted;
                 return;
             }
-            SessionReport::Approval(_) => SessionEvent::ApprovalRequested,
+            SessionReport::Approval(_) | SessionReport::Question(_) => SessionEvent::Asked,
             SessionReport::TurnEnded(Ok(TurnEnd::Paused)) => SessionEvent::Parked,
             SessionReport::TurnEnded(_) => SessionEvent::TurnEnded,
             _ => return,

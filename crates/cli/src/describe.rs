@@ -18,6 +18,14 @@ pub fn tool_failed(name: &str) -> String {
     format!("[{name}] failed")
 }
 
+/// What the person sees after declining to answer the model's Questions where they were asked.
+pub const DECLINED: &str = "[declined to answer the questions; reply in the conversation]";
+
+/// Records what the person answered to the model's Questions, already `described` one per line.
+pub fn answered(described: &str) -> String {
+    format!("[answered] {described}")
+}
+
 /// Warns that the context window is nearly full, so the person can start a new Session before
 /// requests begin to fail. Both counts are in tokens.
 pub fn context_warning(used: u64, limit: u64) -> String {

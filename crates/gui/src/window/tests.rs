@@ -15,7 +15,8 @@ use sstack::session_name::Naming;
 use tempfile::TempDir;
 
 use super::*;
-use crate::test_support::{bash_call, readied, reply, typed, worktree_of};
+use crate::asked::Asking;
+use crate::test_support::{ask_call, bash_call, path_of, readied, reply, typed, worktree_of};
 use crate::transcript::{Approval, Block, Decision};
 
 /// Opens a window on a new Session whose model gives the `script`ed responses in order.
@@ -797,7 +798,7 @@ async fn a_shell_command_the_sandbox_cannot_run_runs_once_the_person_allows_it()
     let mut reports = reports(&window);
     let _ = send(&mut window, "go");
     until_asked(&mut window, &mut reports).await;
-    assert_eq!(window.view_ref().state(), SessionState::AwaitingApproval);
+    assert_eq!(window.view_ref().state(), SessionState::AwaitingAnswer);
 
     let _ = window.update(Message::Answer(true));
 
@@ -1011,7 +1012,7 @@ async fn interrupting_while_quitting_stops_quitting_and_leaves_the_turn_running(
     let _ = window.update(Message::Interrupt);
 
     assert!(!window.harness.phase().is_draining());
-    assert_eq!(window.view_ref().state(), SessionState::AwaitingApproval);
+    assert_eq!(window.view_ref().state(), SessionState::AwaitingAnswer);
 }
 
 #[tokio::test]
@@ -1206,6 +1207,168 @@ async fn clicking_a_link_that_leads_nowhere_changes_nothing() {
 
     assert_eq!(task.units(), 0);
     assert_eq!(blocks(&window), []);
+}
+
+/// Passes `reports` to `window` until the running Turn puts the model's Questions to the person.
+async fn until_questioned(
+    window: &mut Window,
+    reports: &mut (impl Stream<Item = SessionReport> + Unpin),
+) {
+    loop {
+        let report = reports.next().await.expect("the Turn should ask");
+        let asked = matches!(report, SessionReport::Question(_));
+        let _ = window.update(Message::Report("1".into(), report));
+        if asked {
+            return;
+        }
+    }
+}
+
+/// Opens a window whose model asks which store to use, then replies, and runs a Turn until the
+/// Questions are open, returning the window's reports for the rest of the Turn.
+async fn questioned() -> (
+    TempDir,
+    Window,
+    impl Stream<Item = SessionReport> + Unpin + use<>,
+) {
+    let script = vec![
+        Ok(ask_call("Which store?", &["Files", "SQLite"])),
+        Ok(reply("noted")),
+    ];
+    let (dir, mut window) = window(script);
+    let mut reports = reports(&window);
+    let _ = send(&mut window, "grill me");
+    until_questioned(&mut window, &mut reports).await;
+    (dir, window, reports)
+}
+
+/// Returns the output the model got from the Session's one tool call, and whether it failed.
+fn tool_result(dir: &Path) -> Option<(String, bool)> {
+    let entries = sstack::session::lock_free_read(&path_of(dir, "1")).unwrap();
+    entries.into_iter().find_map(|entry| match entry {
+        Entry::ToolResult {
+            output, is_error, ..
+        } => Some((output, is_error)),
+        _ => None,
+    })
+}
+
+/// Returns where the newest set of the model's Questions in the transcript stands.
+fn questions_state(window: &Window) -> Option<Asking> {
+    blocks(window).iter().rev().find_map(|block| match block {
+        Block::Questions(asked) => Some(asked.state.clone()),
+        _ => None,
+    })
+}
+
+#[tokio::test]
+async fn the_models_questions_show_with_the_recommended_choice_picked() {
+    let (_dir, window, _reports) = questioned().await;
+    assert_eq!(window.view_ref().state(), SessionState::AwaitingAnswer);
+
+    let mut ui = simulator(window.view());
+
+    let shown = [
+        "Question: Pick",
+        "Which store?",
+        "Files (recommended)",
+        "SQLite",
+        "Own answer:",
+        "Send answers",
+        "Answer in the chat",
+    ];
+    for shown in shown {
+        assert!(ui.find(shown).is_ok(), "{shown} should be shown");
+    }
+    assert_eq!(questions_state(&window), Some(Asking::Open));
+}
+
+#[tokio::test]
+async fn picking_a_choice_and_sending_gives_the_model_the_answer() {
+    let (dir, mut window, mut reports) = questioned().await;
+
+    interact(&mut window, |ui| {
+        let _ = ui.click("SQLite").unwrap();
+    });
+    interact(&mut window, |ui| {
+        let _ = ui.click("Send answers").unwrap();
+    });
+
+    assert_eq!(window.view_ref().state(), SessionState::Working);
+    let _ = until_turn_ends_on(&mut window, &mut reports).await;
+    assert_eq!(
+        tool_result(dir.path()),
+        Some(("Pick: SQLite".into(), false))
+    );
+    let mut ui = simulator(window.view());
+    assert!(ui.find("Answered: Pick: SQLite").is_ok());
+    assert!(ui.find("Send answers").is_err());
+}
+
+#[tokio::test]
+async fn the_person_can_answer_in_their_own_words() {
+    let (dir, mut window, mut reports) = questioned().await;
+
+    interact(&mut window, |ui| {
+        let _ = ui.click("Type your own answer").unwrap();
+        let _ = ui.typewrite("in git");
+    });
+    let _ = window.update(Message::SendAnswers);
+
+    let _ = until_turn_ends_on(&mut window, &mut reports).await;
+    let answer = "Pick: \"in git\" (own answer)";
+    assert_eq!(tool_result(dir.path()), Some((answer.into(), false)));
+}
+
+#[tokio::test]
+async fn declining_tells_the_model_to_wait_for_the_conversation() {
+    let (dir, mut window, mut reports) = questioned().await;
+
+    interact(&mut window, |ui| {
+        let _ = ui.click("Answer in the chat").unwrap();
+    });
+
+    assert_eq!(window.view_ref().state(), SessionState::Working);
+    let _ = until_turn_ends_on(&mut window, &mut reports).await;
+    let (output, failed) = tool_result(dir.path()).unwrap();
+    assert!(failed);
+    assert!(
+        output.starts_with("the user declined to answer here"),
+        "{output}"
+    );
+    assert_eq!(questions_state(&window), Some(Asking::Declined));
+}
+
+#[tokio::test]
+async fn interrupting_leaves_the_questions_unanswered() {
+    let (_dir, mut window, mut reports) = questioned().await;
+
+    let _ = window.update(Message::Interrupt);
+    let _ = until_turn_ends_on(&mut window, &mut reports).await;
+
+    assert_eq!(questions_state(&window), Some(Asking::Unanswered));
+    assert!(!window.view_ref().asking());
+    let _ = window.update(Message::SendAnswers);
+    assert_eq!(questions_state(&window), Some(Asking::Unanswered));
+}
+
+#[tokio::test]
+async fn a_pill_shows_while_the_models_questions_wait_out_of_view() {
+    let (_dir, mut window, _reports) = questioned().await;
+
+    let _ = window.update(Message::Scrolled { at_end: false });
+    assert!(simulator(window.view()).find(WAITING).is_ok());
+
+    let _ = window.update(Message::Choose {
+        question: 0,
+        row: 1,
+    });
+    let _ = window.update(Message::Write {
+        question: 0,
+        words: "mine".into(),
+    });
+    let _ = window.update(Message::Decline);
+    assert!(simulator(window.view()).find(WAITING).is_err());
 }
 
 mod sessions;

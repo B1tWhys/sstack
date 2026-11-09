@@ -63,7 +63,7 @@ impl Waits {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::running_harness::SessionState::{AwaitingApproval, Idle, Working};
+    use crate::running_harness::SessionState::{AwaitingAnswer, Idle, Working};
 
     /// A moment well before any test runs.
     const LONG_AGO: SystemTime = SystemTime::UNIX_EPOCH;
@@ -87,9 +87,9 @@ mod tests {
         let later = LONG_AGO + Duration::from_secs(5);
         assert_eq!(waits.waited(later), Duration::from_secs(5));
 
-        waits.moved(Working, AwaitingApproval);
+        waits.moved(Working, AwaitingAnswer);
         assert_eq!(waits.waited(LONG_AGO), Duration::ZERO);
-        waits.moved(AwaitingApproval, Working);
+        waits.moved(AwaitingAnswer, Working);
         assert_eq!(waits.position(Working), (true, working_since));
     }
 

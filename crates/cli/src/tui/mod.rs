@@ -36,10 +36,11 @@ use crossterm::execute;
 use crossterm::style::Print;
 use event::{Event, EventReceiver, EventSender, SessionSender};
 use pane::Opened;
+use sstack::question::Asker;
 use sstack::rebuild::{self, Checkout};
 use sstack::running_harness::Exit;
 use sstack::sandbox::Containers;
-use sstack::session_report::{ReportingApprover, SessionReport};
+use sstack::session_report::{ReportingApprover, ReportingAsker, SessionReport};
 use sstack::session_setup::{
     Start, installed_skills, listed_sessions, main_checkout, prepare, sessions_directory,
     starting_session,
@@ -124,12 +125,16 @@ impl Sessions for LiveSessions<'_> {
         let approver = |id: &str| -> Arc<dyn Approver> {
             Arc::new(ReportingApprover::new(report_to(id).reporter()))
         };
+        let asker = |id: &str| -> Option<Arc<dyn Asker>> {
+            Some(Arc::new(ReportingAsker::new(report_to(id).reporter())))
+        };
         let run = prepare()
             .start(start)
             .directory(&self.started_in)
             .maybe_connection(self.args.connection.as_deref())
             .maybe_model(self.args.model.as_deref())
             .approver(approver)
+            .asker(asker)
             .containers(self.containers.clone())
             .call()?;
         let id = workspace::session_id(&run.session);

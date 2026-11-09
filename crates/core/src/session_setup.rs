@@ -14,6 +14,7 @@ use crate::agent::{Agent, AgentConfig};
 use crate::config::{Config, ConfigError, Connection};
 use crate::credentials::{MissingSecret, SystemKeyring, resolve_secret};
 use crate::provider::{Effort, Provider, ProviderError};
+use crate::question::Asker;
 use crate::sandbox::{Containers, Sandbox};
 use crate::session::{Entry, SessionError, SessionLog};
 use crate::session_name::Naming;
@@ -201,6 +202,9 @@ pub fn prepare(
     /// Makes, from the Session's id, whoever decides whether each shell command the model asks to
     /// run on the host may run.
     approver: impl FnOnce(&str) -> Arc<dyn Approver>,
+    /// Makes, from the Session's id, whoever answers the model's Questions. With none, as when
+    /// nobody is there to answer, the model cannot ask any.
+    asker: impl FnOnce(&str) -> Option<Arc<dyn Asker>>,
     /// The runtime for the Session's Sandbox, shared with every other Session of the run.
     containers: Arc<Containers>,
 ) -> Result<Run, SetupError> {
@@ -223,6 +227,7 @@ pub fn prepare(
         .id(&id)
         .place(&place)
         .approver(approver(&id))
+        .maybe_asker(asker(&id))
         .containers(containers)
         .skills(&installed)
         .listing(&listing)
@@ -357,6 +362,8 @@ fn agent_config(
     place: &Workplace,
     /// Who decides on the Session's shell commands that would run on the host.
     approver: Arc<dyn Approver>,
+    /// Who answers the model's Questions in the Session, if anyone does.
+    asker: Option<Arc<dyn Asker>>,
     /// The runtime for the Session's Sandbox.
     containers: Arc<Containers>,
     /// Every Skill installed for the Session. The model may read the files of all of them, since
@@ -381,7 +388,8 @@ fn agent_config(
         .approver(approver.clone())
         .secret_env(secret_env.clone())
         .call()
-        .with_skills(offered_skills(skills));
+        .with_skills(offered_skills(skills))
+        .with_asker(asker);
     let home = dirs::home_dir();
     let claude = skills::claude_directory(home.as_deref(), |name| std::env::var_os(name));
     let system = workspace::system_prompt(root, claude.as_deref());

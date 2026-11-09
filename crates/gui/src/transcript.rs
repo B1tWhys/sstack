@@ -17,6 +17,8 @@ use sstack::agent::{AgentEvent, ToolCallSummary, TurnEnd};
 use sstack::session::{AssistantEntry, Entry};
 use sstack::session_report::{ApprovalRequest, SessionReport};
 
+use crate::asked::{Asked, Asking, Controls};
+
 pub use self::reply::Reply;
 
 /// Space between the parts of the transcript, in logical pixels.
@@ -24,11 +26,23 @@ const SPACING: f32 = 10.0;
 
 /// The Session as it unfolds in the window: what the Session held when it opened, what the
 /// person sent, what the model thought and replied, the tools it called and the questions about
-/// them, and what the window tells the person.
+/// them, the model's Questions, and what the window tells the person.
 #[derive(Debug, Default)]
 pub struct Transcript {
     /// Everything shown, oldest first.
     blocks: Vec<Block>,
+}
+
+/// What pressing things in the transcript sends to the window.
+#[derive(Debug, Clone)]
+pub struct Handlers<Message> {
+    /// Sent when the person answers an open question about a shell command, saying whether it
+    /// may run.
+    pub answer: fn(bool) -> Message,
+    /// Sent when the person clicks a link in a reply, with the link's address.
+    pub open: fn(String) -> Message,
+    /// Sent by the controls of the model's open Questions.
+    pub questions: Controls<Message>,
 }
 
 /// One part of the transcript.
@@ -49,6 +63,8 @@ pub enum Block {
         /// The question whether the call's command may run, if the person was asked.
         approval: Option<Approval>,
     },
+    /// A set of the model's Questions, and what became of them.
+    Questions(Asked),
     /// Something the window tells the person, such as how a Turn ended or why it could not do
     /// what they asked.
     Notice(String),
@@ -106,6 +122,11 @@ impl Transcript {
                 true
             }
             SessionReport::Approval(request) => self.ask(request),
+            SessionReport::Question(request) => {
+                let asked = Asked::new(request.questions.clone());
+                self.blocks.push(Block::Questions(asked));
+                true
+            }
             _ => false,
         }
     }
@@ -123,6 +144,19 @@ impl Transcript {
         }
     }
 
+    /// Returns the oldest set of the model's Questions still open, to work on or settle.
+    pub fn open_questions(&mut self) -> Option<&mut Asked> {
+        self.open_asked().next()
+    }
+
+    /// Returns every set of the model's Questions still open, oldest first.
+    fn open_asked(&mut self) -> impl Iterator<Item = &mut Asked> {
+        self.blocks.iter_mut().filter_map(|block| match block {
+            Block::Questions(asked) if asked.state == Asking::Open => Some(asked),
+            _ => None,
+        })
+    }
+
     /// Returns everything shown, oldest first.
     #[cfg(test)]
     pub fn blocks(&self) -> &[Block] {
@@ -130,14 +164,12 @@ impl Transcript {
     }
 
     /// Draws the transcript, one block under another, with the model's replies formatted as
-    /// Markdown. Pressing Allow or Deny on an open question sends what `answer` makes of whether
-    /// the command may run, and clicking a link in a reply sends what `open` makes of its address.
+    /// Markdown. What the person presses in it sends what `handlers` says.
     pub fn view<'a, Message: Clone + 'a>(
         &'a self,
-        answer: fn(bool) -> Message,
-        open: fn(String) -> Message,
+        handlers: &Handlers<Message>,
     ) -> Element<'a, Message> {
-        column(self.blocks.iter().map(|block| block.view(answer, open)))
+        column(self.blocks.iter().map(|block| block.view(handlers)))
             .spacing(SPACING)
             .into()
     }
@@ -232,11 +264,15 @@ impl Transcript {
     }
 
     /// Notes how a Turn ended or the error that stopped it, returning whether the transcript
-    /// changed. Questions the Turn left open are marked unanswered.
+    /// changed. Questions the Turn left open, of either kind, are marked unanswered.
     fn ended(&mut self, outcome: Result<TurnEnd, &String>) -> bool {
         let mut lapsed = false;
         for approval in self.open_approvals() {
             approval.decision = Decision::Unanswered;
+            lapsed = true;
+        }
+        for asked in self.open_asked() {
+            asked.state = Asking::Unanswered;
             lapsed = true;
         }
         let words = match outcome {
@@ -308,17 +344,15 @@ impl Transcript {
 
 impl Block {
     /// Draws this part of the transcript: a reply formatted as Markdown, and everything else as
-    /// plain text, with a label for any kind of block that could be mistaken for the reply.
-    /// Pressing Allow or Deny on an open question sends what `answer` makes of whether the command
-    /// may run, and clicking a link in a reply sends what `open` makes of its address.
+    /// plain text, with a label for any kind of block that could be mistaken for the reply. What
+    /// the person presses in it sends what `handlers` says.
     fn view<'a, Message: Clone + 'a>(
         &'a self,
-        answer: fn(bool) -> Message,
-        open: fn(String) -> Message,
+        handlers: &Handlers<Message>,
     ) -> Element<'a, Message> {
         match self {
             Self::Prompt(prompt) => text(format!("> {prompt}")).into(),
-            Self::Reply(reply) => reply.view(open),
+            Self::Reply(reply) => reply.view(handlers.open),
             Self::Reasoning(thought) => text(format!("Thinking: {thought}")).into(),
             Self::Tool {
                 call,
@@ -326,8 +360,9 @@ impl Block {
                 approval,
             } => {
                 let line = tool_summary(call, *failed, approval.as_ref());
-                tool_view(line, approval.as_ref(), answer)
+                tool_view(line, approval.as_ref(), handlers.answer)
             }
+            Self::Questions(asked) => asked.view(&handlers.questions),
             Self::Notice(words) => text(format!("Note: {words}")).into(),
         }
     }

@@ -38,6 +38,7 @@ pub async fn run(args: &Args, prompt: &str) -> Result<ExitCode> {
         .maybe_connection(args.connection.as_deref())
         .maybe_model(args.model.as_deref())
         .approver(|_| Arc::new(DenyAll))
+        .asker(|_| None)
         .containers(Arc::new(Containers::new(Vec::new())))
         .call()?;
     let cancel = CancellationToken::new();

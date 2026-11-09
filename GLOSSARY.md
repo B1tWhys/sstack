@@ -22,6 +22,10 @@ _Avoid_: Round, exchange
 One model request plus the tool executions caused by its response.
 _Avoid_: Iteration, call
 
+**Question**:
+Something the model asks the person during a Turn, offering answers to choose from and room for their own, which holds up the Turn until they answer.
+_Avoid_: Prompt, query, survey
+
 ### Models
 
 **Provider**:

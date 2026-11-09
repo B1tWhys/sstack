@@ -41,7 +41,7 @@ pub enum Event {
     /// unwraps these, so components never see one.
     Session(String, Box<Event>),
     /// Core reported something the person should see: what a Session's Turns did, a question
-    /// about a shell command, a notice, or the end of the Rebuild's build.
+    /// about a shell command, the model's Questions, a notice, or the end of the Rebuild's build.
     Report(SessionReport),
     /// The nvim behind the Session's input reported something.
     Vim(VimEvent),
@@ -108,6 +108,9 @@ pub enum Action {
     Interrupt,
     /// The person answered a question about a shell command.
     ApprovalAnswered,
+    /// The person answered the model's Questions, or declined to, which the transcript records
+    /// in these words.
+    QuestionsAnswered(String),
     /// The person asked to see the Session below this one in the sidebar.
     NextSession,
     /// The person asked to see the Session above this one in the sidebar.
