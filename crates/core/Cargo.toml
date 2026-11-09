@@ -38,7 +38,7 @@ yaml-rust2 = { version = "0.13", default-features = false }
 apple-native-keyring-store = { version = "1", features = ["keychain"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-zbus-secret-service-keyring-store = { version = "1", features = ["rt-tokio-crypto-rust"] }
+zbus-secret-service-keyring-store = { version = "1", features = ["rt-async-io-crypto-rust"] }
 
 [dev-dependencies]
 mockall = "0.15.0"

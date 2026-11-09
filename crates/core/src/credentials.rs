@@ -45,6 +45,7 @@ fn platform_store() -> keyring_core::Result<Arc<CredentialStore>> {
     Ok(apple_native_keyring_store::keychain::Store::new()?)
 }
 
+/// Opens the credential store of the operating system this was built for.
 #[cfg(target_os = "linux")]
 fn platform_store() -> keyring_core::Result<Arc<CredentialStore>> {
     Ok(zbus_secret_service_keyring_store::Store::new()?)
