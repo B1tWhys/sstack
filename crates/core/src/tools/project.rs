@@ -54,7 +54,7 @@ impl Project {
     /// # Errors
     /// Returns an error if the path is outside the project or hidden from the model.
     pub fn resolve(&self, path: &str) -> Result<PathBuf, ToolError> {
-        let denied = || ToolError(format!("access denied: {path}"));
+        let denied = || ToolError::Failed(format!("access denied: {path}"));
         let resolved = self.canonical(path).ok_or_else(denied)?;
         let visible = resolved.starts_with(&self.root)
             && !is_protected(&resolved)
@@ -75,7 +75,7 @@ impl Project {
             if readable && !is_protected(&resolved) {
                 Ok(resolved)
             } else {
-                Err(ToolError(format!("access denied: {path}")))
+                Err(ToolError::Failed(format!("access denied: {path}")))
             }
         })
     }

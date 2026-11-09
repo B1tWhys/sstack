@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use tokio::process::Command;
 
 use super::project::Project;
-use super::{Approver, Tool, ToolError, parse_input};
+use super::{Approver, Tool, ToolError, Verdict, parse_input};
 use crate::provider::ToolSpec;
 use crate::sandbox::{Failure, Sandbox};
 
@@ -42,7 +42,9 @@ impl Bash {
     async fn sandboxed(&self, script: &str) -> Result<String, ToolError> {
         match self.sandbox.run(script, TIMEOUT).await {
             Ok(output) => render(&output),
-            Err(Failure::TimedOut(limit)) => Err(ToolError(format!("timed out after {limit:?}"))),
+            Err(Failure::TimedOut(limit)) => {
+                Err(ToolError::Failed(format!("timed out after {limit:?}")))
+            }
             Err(Failure::Unavailable(why)) => {
                 let note = format!("The Sandbox is unavailable, so this runs on the host: {why}");
                 self.on_host(script, &note).await
@@ -52,10 +54,11 @@ impl Bash {
 
     /// Runs `script` on the host once the person approves, telling them `note`.
     async fn on_host(&self, script: &str, note: &str) -> Result<String, ToolError> {
-        if !self.approver.approve(script, Some(note)).await {
-            return Err(ToolError("the user denied this command".to_owned()));
+        match self.approver.approve(script, Some(note)).await {
+            Verdict::Allow => render(&finish(self.command(script).output(), TIMEOUT).await?),
+            Verdict::Deny => Err(ToolError::Failed("the user denied this command".to_owned())),
+            Verdict::Defer => Err(ToolError::Deferred),
         }
-        render(&finish(self.command(script).output(), TIMEOUT).await?)
     }
 
     /// Builds the process for one command on the host, without starting it.
@@ -95,7 +98,7 @@ fn render(output: &Output) -> Result<String, ToolError> {
     if output.status.success() {
         Ok(text)
     } else {
-        Err(ToolError(format!("{}\n{text}", output.status)))
+        Err(ToolError::Failed(format!("{}\n{text}", output.status)))
     }
 }
 
@@ -106,8 +109,8 @@ async fn finish(
 ) -> Result<Output, ToolError> {
     match tokio::time::timeout(limit, output).await {
         Ok(Ok(output)) => Ok(output),
-        Ok(Err(error)) => Err(ToolError(format!("failed to start bash: {error}"))),
-        Err(_) => Err(ToolError(format!("timed out after {limit:?}"))),
+        Ok(Err(error)) => Err(ToolError::Failed(format!("failed to start bash: {error}"))),
+        Err(_) => Err(ToolError::Failed(format!("timed out after {limit:?}"))),
     }
 }
 
@@ -197,9 +200,9 @@ mod tests {
 
     #[async_trait]
     impl Approver for Noting {
-        async fn approve(&self, _command: &str, note: Option<&str>) -> bool {
+        async fn approve(&self, _command: &str, note: Option<&str>) -> Verdict {
             self.0.lock().unwrap().push(note.map(str::to_owned));
-            true
+            Verdict::Allow
         }
     }
 
@@ -248,7 +251,7 @@ mod tests {
             Arc::new(DenyAll),
         );
         let error = tool.run(json!({"command": "sleep 999"})).await.unwrap_err();
-        assert_eq!(error.0, "timed out after 600s");
+        assert_eq!(error.to_string(), "timed out after 600s");
     }
 
     #[tokio::test]
@@ -287,8 +290,8 @@ mod tests {
             .run(json!({"command": "echo nope; exit 3"}))
             .await
             .unwrap_err();
-        assert!(error.0.contains("nope"));
-        assert!(error.0.contains('3'));
+        assert!(error.to_string().contains("nope"));
+        assert!(error.to_string().contains('3'));
     }
 
     #[tokio::test]
@@ -296,7 +299,7 @@ mod tests {
         let (dir, project) = git_project();
         let tool = tool(project, disabled(), Arc::new(DenyAll));
         let error = tool.run(json!({"command": "touch ran"})).await.unwrap_err();
-        assert_eq!(error.0, "the user denied this command");
+        assert_eq!(error.to_string(), "the user denied this command");
         assert!(!dir.path().join("ran").exists());
     }
 
@@ -317,8 +320,8 @@ mod tests {
         let failed = finish(async { Err(io::Error::other("gone")) }, limit)
             .await
             .unwrap_err();
-        assert_eq!(slow.0, "timed out after 1ms");
-        assert_eq!(failed.0, "failed to start bash: gone");
+        assert_eq!(slow.to_string(), "timed out after 1ms");
+        assert_eq!(failed.to_string(), "failed to start bash: gone");
     }
 
     #[test]

@@ -202,8 +202,8 @@ async fn a_rebuild_of_a_worktree_the_session_lacks_says_why_and_work_carries_on(
 }
 
 #[tokio::test]
-async fn a_rebuild_relaunches_only_once_the_running_turn_reaches_the_end_of_its_step() {
-    let (_dir, mut window) = window(vec![Ok(bash_call("touch ran")), Ok(reply("later"))]);
+async fn a_rebuild_puts_off_an_open_question_and_relaunches_once_the_turn_parks() {
+    let (dir, mut window) = window(vec![Ok(bash_call("touch ran")), Ok(reply("later"))]);
     let mut reports = reports(&window);
     let _ = send(&mut window, "go");
     until_asked(&mut window, &mut reports).await;
@@ -211,12 +211,14 @@ async fn a_rebuild_relaunches_only_once_the_running_turn_reaches_the_end_of_its_
 
     let _ = window.update(Message::Built(Ok(NEW_BINARY.into())));
     assert_eq!(relaunched(&window), None);
-    let _ = window.update(Message::Answer(false));
     let _ = until_turn_ends_on(&mut window, &mut reports).await;
 
     assert_eq!(relaunched(&window), Some(&PathBuf::from(NEW_BINARY)));
+    assert!(!window.view_ref().asking());
+    assert!(!dir.path().join("ran").exists());
+    let put_off = asked_bash("touch ran", Decision::PutOff, false);
     let parked = notice("the Turn paused until sstack runs again");
-    assert_eq!(blocks(&window).last(), Some(&parked));
+    assert_eq!(blocks(&window)[1..], [put_off, parked]);
 }
 
 #[tokio::test]
@@ -272,7 +274,8 @@ async fn a_build_that_ends_after_it_was_stopped_changes_nothing() {
 
 /// What the window says while a Rebuild's build runs.
 const BUILDING: &str = "Building sstack-gui for a Rebuild, which relaunches into this Session \
-                        once built and once no Turn is running. Interrupt to back out, or close \
+                        once built and once no Turn is running. Commands waiting for approval are \
+                        asked about again after the relaunch. Interrupt to back out, or close \
                         the window to quit instead.";
 
 /// What the window says once a Rebuild's build has worked and a Turn is still running.
@@ -1140,7 +1143,6 @@ async fn closing_the_window_during_a_rebuild_quits_instead_once_the_turn_stops()
     let waiting = "Quitting once every running Turn reaches the end of its Step. Quit or \
                    close the window again to quit now, or interrupt to carry on.";
     assert!(simulator(window.view()).find(waiting).is_ok());
-    let _ = window.update(Message::Answer(false));
     let _ = until_turn_ends_on(&mut window, &mut reports).await;
 
     assert!(!window.harness.phase().is_draining());

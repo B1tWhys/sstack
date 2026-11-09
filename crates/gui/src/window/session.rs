@@ -14,6 +14,7 @@ use sstack::session::{self, Entry};
 use sstack::session_controller::SessionController;
 use sstack::session_name;
 use sstack::session_report::{ApprovalRequest, QuestionRequest, SessionReport};
+use sstack::tools::Verdict;
 use sstack::turn_runner::AgentHandle;
 use sstack::vim::VimEvent;
 use sstack::workspace::{self, SessionSummary};
@@ -64,7 +65,8 @@ pub struct SessionView {
     pub(super) transcript: Transcript,
     /// Questions about shell commands that the Session's Turn is waiting on, oldest first, which
     /// the transcript shows and the person answers in that order. Dropping one unanswered, as
-    /// closing the window does, denies it.
+    /// closing the window does, denies it. Each goes when its Turn ends or parks, and one that a
+    /// Rebuild put off is asked again when the Turn carries on.
     approvals: VecDeque<ApprovalRequest>,
     /// The model's Questions that the Session's Turn is waiting on, oldest first, which the
     /// transcript shows and the person answers in that order. Dropping one unanswered, as closing
@@ -269,7 +271,10 @@ impl SessionView {
             SessionReport::Named(Some(name)) => {
                 self.name.get_or_insert_with(|| name.clone());
             }
-            SessionReport::TurnEnded(Ok(TurnEnd::Paused)) => {}
+            SessionReport::TurnEnded(Ok(TurnEnd::Paused)) => {
+                self.approvals.clear();
+                self.asked.clear();
+            }
             SessionReport::TurnEnded(outcome) => {
                 self.approvals.clear();
                 self.asked.clear();
@@ -294,7 +299,11 @@ impl SessionView {
     /// whether the command may run.
     pub fn answer(&mut self, allowed: bool) {
         if let Some(question) = self.approvals.pop_front() {
-            question.reply.send(allowed);
+            question.reply.send(if allowed {
+                Verdict::Allow
+            } else {
+                Verdict::Deny
+            });
             self.transcript.answered(allowed);
             self.control(SessionController::answered);
         }

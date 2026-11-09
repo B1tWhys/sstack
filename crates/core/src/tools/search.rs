@@ -52,7 +52,7 @@ fn relative(root: &Path, path: &Path) -> Option<String> {
 
 /// Builds the filter for an optional glob.
 fn file_filter(root: &Path, glob: Option<&str>) -> Result<Override, ToolError> {
-    let invalid = |error: ignore::Error| ToolError(format!("invalid glob: {error}"));
+    let invalid = |error: ignore::Error| ToolError::Failed(format!("invalid glob: {error}"));
     let mut filter = OverrideBuilder::new(root);
     if let Some(glob) = glob {
         filter.add(glob).map_err(invalid)?;
@@ -120,7 +120,7 @@ impl Tool for Search {
             return Ok(summarize(files));
         };
         let pattern =
-            Regex::new(&pattern).map_err(|e| ToolError(format!("invalid pattern: {e}")))?;
+            Regex::new(&pattern).map_err(|e| ToolError::Failed(format!("invalid pattern: {e}")))?;
         let root = self.project.root();
         let lines = files
             .iter()

@@ -659,7 +659,7 @@ mod tests {
     use ratatui::style::Color;
     use sstack::provider::scripted::{Scripted, ScriptedProvider};
     use sstack::provider::{ModelRequest, Provider, ProviderError, StreamEvent};
-    use sstack::session::{self, AssistantEntry, Entry, SessionLog};
+    use sstack::session::{self, AssistantEntry, Entry, SessionLog, StopReason, ToolCall};
     use sstack::vim::Draft;
     use sstack::workspace;
     use std::cell::RefCell;
@@ -669,7 +669,7 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
     use tempfile::TempDir;
-    use tokio::sync::mpsc;
+    use tokio::sync::{Semaphore, mpsc};
 
     /// A width that leaves room for the sidebar.
     const WIDE: u16 = 100;
@@ -898,6 +898,24 @@ mod tests {
             exit
         }
 
+        /// Starts a Turn whose model is held back, then asks for `command` from a new Session, so
+        /// that a Step is in progress when `command` arrives.
+        async fn drain_with_a_step_running(&mut self, command: &str) -> Option<Exit> {
+            self.enter("go");
+            self.until(|event| matches!(event, Event::Report(SessionReport::TurnStarted(_))))
+                .await;
+            self.enter_new();
+            self.enter(command)
+        }
+
+        /// Handles events from the agents until a Session asks a question, then answers yes to
+        /// it.
+        async fn until_asked_then_approve(&mut self) {
+            self.until(|event| matches!(event, Event::Report(SessionReport::Approval(_))))
+                .await;
+            self.approve();
+        }
+
         /// Answers yes to the question on the Session that has waited longest.
         fn approve(&mut self) {
             self.press('g');
@@ -1094,6 +1112,53 @@ mod tests {
             _on_event: &mut (dyn FnMut(StreamEvent) + Send),
         ) -> Result<AssistantEntry, ProviderError> {
             std::future::pending().await
+        }
+    }
+
+    /// A Provider that gives scripted responses, each only once the test lets it through, so
+    /// that a Step stays in progress for as long as the test needs.
+    struct Gated {
+        /// The responses, in order.
+        script: ScriptedProvider,
+        /// One permit for each response the test has let through and the Provider has not given
+        /// yet.
+        gate: Arc<Semaphore>,
+    }
+
+    #[async_trait]
+    impl Provider for Gated {
+        async fn respond(
+            &self,
+            request: ModelRequest<'_>,
+            on_event: &mut (dyn FnMut(StreamEvent) + Send),
+        ) -> Result<AssistantEntry, ProviderError> {
+            self.gate.acquire().await.unwrap().forget();
+            self.script.respond(request, on_event).await
+        }
+    }
+
+    /// Starts an [`App`] whose model gives the `script`ed responses, each only once a permit is
+    /// added to the returned gate.
+    fn gated(script: Vec<Scripted>) -> (Harness, Arc<Semaphore>) {
+        let gate = Arc::new(Semaphore::new(0));
+        let provider = Gated {
+            script: ScriptedProvider::new(script),
+            gate: gate.clone(),
+        };
+        (harness(Arc::new(provider)), gate)
+    }
+
+    /// Returns a model response asking to read a file that is not there, which runs without
+    /// asking the person.
+    fn read_call() -> AssistantEntry {
+        AssistantEntry {
+            tool_calls: vec![ToolCall {
+                id: "1".into(),
+                name: "read".into(),
+                input: serde_json::json!({ "path": "missing" }),
+            }],
+            stop: StopReason::ToolUse,
+            ..reply("")
         }
     }
 
@@ -1765,42 +1830,43 @@ mod tests {
 
     #[tokio::test]
     async fn a_rebuild_waits_for_both_the_build_and_the_step_in_progress() {
-        let mut h = two_steps();
-        assert_eq!(h.drain_with_a_question_open("/rebuild").await, None);
+        let (mut h, gate) = gated(vec![Ok(read_call()), Ok(reply("all done"))]);
+        assert_eq!(h.drain_with_a_step_running("/rebuild").await, None);
         assert_eq!(h.app.handle(built()), None);
         let screen = h.screen_of(WIDE);
         assert!(screen.contains("built, 1 running"), "{screen}");
-        assert!(screen.contains("! go"), "{screen}");
 
-        h.approve();
+        gate.add_permits(1);
 
         assert_eq!(h.until_exit().await, Exit::Rebuild(binary()));
         let entries = session::lock_free_read(&path_of(&h.dir, "first")).unwrap();
         assert_eq!(entries.last(), Some(&Entry::TurnParked));
-        assert!(h.dir.path().join("ran").exists());
+        assert!(matches!(
+            entries[entries.len() - 2],
+            Entry::ToolResult { .. }
+        ));
     }
 
     #[tokio::test]
-    async fn a_build_that_finishes_after_the_turns_stop_still_relaunches() {
+    async fn a_rebuild_puts_off_an_open_question_rather_than_wait_for_it() {
         let mut h = two_steps();
         h.drain_with_a_question_open("/rebuild").await;
-        h.approve();
-        h.until(|event| matches!(event, Event::Report(SessionReport::TurnEnded(_))))
-            .await;
+        h.until_turn_ends().await;
         assert_eq!(h.app.panes[0].state(), SessionState::Parked);
         let screen = h.screen_of(WIDE);
         assert!(screen.contains("- go"), "{screen}");
         assert!(screen.contains("parked"), "{screen}");
 
         assert_eq!(h.app.handle(built()), Some(Exit::Rebuild(binary())));
+        assert_eq!(h.session().last(), Some(&Entry::TurnParked));
+        assert!(!h.dir.path().join("ran").exists());
     }
 
     #[tokio::test]
-    async fn parked_turns_carry_on_after_a_relaunch() {
+    async fn parked_turns_carry_on_after_a_relaunch_and_ask_again_what_was_put_off() {
         let mut h = two_steps();
         h.drain_with_a_question_open("/rebuild").await;
         h.app.handle(built());
-        h.approve();
         h.until_exit().await;
 
         let stored = SessionSummary {
@@ -1817,8 +1883,10 @@ mod tests {
         h.app.continue_parked();
 
         assert_eq!(h.app.panes[0].state(), SessionState::Working);
+        h.until_asked_then_approve().await;
         h.until_turn_ends().await;
         assert_eq!(h.app.panes[0].state(), SessionState::Idle);
+        assert!(h.dir.path().join("ran").exists());
         assert!(h.screen().contains("carried on"));
         assert_eq!(h.session().len(), 5);
     }
@@ -1845,9 +1913,7 @@ mod tests {
     async fn a_failed_build_stops_the_drain_and_the_turns_carry_on() {
         let mut h = two_steps();
         h.drain_with_a_question_open("/rebuild").await;
-        h.approve();
-        h.until(|event| matches!(event, Event::Report(SessionReport::TurnEnded(_))))
-            .await;
+        h.until_turn_ends().await;
 
         let failed = Event::Report(SessionReport::BuildFinished(Err(
             "the build did not succeed".into(),
@@ -1857,6 +1923,7 @@ mod tests {
         assert!(!h.app.harness.phase().is_draining());
         assert!(h.screen().contains("the build did not succeed"));
         assert_eq!(h.app.panes[0].state(), SessionState::Working);
+        h.until_asked_then_approve().await;
         h.until_turn_ends().await;
         assert_eq!(h.app.panes[0].state(), SessionState::Idle);
         assert!(h.screen().contains("all done"));
@@ -1871,32 +1938,35 @@ mod tests {
 
         assert!(!h.app.harness.phase().is_draining());
         assert_eq!(*h.builds.borrow(), ["started", "cancelled"]);
-        assert_eq!(h.app.panes[0].state(), SessionState::AwaitingAnswer);
-        h.approve();
+        // The question was put off before the back-out, so the Turn parks and carries on at once.
+        h.until_turn_ends().await;
+        assert_eq!(h.app.panes[0].state(), SessionState::Working);
+        h.until_asked_then_approve().await;
         h.until_turn_ends().await;
         assert_eq!(h.app.panes[0].state(), SessionState::Idle);
-        assert!(h.session().iter().all(|entry| *entry != Entry::TurnParked));
+        assert!(h.dir.path().join("ran").exists());
     }
 
     #[tokio::test]
     async fn a_turn_that_parks_just_after_a_drain_is_abandoned_carries_on() {
-        let mut h = two_steps();
-        h.drain_with_a_question_open("/rebuild").await;
-        h.approve();
+        let (mut h, gate) = gated(vec![Ok(read_call()), Ok(reply("all done"))]);
+        h.drain_with_a_step_running("/rebuild").await;
         h.app.handle(Event::Key(alt('c')));
         h.app.panes[0].set_paused(true);
+        gate.add_permits(1);
         h.until(|event| matches!(event, Event::Report(SessionReport::TurnEnded(_))))
             .await;
         h.app.panes[0].set_paused(false);
         assert_eq!(h.app.panes[0].state(), SessionState::Working);
+        gate.add_permits(1);
         h.until_turn_ends().await;
         assert_eq!(h.app.panes[0].state(), SessionState::Idle);
     }
 
     #[tokio::test]
     async fn nothing_new_starts_during_a_drain_but_the_person_can_still_move_around() {
-        let mut h = two_steps();
-        h.drain_with_a_question_open("/rebuild").await;
+        let (mut h, _gate) = gated(vec![]);
+        h.drain_with_a_step_running("/rebuild").await;
 
         h.enter("hello");
         assert!(h.screen().contains("the harness is stopping"));
@@ -1908,15 +1978,14 @@ mod tests {
         assert_eq!(h.app.panes.len(), 2);
         assert_eq!(*h.builds.borrow(), ["started"]);
 
-        h.press('g');
+        h.press('e');
         assert_eq!(h.shown(), "first");
-        assert!(h.screen().contains("[y/N]"));
     }
 
     #[tokio::test]
     async fn the_narrow_status_line_says_what_a_drain_is_doing() {
-        let mut h = two_steps();
-        h.drain_with_a_question_open("/rebuild").await;
+        let (mut h, _gate) = gated(vec![]);
+        h.drain_with_a_step_running("/rebuild").await;
         let narrow = h.screen();
         assert!(narrow.contains("building, 1 running"), "{narrow}");
     }
@@ -1955,13 +2024,13 @@ mod tests {
         let mut h = two_steps();
         h.drain_with_a_question_open("/rebuild").await;
         h.app.handle(built());
-        h.approve();
         assert_eq!(h.until_exit().await, Exit::Rebuild(binary()));
 
         h.app.relaunch_failed("exec failed");
 
         assert!(h.screen().contains("rebuild failed: exec failed"));
         assert_eq!(h.app.panes[0].state(), SessionState::Working);
+        h.until_asked_then_approve().await;
         h.until_turn_ends().await;
         assert_eq!(h.app.panes[0].state(), SessionState::Idle);
     }

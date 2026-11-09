@@ -57,8 +57,8 @@ impl Tool for UseSkill {
             .skills
             .iter()
             .find(|skill| skill.name == input.name)
-            .ok_or_else(|| ToolError(format!("unknown skill: {}", input.name)))?;
-        skills::load(skill).map_err(|error| ToolError(format!("{}: {error}", input.name)))
+            .ok_or_else(|| ToolError::Failed(format!("unknown skill: {}", input.name)))?;
+        skills::load(skill).map_err(|error| ToolError::Failed(format!("{}: {error}", input.name)))
     }
 }
 
@@ -125,7 +125,7 @@ mod tests {
     async fn refuses_a_skill_it_does_not_offer() {
         let tool = UseSkill::new(vec![]);
         let error = tool.run(json!({"name": "../secret"})).await.unwrap_err();
-        assert_eq!(error, ToolError("unknown skill: ../secret".into()));
+        assert_eq!(error, ToolError::Failed("unknown skill: ../secret".into()));
     }
 
     #[tokio::test]
@@ -133,6 +133,6 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let tool = UseSkill::new(vec![skill("gone", &dir.path().join("SKILL.md"))]);
         let error = tool.run(json!({"name": "gone"})).await.unwrap_err();
-        assert!(error.0.starts_with("gone: "), "{error}");
+        assert!(error.to_string().starts_with("gone: "), "{error}");
     }
 }

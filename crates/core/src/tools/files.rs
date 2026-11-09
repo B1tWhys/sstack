@@ -18,7 +18,7 @@ const DEFAULT_LINE_LIMIT: usize = 2000;
 
 /// Describes a filesystem failure, naming the path the model asked for.
 fn io_error(path: &str, error: &std::io::Error) -> ToolError {
-    ToolError(format!("{path}: {error}"))
+    ToolError::Failed(format!("{path}: {error}"))
 }
 
 /// What the model last saw of each file, so that `edit` and `write` only change a
@@ -70,7 +70,7 @@ enum Unseen {
 impl Unseen {
     /// Tells the model why it cannot change the file it calls `shown`, and what to do instead.
     fn error(self, shown: &str) -> ToolError {
-        ToolError(match self {
+        ToolError::Failed(match self {
             Self::NeverRead => format!("{shown} has not been read yet; read it before changing it"),
             Self::Changed => format!(
                 "{shown} has changed since you last read it; read it again before changing it"
@@ -279,18 +279,18 @@ struct EditInput {
 /// or matches more than once without `replace_all`.
 fn replace(contents: &str, input: &EditInput) -> Result<(String, usize), ToolError> {
     if input.old.is_empty() {
-        return Err(ToolError(
+        return Err(ToolError::Failed(
             "`old` is empty; to replace a whole file, use write".to_owned(),
         ));
     }
     match (contents.matches(&input.old).count(), input.replace_all) {
-        (0, _) => Err(ToolError(format!(
+        (0, _) => Err(ToolError::Failed(format!(
             "text not found in {}; read it again and copy the text exactly, leaving out the \
              line number and tab that read puts before each line",
             input.path
         ))),
         (count, true) | (count @ 1, false) => Ok((contents.replace(&input.old, &input.new), count)),
-        (count, false) => Err(ToolError(format!(
+        (count, false) => Err(ToolError::Failed(format!(
             "text matches {count} times in {}; include more surrounding text to pick one, or \
              set replace_all to change every one",
             input.path
@@ -367,7 +367,7 @@ mod tests {
 
         assert!(read.run(json!({"path": "missing"})).await.is_err());
         let hidden = read.run(json!({"path": ".env"})).await.unwrap_err();
-        assert_eq!(hidden.0, "access denied: .env");
+        assert_eq!(hidden.to_string(), "access denied: .env");
     }
 
     #[tokio::test]
@@ -445,9 +445,9 @@ mod tests {
         let empty = json!({"path": "a.txt", "old": "", "new": "x"});
         let absent_file = json!({"path": "b.txt", "old": "a", "new": "x"});
 
-        let ambiguous = tools.edit.run(ambiguous).await.unwrap_err().0;
+        let ambiguous = tools.edit.run(ambiguous).await.unwrap_err().to_string();
         assert!(ambiguous.contains("2 times") && ambiguous.contains("replace_all"));
-        let missing = tools.edit.run(missing).await.unwrap_err().0;
+        let missing = tools.edit.run(missing).await.unwrap_err().to_string();
         assert!(missing.contains("not found") && missing.contains("line number"));
         assert!(tools.edit.run(empty).await.is_err());
         assert!(tools.edit.run(absent_file).await.is_err());
@@ -479,7 +479,12 @@ mod tests {
         let tools = FileTools::new(project);
         let change = |old: &str, new: &str| json!({"path": "a.txt", "old": old, "new": new});
 
-        let unread = tools.edit.run(change("one", "1")).await.unwrap_err().0;
+        let unread = tools
+            .edit
+            .run(change("one", "1"))
+            .await
+            .unwrap_err()
+            .to_string();
         assert!(unread.contains("not been read"), "{unread}");
 
         tools.look_at("a.txt").await;
@@ -487,7 +492,12 @@ mod tests {
         tools.edit.run(change("two", "2")).await.unwrap();
 
         fs::write(&path, "1 2 three four").unwrap();
-        let stale = tools.edit.run(change("three", "3")).await.unwrap_err().0;
+        let stale = tools
+            .edit
+            .run(change("three", "3"))
+            .await
+            .unwrap_err()
+            .to_string();
         assert!(stale.contains("changed since"), "{stale}");
 
         tools.look_at("a.txt").await;
@@ -503,12 +513,22 @@ mod tests {
         let tools = FileTools::new(project);
         let replace = json!({"path": "a.txt", "content": "new"});
 
-        let unread = tools.write.run(replace.clone()).await.unwrap_err().0;
+        let unread = tools
+            .write
+            .run(replace.clone())
+            .await
+            .unwrap_err()
+            .to_string();
         assert!(unread.contains("not been read"), "{unread}");
 
         tools.look_at("a.txt").await;
         fs::write(&path, "changed").unwrap();
-        let stale = tools.write.run(replace.clone()).await.unwrap_err().0;
+        let stale = tools
+            .write
+            .run(replace.clone())
+            .await
+            .unwrap_err()
+            .to_string();
         assert!(stale.contains("changed since"), "{stale}");
 
         tools.look_at("a.txt").await;

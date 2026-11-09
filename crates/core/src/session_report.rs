@@ -13,7 +13,7 @@ use tokio::sync::oneshot;
 use crate::agent::{AgentEvent, TurnEnd};
 use crate::question::{Answer, Asker, Question};
 use crate::session::Entry;
-use crate::tools::Approver;
+use crate::tools::{Approver, Verdict};
 
 /// Something that happened in a Session, which the interface showing it should react to.
 #[derive(Debug, Clone)]
@@ -29,7 +29,8 @@ pub enum SessionReport {
     Agent(AgentEvent),
     /// The running Turn ended, either normally or with the error that stopped it.
     TurnEnded(Result<TurnEnd, String>),
-    /// The model wants to run a shell command, and the Turn is waiting for the person to decide.
+    /// The model wants to run a shell command, and the Turn is waiting for the person to decide,
+    /// unless a Rebuild puts the question off.
     Approval(ApprovalRequest),
     /// The model put Questions to the person, and the Turn is waiting for their answers.
     Question(QuestionRequest),
@@ -69,8 +70,9 @@ pub struct ApprovalRequest {
     pub command: String,
     /// Why the person is being asked, if the asker says.
     pub note: Option<String>,
-    /// Where the person's decision goes. Dropping it unanswered denies the command.
-    pub reply: Reply<bool>,
+    /// Where the person's decision goes. Dropping it unanswered denies the command. Only the
+    /// first answer counts, so one sent after a Rebuild put the question off does nothing.
+    pub reply: Reply<Verdict>,
 }
 
 /// The model's Questions to the person, waiting for answers.
@@ -111,7 +113,8 @@ impl<T> Reply<T> {
 /// while the Turn waits.
 ///
 /// A command is denied if the interface drops the question unanswered, such as when the Turn is
-/// cancelled or the interface has gone.
+/// cancelled or the interface has gone. The Running Harness can also answer
+/// [`Verdict::Defer`], so that a Rebuild need not wait for the person.
 pub struct ReportingApprover {
     /// Where questions are sent for the interface to show.
     reports: ReportSender,
@@ -127,7 +130,7 @@ impl ReportingApprover {
 
 #[async_trait]
 impl Approver for ReportingApprover {
-    async fn approve(&self, command: &str, note: Option<&str>) -> bool {
+    async fn approve(&self, command: &str, note: Option<&str>) -> Verdict {
         let (reply, answer) = Reply::new();
         let request = ApprovalRequest {
             command: command.to_owned(),
@@ -135,7 +138,7 @@ impl Approver for ReportingApprover {
             reply,
         };
         self.reports.send(SessionReport::Approval(request));
-        answer.await.unwrap_or(false)
+        answer.await.unwrap_or(Verdict::Deny)
     }
 }
 
@@ -217,9 +220,9 @@ mod tests {
         };
         assert_eq!(request.command, "ls");
         assert_eq!(request.note.as_deref(), Some("why"));
-        request.reply.send(true);
+        request.reply.send(Verdict::Allow);
 
-        assert!(asking.await.unwrap());
+        assert_eq!(asking.await.unwrap(), Verdict::Allow);
     }
 
     fn question() -> Question {
@@ -260,6 +263,6 @@ mod tests {
         let (reports, received) = channel();
         drop(received);
         let approver = ReportingApprover::new(reports);
-        assert!(!approver.approve("ls", None).await);
+        assert_eq!(approver.approve("ls", None).await, Verdict::Deny);
     }
 }

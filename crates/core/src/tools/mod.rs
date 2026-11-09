@@ -32,9 +32,21 @@ use project::Project;
 /// Someone who decides whether the model may run a command on the host, outside the Sandbox.
 #[async_trait]
 pub trait Approver: Send + Sync {
-    /// Returns whether the model may run `command`. `note`, if given, tells the person why
-    /// they are being asked.
-    async fn approve(&self, command: &str, note: Option<&str>) -> bool;
+    /// Returns whether the model may run `command`, or that the question was put off. `note`,
+    /// if given, tells the person why they are being asked.
+    async fn approve(&self, command: &str, note: Option<&str>) -> Verdict;
+}
+
+/// What became of a question whether the model may run a command on the host.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Verdict {
+    /// The command may run.
+    Allow,
+    /// The command may not run, and the model is told so.
+    Deny,
+    /// Nobody decided, because a Rebuild put the question off. The call that asked runs again,
+    /// asking again, when its Turn carries on.
+    Defer,
 }
 
 /// An [`Approver`] that refuses everything, for runs with nobody to ask.
@@ -43,15 +55,27 @@ pub struct DenyAll;
 
 #[async_trait]
 impl Approver for DenyAll {
-    async fn approve(&self, _command: &str, _note: Option<&str>) -> bool {
-        false
+    async fn approve(&self, _command: &str, _note: Option<&str>) -> Verdict {
+        Verdict::Deny
     }
 }
 
-/// A failure reported back to the model.
+/// Why a tool call has no ordinary result for the model.
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
-#[error("{0}")]
-pub struct ToolError(pub String);
+pub enum ToolError {
+    /// A failure reported back to the model in these words.
+    #[error("{0}")]
+    Failed(String),
+    /// The call's question was put off, so it has no result yet and runs again when its Turn
+    /// carries on.
+    #[error("the question was put off until the Turn carries on")]
+    Deferred,
+}
+
+/// A tool call that has no result yet, because the question it asked was put off. The call runs
+/// again when its Turn carries on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Deferred;
 
 /// The result of a tool call.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,7 +96,8 @@ trait Tool: Send + Sync {
 
 /// Parses a tool's JSON input into its input type.
 fn parse_input<T: DeserializeOwned>(input: Value) -> Result<T, ToolError> {
-    serde_json::from_value(input).map_err(|error| ToolError(format!("invalid input: {error}")))
+    serde_json::from_value(input)
+        .map_err(|error| ToolError::Failed(format!("invalid input: {error}")))
 }
 
 /// Everything the model can do to the project during a Session.
@@ -149,21 +174,26 @@ impl ToolBox {
     }
 
     /// Runs one tool call. Every failure becomes an error result for the model to react to.
-    pub async fn run(&self, call: &ToolCall) -> ToolOutput {
+    ///
+    /// # Errors
+    /// Returns [`Deferred`] if the call asked the person a question that was put off, so it has
+    /// no result to record.
+    pub async fn run(&self, call: &ToolCall) -> Result<ToolOutput, Deferred> {
         let tool = self.tools.iter().find(|tool| tool.spec().name == call.name);
         let result = match tool {
             Some(tool) => tool.run(call.input.clone()).await,
-            None => Err(ToolError(format!("unknown tool: {}", call.name))),
+            None => Err(ToolError::Failed(format!("unknown tool: {}", call.name))),
         };
         match result {
-            Ok(text) => ToolOutput {
+            Ok(text) => Ok(ToolOutput {
                 text,
                 is_error: false,
-            },
-            Err(ToolError(text)) => ToolOutput {
+            }),
+            Err(ToolError::Failed(text)) => Ok(ToolOutput {
                 text,
                 is_error: true,
-            },
+            }),
+            Err(ToolError::Deferred) => Err(Deferred),
         }
     }
 }
@@ -176,8 +206,8 @@ pub(crate) mod test_support {
 
     use async_trait::async_trait;
 
-    use super::Approver;
     use super::project::Project;
+    use super::{Approver, Verdict};
 
     use crate::sandbox::Sandbox;
 
@@ -186,12 +216,23 @@ pub(crate) mod test_support {
         Arc::new(Sandbox::disabled())
     }
 
+    /// An [`Approver`] that lets every command run, as a person who always says yes.
     pub struct AllowAll;
 
     #[async_trait]
     impl Approver for AllowAll {
-        async fn approve(&self, _command: &str, _note: Option<&str>) -> bool {
-            true
+        async fn approve(&self, _command: &str, _note: Option<&str>) -> Verdict {
+            Verdict::Allow
+        }
+    }
+
+    /// An [`Approver`] that puts off every question, as a Rebuild does.
+    pub struct DeferAll;
+
+    #[async_trait]
+    impl Approver for DeferAll {
+        async fn approve(&self, _command: &str, _note: Option<&str>) -> Verdict {
+            Verdict::Defer
         }
     }
 
@@ -239,10 +280,11 @@ mod tests {
             .approver(Arc::new(DenyAll))
             .call();
 
-        let read = tools.run(&call("read", json!({"path": "a.txt"}))).await;
-        let unknown = tools.run(&call("nope", json!({}))).await;
-        let invalid = tools.run(&call("read", json!({"wrong": 1}))).await;
-        let denied = tools.run(&call("bash", json!({"command": "true"}))).await;
+        let run = async |name, input| tools.run(&call(name, input)).await.unwrap();
+        let read = run("read", json!({"path": "a.txt"})).await;
+        let unknown = run("nope", json!({})).await;
+        let invalid = run("read", json!({"wrong": 1})).await;
+        let denied = run("bash", json!({"command": "true"})).await;
 
         assert_eq!(read.text, "1\thello");
         assert!(!read.is_error);
@@ -250,6 +292,20 @@ mod tests {
         assert!(unknown.is_error);
         assert!(invalid.is_error);
         assert!(denied.is_error);
+    }
+
+    #[tokio::test]
+    async fn a_call_whose_question_was_put_off_has_no_result() {
+        let (_dir, project) = git_project();
+        let tools = ToolBox::standard()
+            .project(project)
+            .sandbox(disabled())
+            .approver(Arc::new(super::test_support::DeferAll))
+            .call();
+
+        let put_off = tools.run(&call("bash", json!({"command": "true"}))).await;
+
+        assert_eq!(put_off, Err(Deferred));
     }
 
     #[test]

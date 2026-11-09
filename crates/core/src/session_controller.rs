@@ -10,8 +10,9 @@
 use crate::agent::TurnEnd;
 use crate::running_harness::{Outcome, Refusal, SessionEvent, SessionState};
 use crate::session_name::Naming;
-use crate::session_report::{ReportSender, SessionReport};
+use crate::session_report::{Reply, ReportSender, SessionReport};
 use crate::skills::{self, Lookup, Skill};
+use crate::tools::Verdict;
 use crate::turn_runner::AgentHandle;
 
 /// Control of one open Session, which starts, pauses and cancels its Turns and keeps track of what
@@ -29,6 +30,9 @@ pub struct SessionController {
     skills: Vec<Skill>,
     /// How far the Session is from having a Session Name made for it.
     naming: NameWork,
+    /// Where the verdict goes on the shell command the running Turn waits to have approved, if
+    /// it waits on one, so that a Rebuild can put the question off.
+    approval: Option<Reply<Verdict>>,
 }
 
 /// How far a Session is from having a Session Name made from the first thing the person says in
@@ -64,6 +68,7 @@ impl SessionController {
             state,
             skills,
             naming: NameWork::Unwanted,
+            approval: None,
         }
     }
 
@@ -91,7 +96,17 @@ impl SessionController {
     /// Notes that the person answered what the Session's Turn asked: whether a shell command may
     /// run, or its Questions.
     pub fn answered(&mut self) {
+        self.approval = None;
         self.moved(SessionEvent::Answered);
+    }
+
+    /// Puts off the question about a shell command that the running Turn waits on, if there is
+    /// one, so that the Turn parks and asks it again when it carries on. The person's own answer,
+    /// if it comes later, does nothing. The model's Questions are not put off.
+    pub(crate) fn defer_approval(&mut self) {
+        if let Some(approval) = self.approval.take() {
+            approval.send(Verdict::Defer);
+        }
     }
 
     /// Carries on the Turn that parked, if there is one. An interface calls this once it has
@@ -117,11 +132,18 @@ impl SessionController {
                 self.naming = NameWork::Unwanted;
                 return;
             }
-            SessionReport::Approval(_) | SessionReport::Question(_) => SessionEvent::Asked,
+            SessionReport::Approval(request) => {
+                self.approval = Some(request.reply.clone());
+                SessionEvent::Asked
+            }
+            SessionReport::Question(_) => SessionEvent::Asked,
             SessionReport::TurnEnded(Ok(TurnEnd::Paused)) => SessionEvent::Parked,
             SessionReport::TurnEnded(_) => SessionEvent::TurnEnded,
             _ => return,
         };
+        if matches!(report, SessionReport::TurnEnded(_)) {
+            self.approval = None;
+        }
         self.moved(event);
     }
 
@@ -213,6 +235,7 @@ mod tests {
     use std::sync::Arc;
 
     use tempfile::TempDir;
+    use tokio::sync::oneshot;
 
     use super::*;
     use crate::agent::{Agent, AgentConfig};
@@ -221,6 +244,7 @@ mod tests {
     use crate::rebuild::Checkout;
     use crate::running_harness::{Exit, RunningHarness};
     use crate::session::{AssistantEntry, Entry, SessionLog, StopReason, Usage};
+    use crate::session_report::ApprovalRequest;
     use crate::tools::project::Project;
     use crate::tools::test_support::{disabled, git_project};
     use crate::tools::{DenyAll, ToolBox};
@@ -382,6 +406,86 @@ mod tests {
 
         assert_eq!(asked, Some(Outcome::StartBuild(Checkout::Worktree)));
         assert!(harness.phase().is_rebuilding());
+    }
+
+    /// Returns a question about `touch ran`, as the Session's Turn would ask it, with the way to
+    /// see how it was answered.
+    fn question() -> (SessionReport, oneshot::Receiver<Verdict>) {
+        let (reply, answer) = Reply::new();
+        let request = ApprovalRequest {
+            command: "touch ran".into(),
+            note: None,
+            reply,
+        };
+        (SessionReport::Approval(request), answer)
+    }
+
+    #[tokio::test]
+    async fn a_rebuild_puts_off_an_open_question_rather_than_wait_for_it() {
+        let (dir, _) = git_project();
+        let mut session = controller(&dir, "a");
+        let mut harness = RunningHarness::default();
+        let (asked, mut answer) = question();
+        let _ = harness
+            .in_session(&mut session, &mut NoOtherSessions)
+            .submit("go");
+        let _ = harness
+            .in_session(&mut session, &mut NoOtherSessions)
+            .report(&asked);
+
+        let _ = harness
+            .in_session(&mut session, &mut NoOtherSessions)
+            .submit("/rebuild");
+
+        assert_eq!(answer.try_recv(), Ok(Verdict::Defer));
+        let parked = harness
+            .in_session(&mut session, &mut NoOtherSessions)
+            .report(&ended(TurnEnd::Paused));
+        assert_eq!(parked, None);
+        assert_eq!(session.state(), SessionState::Parked);
+        let binary = PathBuf::from("/bin/sstack");
+        let built = harness.build_finished(Some(binary.clone()), &mut session);
+        assert_eq!(built, Some(Outcome::Exit(Exit::Rebuild(binary))));
+    }
+
+    #[tokio::test]
+    async fn a_question_asked_during_a_rebuild_is_put_off_at_once() {
+        let (dir, _) = git_project();
+        let (mut working, mut idle) = (controller(&dir, "a"), controller(&dir, "b"));
+        let mut harness = RunningHarness::default();
+        let (asked, mut answer) = question();
+        let _ = harness
+            .in_session(&mut working, &mut NoOtherSessions)
+            .submit("go");
+        let _ = harness
+            .in_session(&mut idle, &mut working)
+            .submit("/rebuild");
+
+        let _ = harness.in_session(&mut working, &mut idle).report(&asked);
+
+        assert_eq!(answer.try_recv(), Ok(Verdict::Defer));
+    }
+
+    #[tokio::test]
+    async fn quitting_still_waits_for_the_person_to_answer() {
+        let (dir, _) = git_project();
+        let mut session = controller(&dir, "a");
+        let mut harness = RunningHarness::default();
+        let (asked, mut answer) = question();
+        let _ = harness
+            .in_session(&mut session, &mut NoOtherSessions)
+            .submit("go");
+        let _ = harness
+            .in_session(&mut session, &mut NoOtherSessions)
+            .report(&asked);
+
+        let quit = harness
+            .in_session(&mut session, &mut NoOtherSessions)
+            .submit("/quit");
+
+        assert_eq!(quit, None);
+        assert_eq!(answer.try_recv(), Err(oneshot::error::TryRecvError::Empty));
+        assert_eq!(session.state(), SessionState::AwaitingAnswer);
     }
 
     #[tokio::test]

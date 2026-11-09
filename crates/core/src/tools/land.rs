@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use tokio::process::Command;
 
 use super::project::Project;
-use super::{Approver, Tool, ToolError};
+use super::{Approver, Tool, ToolError, Verdict};
 use crate::provider::ToolSpec;
 use crate::worktree::REPOSITORY_ENV;
 
@@ -56,7 +56,7 @@ impl Land {
         if status.trim().is_empty() {
             Ok(())
         } else {
-            Err(ToolError(format!(
+            Err(ToolError::Failed(format!(
                 "commit or discard these changes first:\n{status}"
             )))
         }
@@ -78,7 +78,7 @@ impl Land {
         }
         let conflicts = git(root, &["diff", "--name-only", "--diff-filter=U"]).await?;
         git(root, &["rebase", "--abort"]).await?;
-        Err(ToolError(format!(
+        Err(ToolError::Failed(format!(
             "rebasing onto {target} conflicts in:\n{conflicts}\nrun `git rebase {target}`, \
              resolve the conflicts, then land again"
         )))
@@ -93,12 +93,12 @@ impl Land {
         }
         let output = tokio::time::timeout(HOOK_TIMEOUT, command.output())
             .await
-            .map_err(|_| ToolError(format!("the checks timed out after {HOOK_TIMEOUT:?}")))?
-            .map_err(|error| ToolError(format!("failed to start git: {error}")))?;
+            .map_err(|_| ToolError::Failed(format!("the checks timed out after {HOOK_TIMEOUT:?}")))?
+            .map_err(|error| ToolError::Failed(format!("failed to start git: {error}")))?;
         if output.status.success() {
             Ok(())
         } else {
-            Err(ToolError(format!(
+            Err(ToolError::Failed(format!(
                 "the checks failed, so nothing landed:\n{}",
                 tail(&combined(&output))
             )))
@@ -126,7 +126,7 @@ impl Land {
                 return Ok(format!("landed {branch} on {target}"));
             }
         }
-        Err(ToolError(format!(
+        Err(ToolError::Failed(format!(
             "{target} kept moving: try again in a moment"
         )))
     }
@@ -167,11 +167,11 @@ async fn git(directory: &Path, args: &[&str]) -> Result<String, ToolError> {
         .args(args)
         .output()
         .await
-        .map_err(|error| ToolError(format!("failed to start git: {error}")))?;
+        .map_err(|error| ToolError::Failed(format!("failed to start git: {error}")))?;
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
     } else {
-        Err(ToolError(combined(&output).trim().to_owned()))
+        Err(ToolError::Failed(combined(&output).trim().to_owned()))
     }
 }
 
@@ -196,10 +196,11 @@ impl Tool for Land {
         }
         let branch = self.branch().await?;
         let request = format!("land {branch} onto {target}");
-        if !self.approver.approve(&request, None).await {
-            return Err(ToolError("the user denied this landing".to_owned()));
+        match self.approver.approve(&request, None).await {
+            Verdict::Allow => self.land_on(&target, &branch).await,
+            Verdict::Deny => Err(ToolError::Failed("the user denied this landing".to_owned())),
+            Verdict::Defer => Err(ToolError::Deferred),
         }
-        self.land_on(&target, &branch).await
     }
 }
 
@@ -288,7 +289,9 @@ mod tests {
     async fn uncommitted_changes_must_be_dealt_with_first() {
         let f = fixture(Arc::new(AllowAll));
         fs::write(f.worktree.join("a.txt"), "a").unwrap();
-        let ToolError(said) = f.land.run(json!({})).await.unwrap_err();
+        let ToolError::Failed(said) = f.land.run(json!({})).await.unwrap_err() else {
+            panic!("the landing should fail");
+        };
         assert!(said.contains("a.txt"), "{said}");
     }
 
@@ -306,7 +309,9 @@ mod tests {
         commit(&f.worktree, "a.txt", "a");
         hook(f.dir.path(), "echo clippy is unhappy\nexit 1");
 
-        let ToolError(said) = f.land.run(json!({})).await.unwrap_err();
+        let ToolError::Failed(said) = f.land.run(json!({})).await.unwrap_err() else {
+            panic!("the landing should fail");
+        };
 
         assert!(said.contains("clippy is unhappy"), "{said}");
         assert!(!f.dir.path().join("a.txt").exists());
@@ -330,7 +335,9 @@ mod tests {
         commit(&f.worktree, "a.txt", "mine");
         commit(f.dir.path(), "a.txt", "theirs");
 
-        let ToolError(said) = f.land.run(json!({})).await.unwrap_err();
+        let ToolError::Failed(said) = f.land.run(json!({})).await.unwrap_err() else {
+            panic!("the landing should fail");
+        };
 
         assert!(said.contains("a.txt"), "{said}");
         assert!(said.contains("git rebase main"), "{said}");
@@ -372,7 +379,9 @@ mod tests {
             ),
         );
 
-        let ToolError(said) = f.land.run(json!({})).await.unwrap_err();
+        let ToolError::Failed(said) = f.land.run(json!({})).await.unwrap_err() else {
+            panic!("the landing should fail");
+        };
 
         assert!(said.contains("kept moving"), "{said}");
     }

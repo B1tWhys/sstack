@@ -39,7 +39,7 @@ struct AskInput {
 /// Refuses Questions the person could not answer sensibly, saying why for the model.
 fn check(questions: &[Question]) -> Result<(), ToolError> {
     if !(1..=MAX_QUESTIONS).contains(&questions.len()) {
-        return Err(ToolError(format!(
+        return Err(ToolError::Failed(format!(
             "ask between 1 and {MAX_QUESTIONS} questions at once"
         )));
     }
@@ -70,7 +70,7 @@ fn check_one(question: &Question) -> Result<(), ToolError> {
     let fault = faults
         .into_iter()
         .find_map(|(faulty, why)| faulty.then_some(why));
-    fault.map_or(Ok(()), |fault| Err(ToolError(fault)))
+    fault.map_or(Ok(()), |fault| Err(ToolError::Failed(fault)))
 }
 
 #[async_trait]
@@ -141,7 +141,7 @@ impl Tool for Ask {
         let AskInput { questions } = parse_input(input)?;
         check(&questions)?;
         let answers = (self.asker.ask(questions.clone()).await)
-            .ok_or_else(|| ToolError(DECLINED.to_owned()))?;
+            .ok_or_else(|| ToolError::Failed(DECLINED.to_owned()))?;
         Ok(question::describe_all(&questions, &answers))
     }
 }
@@ -196,7 +196,7 @@ mod tests {
             .run(json!({"questions": [question("One")]}))
             .await
             .unwrap_err();
-        assert_eq!(error.0, DECLINED);
+        assert_eq!(error.to_string(), DECLINED);
     }
 
     #[tokio::test]

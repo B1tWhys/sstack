@@ -95,6 +95,9 @@ pub enum Decision {
     Denied,
     /// The Turn ended before the person answered, which refuses the command.
     Unanswered,
+    /// A Rebuild put the question off and the Turn parked. The Turn asks again, on a new tool
+    /// call, when it carries on.
+    PutOff,
 }
 
 impl Transcript {
@@ -264,11 +267,17 @@ impl Transcript {
     }
 
     /// Notes how a Turn ended or the error that stopped it, returning whether the transcript
-    /// changed. Questions the Turn left open, of either kind, are marked unanswered.
+    /// changed. Questions the Turn left open, of either kind, are marked unanswered, or put off
+    /// if it parked.
     fn ended(&mut self, outcome: Result<TurnEnd, &String>) -> bool {
+        let lapsed_as = if outcome == Ok(TurnEnd::Paused) {
+            Decision::PutOff
+        } else {
+            Decision::Unanswered
+        };
         let mut lapsed = false;
         for approval in self.open_approvals() {
-            approval.decision = Decision::Unanswered;
+            approval.decision = lapsed_as;
             lapsed = true;
         }
         for asked in self.open_asked() {
@@ -398,6 +407,7 @@ impl Decision {
             Self::Allowed => Some("allowed"),
             Self::Denied => Some("denied"),
             Self::Unanswered => Some("not answered"),
+            Self::PutOff => Some("put off"),
         }
     }
 }

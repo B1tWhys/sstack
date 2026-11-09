@@ -131,18 +131,25 @@ fn is_tool_result(entry: &Entry) -> bool {
     matches!(entry, Entry::ToolResult { .. })
 }
 
+/// Returns whether `entry` only marks how a Turn stopped, which the model never sees.
+fn is_marker(entry: &Entry) -> bool {
+    matches!(entry, Entry::TurnCancelled | Entry::TurnParked)
+}
+
 /// Translates a Session into messages.
 ///
-/// Results of one response share a message, which keeps the model making parallel calls.
+/// Results of one response share a message, which keeps the model making parallel calls. They
+/// share it even when the Turn parked between them, as it does when a Rebuild puts off a
+/// question.
 fn to_messages(entries: &[Entry]) -> Vec<ChatMessage> {
-    entries
-        .chunk_by(|a, b| is_tool_result(a) && is_tool_result(b))
+    let seen: Vec<&Entry> = entries.iter().filter(|entry| !is_marker(entry)).collect();
+    seen.chunk_by(|a, b| is_tool_result(a) && is_tool_result(b))
         .filter_map(to_message)
         .collect()
 }
 
 /// Translates a chunk of adjacent entries into one message, if it produces one.
-fn to_message(chunk: &[Entry]) -> Option<ChatMessage> {
+fn to_message(chunk: &[&Entry]) -> Option<ChatMessage> {
     match chunk.first()? {
         Entry::User { text } => Some(ChatMessage::user(text.as_str())),
         Entry::Assistant(assistant) => assistant_message(assistant),
@@ -152,8 +159,8 @@ fn to_message(chunk: &[Entry]) -> Option<ChatMessage> {
 }
 
 /// Combines adjacent tool results into a single message.
-fn tool_message(results: &[Entry]) -> ChatMessage {
-    let responses: Vec<ToolResponse> = results.iter().filter_map(tool_response).collect();
+fn tool_message(results: &[&Entry]) -> ChatMessage {
+    let responses: Vec<ToolResponse> = results.iter().copied().filter_map(tool_response).collect();
     responses.into()
 }
 
@@ -388,6 +395,20 @@ mod tests {
         assert_eq!(responses[1].content, "Error: bad");
         assert!(tool_response(&Entry::TurnCancelled).is_none());
         assert!(tool_response(&Entry::TurnParked).is_none());
+    }
+
+    #[test]
+    fn results_either_side_of_a_parked_turn_still_share_one_message() {
+        let entries = [
+            Entry::User { text: "hi".into() },
+            Entry::Assistant(assistant("", vec![call()], None)),
+            tool_result("c1", "ok", false),
+            Entry::TurnParked,
+            tool_result("c2", "later", false),
+        ];
+        let messages = to_messages(&entries);
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[2].content.tool_responses().len(), 2);
     }
 
     #[test]

@@ -9,6 +9,7 @@ use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
 
 use crate::tui::component::{Component, KeyOutcome};
 use sstack::session_report::{ApprovalRequest, SessionReport};
+use sstack::tools::Verdict;
 
 use crate::tui::event::{Action, Event};
 use crate::tui::theme;
@@ -16,7 +17,8 @@ use crate::tui::theme;
 /// The panel that asks the person about each shell command the model wants to run, holding the
 /// keyboard until they answer.
 ///
-/// Only `y` approves. Every unanswered question is denied when its Turn ends.
+/// Only `y` approves. Every unanswered question is dropped when its Turn ends, which denies it
+/// unless a Rebuild put it off, and then the Turn asks it again when it carries on.
 #[derive(Debug, Default)]
 pub struct Approval {
     /// Questions still to answer, oldest first. Only the oldest is shown.
@@ -38,10 +40,10 @@ impl Component for Approval {
         let Some(request) = self.waiting.front() else {
             return KeyOutcome::Ignored;
         };
-        let Some(approved) = answer(key.code) else {
+        let Some(answer) = answer(key.code) else {
             return KeyOutcome::Handled;
         };
-        request.reply.send(approved);
+        request.reply.send(answer);
         self.waiting.pop_front();
         KeyOutcome::Act(Action::ApprovalAnswered)
     }
@@ -77,10 +79,10 @@ const WIDTH: Constraint = Constraint::Percentage(60);
 
 /// Returns the answer a key gives, or nothing if it is not an answer. Anything that confirms
 /// without saying yes counts as no.
-fn answer(code: KeyCode) -> Option<bool> {
+fn answer(code: KeyCode) -> Option<Verdict> {
     match code {
-        KeyCode::Char('y' | 'Y') => Some(true),
-        KeyCode::Char('n' | 'N') | KeyCode::Enter | KeyCode::Esc => Some(false),
+        KeyCode::Char('y' | 'Y') => Some(Verdict::Allow),
+        KeyCode::Char('n' | 'N') | KeyCode::Enter | KeyCode::Esc => Some(Verdict::Deny),
         _ => None,
     }
 }
@@ -94,7 +96,7 @@ mod tests {
     use sstack::session_report::Reply;
     use tokio::sync::oneshot;
 
-    fn ask(approval: &mut Approval, command: &str) -> oneshot::Receiver<bool> {
+    fn ask(approval: &mut Approval, command: &str) -> oneshot::Receiver<Verdict> {
         asked(approval, command, None)
     }
 
@@ -102,7 +104,7 @@ mod tests {
         approval: &mut Approval,
         command: &str,
         note: Option<&str>,
-    ) -> oneshot::Receiver<bool> {
+    ) -> oneshot::Receiver<Verdict> {
         let (reply, answer) = Reply::new();
         let command = command.to_owned();
         let note = note.map(str::to_owned);
@@ -133,15 +135,15 @@ mod tests {
         assert_eq!(approval.key(key(KeyCode::Char('Y'))), answered);
         assert_eq!(approval.key(key(KeyCode::Enter)), answered);
 
-        assert_eq!(first.try_recv(), Ok(true));
-        assert_eq!(second.try_recv(), Ok(false));
+        assert_eq!(first.try_recv(), Ok(Verdict::Allow));
+        assert_eq!(second.try_recv(), Ok(Verdict::Deny));
     }
 
     #[test]
     fn only_yes_approves() {
-        assert_eq!(answer(KeyCode::Char('y')), Some(true));
+        assert_eq!(answer(KeyCode::Char('y')), Some(Verdict::Allow));
         for denial in [KeyCode::Char('n'), KeyCode::Esc, KeyCode::Enter] {
-            assert_eq!(answer(denial), Some(false));
+            assert_eq!(answer(denial), Some(Verdict::Deny));
         }
         assert_eq!(answer(KeyCode::Tab), None);
     }
