@@ -11,14 +11,16 @@ mod reply;
 
 use std::collections::{HashMap, HashSet};
 
-use iced::widget::{button, column, container, row, text};
+use iced::widget::{Space, Text, button, column, container, hover, row, text};
 use iced::{Element, Fill, Font};
+use lucide_icons::Icon;
 use sstack::agent::{self, AgentEvent, ToolCallSummary, TurnEnd};
 use sstack::question::Question;
 use sstack::session::{AssistantEntry, Entry};
 use sstack::session_report::{ApprovalRequest, SessionReport};
 
 use crate::asked::{Asked, Asking, Controls};
+use crate::hint::hint;
 use crate::theme;
 
 pub use self::reply::Reply;
@@ -33,6 +35,17 @@ const TEXT_SIZE: f32 = 16.0;
 /// The size of text that matters less than the answers around it, such as what the model thought,
 /// in logical pixels.
 const ASIDE_SIZE: f32 = 14.0;
+
+/// The size of the copy button's icon, in logical pixels, small enough that the button fits
+/// beside a single line of text.
+const COPY_ICON_SIZE: f32 = 14.0;
+
+/// The room around the copy button's icon, in logical pixels.
+const COPY_PADDING: f32 = 1.0;
+
+/// How wide the room kept beside every part of the transcript for its copy button is, in logical
+/// pixels, so that the button never covers the text.
+const COPY_WIDTH: f32 = 20.0;
 
 /// The Session as it unfolds in the window: what the Session held when it opened, what the
 /// person sent, what the model thought and replied, the tools it called and the questions about
@@ -51,6 +64,9 @@ pub struct Handlers<Message> {
     pub answer: fn(bool) -> Message,
     /// Sent when the person clicks a link in a reply, with the link's address.
     pub open: fn(String) -> Message,
+    /// Sent when the person presses the copy button beside a part of the transcript, with the
+    /// text to put on the clipboard.
+    pub copy: fn(String) -> Message,
     /// Sent by the controls of the model's open Questions.
     pub questions: Controls<Message>,
 }
@@ -195,20 +211,20 @@ impl Transcript {
 
     /// Draws the transcript, one block under another, with the model's replies formatted as
     /// Markdown. What the person said stands in a panel, and what the model thought or said on its
-    /// way to an answer is smaller and muted, so that its answers stand out. What the person
+    /// way to an answer is smaller and muted, so that its answers stand out. A copy button shows
+    /// beside each block the pointer is over, except the model's Questions. What the person
     /// presses in it sends what `handlers` says.
     pub fn view<'a, Message: Clone + 'a>(
         &'a self,
         handlers: &Handlers<Message>,
     ) -> Element<'a, Message> {
-        let drawn = self
-            .blocks
-            .iter()
-            .enumerate()
-            .map(|(index, block)| match block {
+        let drawn = self.blocks.iter().enumerate().map(|(index, block)| {
+            let drawn = match block {
                 Block::Reply(reply) if self.interim(index) => reply.aside(handlers.open),
                 _ => block.view(handlers),
-            });
+            };
+            copyable(drawn, block.copied(), handlers.copy)
+        });
         column(drawn).spacing(SPACING).into()
     }
 
@@ -463,6 +479,40 @@ impl Block {
     }
 }
 
+impl Block {
+    /// Returns the text that copying this part of the transcript puts on the clipboard, without
+    /// the label it is drawn with: a reply as the Markdown the model sent, and a tool call as its
+    /// input. The model's Questions have none, since they cannot be copied.
+    pub fn copied(&self) -> Option<&str> {
+        match self {
+            Self::Prompt(words) | Self::Reasoning(words) | Self::Notice(words) => Some(words),
+            Self::Reply(reply) => Some(reply.source()),
+            Self::Tool { call, .. } => Some(&call.input),
+            Self::Questions(_) => None,
+        }
+    }
+}
+
+/// Draws `drawn` with room beside it for a copy button, which shows while the pointer is over it
+/// and sends what `copy` makes of `words`. Without `words` the room stays empty, so that every
+/// part of the transcript lines up.
+fn copyable<'a, Message: Clone + 'a>(
+    drawn: Element<'a, Message>,
+    words: Option<&'a str>,
+    copy: fn(String) -> Message,
+) -> Element<'a, Message> {
+    let base = row![container(drawn).width(Fill), Space::new().width(COPY_WIDTH)].width(Fill);
+    let Some(words) = words else {
+        return base.into();
+    };
+    let icon = Text::from(Icon::Copy).size(COPY_ICON_SIZE);
+    let press = button(icon)
+        .padding(COPY_PADDING)
+        .style(button::text)
+        .on_press_with(move || copy(words.to_owned()));
+    hover(base, container(hint(press, "Copy")).align_right(Fill))
+}
+
 impl Approval {
     /// Draws the open question: why the person is asked, the whole command, and the buttons
     /// that send what `answer` makes of whether it may run.
@@ -619,5 +669,37 @@ mod tests {
         let mut transcript = Transcript::default();
         transcript.report(&SessionReport::Resumed(held.to_vec()));
         assert_eq!(interim_replies(&transcript), [false, true, false]);
+    }
+
+    #[test]
+    fn copying_a_block_takes_its_text_without_its_label() {
+        let tool = Block::Tool {
+            call: ToolCallSummary {
+                name: "bash".into(),
+                input: r#"{"command":"ls"}"#.into(),
+            },
+            failed: true,
+            approval: None,
+        };
+        let blocks = [
+            Block::Prompt("look".into()),
+            Block::Reply("**bold**".into()),
+            Block::Reasoning("hmm".into()),
+            tool,
+            Block::Notice("down".into()),
+            Block::Questions(Asked::new(vec![])),
+        ];
+
+        let copied: Vec<_> = blocks.iter().map(Block::copied).collect();
+
+        let expected = [
+            Some("look"),
+            Some("**bold**"),
+            Some("hmm"),
+            Some(r#"{"command":"ls"}"#),
+            Some("down"),
+            None,
+        ];
+        assert_eq!(copied, expected);
     }
 }

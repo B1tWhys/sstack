@@ -1304,6 +1304,35 @@ async fn clicking_a_link_that_leads_nowhere_changes_nothing() {
     assert_eq!(blocks(&window), []);
 }
 
+#[tokio::test]
+async fn the_copy_button_beside_a_reply_copies_its_markdown() {
+    let (_dir, mut window) = window(vec![]);
+    let _ = happened(&mut window, [AgentEvent::Text("hi **there**".into())]);
+    let mut ui = simulator(window.view());
+
+    let icon = char::from(lucide_icons::Icon::Copy).to_string();
+    let _ = ui.click(icon.as_str()).unwrap();
+
+    let copied: Vec<_> = ui
+        .into_messages()
+        .filter_map(|message| match message {
+            Message::Copy(words) => Some(words),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(copied, ["hi **there**"]);
+}
+
+#[tokio::test]
+async fn copying_puts_the_text_on_the_clipboard() {
+    let (_dir, mut window) = window(vec![]);
+
+    let task = window.update(Message::Copy("hi".into()));
+
+    assert_eq!(task.units(), 1);
+    assert_eq!(blocks(&window), []);
+}
+
 /// Passes `reports` to `window` until the running Turn puts the model's Questions to the person.
 async fn until_questioned(
     window: &mut Window,

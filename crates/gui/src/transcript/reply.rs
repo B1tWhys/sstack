@@ -28,6 +28,11 @@ impl Reply {
         self.markdown.push_str(piece);
     }
 
+    /// Returns the reply as the model sent it, with the marks that ask for Markdown formatting.
+    pub fn source(&self) -> &str {
+        &self.source
+    }
+
     /// Draws the reply. Clicking a link sends what `open` makes of its address.
     pub fn view<'a, Message: 'a>(&'a self, open: fn(String) -> Message) -> Element<'a, Message> {
         self.drawn(Pixels(TEXT_SIZE), open)

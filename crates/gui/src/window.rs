@@ -191,6 +191,8 @@ pub enum Message {
     Answer(bool),
     /// The person clicked a link in a reply, which leads to this address.
     OpenLink(String),
+    /// The person asked to put this text from the transcript on the clipboard.
+    Copy(String),
     /// The person picked a row of one of the model's open Questions.
     Choose {
         /// The position of the Question in its set.
@@ -306,6 +308,7 @@ impl Window {
                 Task::none()
             }
             Message::OpenLink(uri) => self.open_link(&uri),
+            Message::Copy(words) => clipboard::write(words),
             message @ (Message::Choose { .. }
             | Message::Write { .. }
             | Message::SendAnswers
@@ -382,6 +385,7 @@ impl Window {
         let handlers = Handlers {
             answer: Message::Answer,
             open: Message::OpenLink,
+            copy: Message::Copy,
             questions: Controls {
                 choose: |question, row| Message::Choose { question, row },
                 write: |question, words| Message::Write { question, words },
