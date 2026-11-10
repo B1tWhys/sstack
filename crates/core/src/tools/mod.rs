@@ -16,14 +16,14 @@ mod session_info;
 /// The tool that hands the model a Skill's instructions.
 mod skill;
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use async_trait::async_trait;
 use bon::bon;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-use crate::provider::ToolSpec;
+use crate::provider::{Effort, ToolSpec};
 use crate::question::Asker;
 use crate::sandbox::Sandbox;
 use crate::session::ToolCall;
@@ -107,6 +107,8 @@ fn parse_input<T: DeserializeOwned>(input: Value) -> Result<T, ToolError> {
 pub struct ToolBox {
     /// The tools, in the order they are offered to the model.
     tools: Vec<Box<dyn Tool>>,
+    /// What the `session_info` tool tells the model, if it is offered.
+    session_info: Option<session_info::SharedInfo>,
 }
 
 #[bon]
@@ -139,6 +141,7 @@ impl ToolBox {
                 Box::new(search::Search::new(project)),
                 Box::new(bash),
             ],
+            session_info: None,
         }
     }
 }
@@ -155,9 +158,21 @@ impl ToolBox {
     /// commits which Session made them and with which model.
     #[must_use]
     pub fn with_session_info(mut self, info: SessionInfo) -> Self {
+        let info = Arc::new(Mutex::new(info));
         self.tools
-            .push(Box::new(session_info::ShowSessionInfo::new(info)));
+            .push(Box::new(session_info::ShowSessionInfo::new(info.clone())));
+        self.session_info = Some(info);
         self
+    }
+
+    /// Tells the model from now on that `model` serves the Session, asked for `effort`. Changes
+    /// nothing if the model cannot learn about the Session.
+    pub fn served_by(&self, model: &str, effort: Option<Effort>) {
+        if let Some(info) = &self.session_info {
+            let mut info = info.lock().unwrap_or_else(PoisonError::into_inner);
+            model.clone_into(&mut info.model);
+            info.effort = effort;
+        }
     }
 
     /// Adds the ability to read the instructions of `skills`. With none, offers nothing new.
@@ -333,7 +348,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn offers_the_session_info_when_given_some() {
+    async fn offers_the_session_info_when_given_some_and_keeps_it_current() {
         let (_dir, project) = git_project();
         let tools = ToolBox::standard()
             .project(project)
@@ -341,6 +356,7 @@ mod tests {
             .approver(Arc::new(DenyAll))
             .call();
         assert!(!tools.specs().iter().any(|spec| spec.name == "session_info"));
+        tools.served_by("ignored", None);
 
         let tools = tools.with_session_info(SessionInfo {
             session_id: "42".into(),
@@ -348,8 +364,14 @@ mod tests {
             effort: None,
         });
         let output = tools.run(&call("session_info", json!({}))).await.unwrap();
-
         assert_eq!(output.text, r#"{"session_id":"42","model":"m"}"#);
+
+        tools.served_by("other", Some(Effort::Low));
+        let output = tools.run(&call("session_info", json!({}))).await.unwrap();
+        assert_eq!(
+            output.text,
+            r#"{"session_id":"42","model":"other","effort":"low"}"#
+        );
     }
 
     #[test]

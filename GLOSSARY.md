@@ -37,7 +37,7 @@ A service that serves models through an API. Sessions are never tied to one Prov
 _Avoid_: Backend, vendor
 
 **Connection**:
-A Provider paired with one set of credentials, selected at runtime. Several Connections can use the same Provider.
+A Provider paired with one set of credentials and the models to request from it. Each Session runs on one Connection at a time, which the person can change between Turns. Several Connections can use the same Provider.
 _Avoid_: Account, profile
 
 **Provider Payload**:

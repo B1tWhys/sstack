@@ -19,6 +19,10 @@ pub struct SessionMetadata {
     /// Missing until either happens, while the Session is known by its first prompt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// The name of the Connection the Session runs on, as settings call it. Missing means the
+    /// default in settings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connection: Option<String>,
     /// Facts written by a newer Harness Source, kept so that an older Running Harness, such as
     /// one relaunched from an earlier commit, does not lose them when it changes the file.
     #[serde(flatten)]

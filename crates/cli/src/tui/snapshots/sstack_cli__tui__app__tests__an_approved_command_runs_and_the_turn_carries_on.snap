@@ -1,5 +1,6 @@
 ---
 source: crates/cli/src/tui/app.rs
+assertion_line: 1095
 expression: h.drawn_at(NARROW)
 ---
 "                                                            "
@@ -10,7 +11,7 @@ expression: h.drawn_at(NARROW)
 "            │this runs on the host: the Sandbox│            "
 "            │is turned off                     │            "
 "            │                                  │            "
-"session firs│Run `touch ran`? [y/N]            │ switch | Al"
+"session firs│Run `touch ran`? [y/N]            │el | Alt-E/Y"
 "┌───────────└──────────────────────────────────┘───────────┐"
 "│>                                                         │"
 "└──────────────────────────────────────────────────────────┘"

@@ -1,0 +1,15 @@
+---
+source: crates/cli/src/tui/components/connection_picker.rs
+assertion_line: 157
+expression: shown.backend()
+---
+"                                                                                "
+"                    ┌ Connection ──────────────────────────┐                    "
+"                    │  1. anthropic                        │                    "
+"                    │  2. openai                           │                    "
+"                    │> 3. work (now)                       │                    "
+"                    │                                      │                    "
+"                    │Up/Down choose, Enter switches from   │                    "
+"                    │the next Turn, Esc keeps it           │                    "
+"                    └──────────────────────────────────────┘                    "
+"                                                                                "

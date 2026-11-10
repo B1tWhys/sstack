@@ -1,5 +1,6 @@
 ---
 source: crates/cli/src/tui/components/status.rs
-expression: shown.backend()
+assertion_line: 106
+expression: status.text()
 ---
-"session 42 | ready | Alt-C qui"
+session 42 | openai | working | Alt-C cancel | Alt-E/Y switch | Alt-G next | PgUp/PgDn scroll | /new /vim /connection /rebuild /quit

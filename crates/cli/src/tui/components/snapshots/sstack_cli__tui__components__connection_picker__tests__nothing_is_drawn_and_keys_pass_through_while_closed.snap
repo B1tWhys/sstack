@@ -1,0 +1,10 @@
+---
+source: crates/cli/src/tui/components/connection_picker.rs
+assertion_line: 150
+expression: shown.backend()
+---
+"                              "
+"                              "
+"                              "
+"                              "
+"                              "

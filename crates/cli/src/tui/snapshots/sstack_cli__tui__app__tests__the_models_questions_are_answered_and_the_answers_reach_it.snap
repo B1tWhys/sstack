@@ -1,5 +1,6 @@
 ---
 source: crates/cli/src/tui/app.rs
+assertion_line: 1115
 expression: h.drawn_at(NARROW)
 ---
 "                                                            "
@@ -10,7 +11,7 @@ expression: h.drawn_at(NARROW)
 "         │  2. SQLite                             │         "
 "         │  3. Own answer:                        │         "
 "         │                                        │         "
-"session f│Up/Down choose, Enter confirms,         │itch | Al"
+"session f│Up/Down choose, Enter confirms,         │| Alt-E/Y"
 "┌────────│Shift-Tab goes back, Esc answers in the │────────┐"
 "│>       │chat                                    │        │"
 "└────────└────────────────────────────────────────┘────────┘"

@@ -392,10 +392,13 @@ async fn work_that_would_be_lost_stops_archiving_unless_forced() {
 }
 
 #[tokio::test]
-async fn pressing_archive_puts_the_session_away_and_moves_on() {
+async fn archiving_from_the_menu_puts_the_session_away_and_moves_on() {
     let (_dir, mut window, done) = window_with(vec![], |_, _| {});
     let _ = send(&mut window, "/new");
 
+    interact(&mut window, |ui| {
+        let _ = ui.click("Session").unwrap();
+    });
     interact(&mut window, |ui| {
         let _ = ui.click("Archive").unwrap();
     });
@@ -405,9 +408,10 @@ async fn pressing_archive_puts_the_session_away_and_moves_on() {
 }
 
 #[tokio::test]
-async fn the_archive_button_does_nothing_while_a_turn_runs() {
+async fn the_archive_menu_item_does_nothing_while_a_turn_runs() {
     let (_dir, mut window) = window(vec![Ok(reply("busy"))]);
     let _ = send(&mut window, "go");
+    let _ = window.update(Message::Menu(MenuEvent::Toggle));
 
     let mut ui = simulator(window.view());
     let _ = ui.click("Archive").unwrap();
@@ -510,4 +514,79 @@ async fn a_shortcut_pressed_in_the_prompt_reaches_the_window() {
         "{messages:?}"
     );
     assert_eq!(window.view_ref().prompt.draft().text, "");
+}
+
+/// Clicks the button labelled `label` in `window`, and acts on what that sends.
+fn click(window: &mut Window, label: &str) {
+    interact(window, |ui| {
+        let _ = ui.click(label).unwrap();
+    });
+}
+
+#[tokio::test]
+async fn the_session_menu_renames_and_starts_sessions_then_closes() {
+    let (_dir, mut window) = window(vec![]);
+
+    click(&mut window, "Session");
+    click(&mut window, "Rename");
+    assert_eq!(window.menu, Menu::Renaming(String::new()));
+    let _ = window.update(Message::Menu(MenuEvent::RenameEdited("planned".into())));
+    let _ = window.update(Message::Renamed);
+    assert_eq!(row_of(&window, "1").name, "planned");
+    assert_eq!(window.menu, Menu::Closed);
+
+    click(&mut window, "Session");
+    click(&mut window, "New in main checkout");
+    assert_eq!(window.view_ref().id(), "2");
+    assert_eq!(window.menu, Menu::Closed);
+    assert_eq!(window.update(Message::Renamed).units(), 0);
+}
+
+#[tokio::test]
+async fn a_click_outside_the_open_menu_closes_it() {
+    let (_dir, mut window) = window(vec![]);
+    let _ = window.update(Message::Menu(MenuEvent::Toggle));
+
+    interact(&mut window, |ui| {
+        ui.point_at(iced::Point::new(900.0, 600.0));
+        let _ = ui.simulate([
+            iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+            iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+        ]);
+    });
+
+    assert_eq!(window.menu, Menu::Closed);
+}
+
+#[tokio::test]
+async fn a_connection_chosen_from_the_menu_shows_in_the_bar_and_says_when_it_applies() {
+    let (_dir, mut window) = window(vec![]);
+    assert!(
+        simulator(window.view())
+            .find("Connection: anthropic")
+            .is_ok()
+    );
+
+    click(&mut window, "Session");
+    click(&mut window, "Connection >");
+    click(&mut window, "openai");
+
+    let switched = notice("runs on openai from the next Turn");
+    assert_eq!(blocks(&window).last(), Some(&switched));
+    assert!(simulator(window.view()).find("Connection: openai").is_ok());
+    assert_eq!(window.menu, Menu::Closed);
+}
+
+#[tokio::test]
+async fn the_connection_command_switches_or_opens_the_list() {
+    let (_dir, mut window) = window(vec![]);
+
+    let _ = send(&mut window, "/connection nope");
+    let refused = notice("not switched: no connection named nope");
+    assert_eq!(blocks(&window).last(), Some(&refused));
+
+    let _ = send(&mut window, "/connection");
+    assert_eq!(window.menu, Menu::Connections);
+    let mut ui = simulator(window.view());
+    assert!(ui.find("openai").is_ok() && ui.find("anthropic").is_ok());
 }

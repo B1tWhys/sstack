@@ -835,7 +835,7 @@ async fn scrolling_the_transcript_says_whether_the_newest_output_is_in_view() {
     let (_dir, mut window) = window(vec![]);
     let _ = happened(&mut window, [AgentEvent::Text("line\n\n".repeat(200))]);
     let mut ui = simulator(window.view());
-    ui.point_at(iced::Point::new(600.0, 50.0));
+    ui.point_at(iced::Point::new(600.0, 150.0));
 
     let wheel = |y| {
         iced::Event::Mouse(mouse::Event::WheelScrolled {
@@ -1540,3 +1540,189 @@ async fn a_pill_shows_while_the_models_questions_wait_out_of_view() {
 
 mod sessions;
 mod vim;
+
+/// The window drawn frame after frame as the iced runtime draws it, keeping what widgets
+/// remember, such as how far the transcript is scrolled, from one frame to the next.
+struct Frames {
+    /// What draws the window, without a screen.
+    renderer: iced::Renderer,
+    /// What the widgets remembered after the last frame.
+    cache: iced_test::runtime::user_interface::Cache,
+    /// Where the mouse is, in logical pixels.
+    cursor: iced::Point,
+}
+
+/// The widgets of [`Frames`] as the runtime holds them during one frame.
+type Ui<'a> = iced_test::runtime::UserInterface<'a, Message, Theme, iced::Renderer>;
+
+/// What the widgets remember at the end of a frame that tests check.
+#[derive(Default)]
+struct Remembered {
+    /// How far the transcript is scrolled from the top, in logical pixels.
+    offset: Option<f32>,
+    /// Whether the prompt has the keyboard.
+    prompt_focused: bool,
+}
+
+impl iced::advanced::widget::Operation for Remembered {
+    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn iced::advanced::widget::Operation)) {
+        operate(self);
+    }
+
+    fn scrollable(
+        &mut self,
+        id: Option<&iced::advanced::widget::Id>,
+        _bounds: iced::Rectangle,
+        _content_bounds: iced::Rectangle,
+        translation: iced::Vector,
+        _state: &mut dyn iced::advanced::widget::operation::Scrollable,
+    ) {
+        if id == Some(&iced::advanced::widget::Id::from(TRANSCRIPT)) {
+            self.offset = Some(translation.y);
+        }
+    }
+
+    fn focusable(
+        &mut self,
+        id: Option<&iced::advanced::widget::Id>,
+        _bounds: iced::Rectangle,
+        state: &mut dyn iced::advanced::widget::operation::Focusable,
+    ) {
+        if id == Some(&iced::advanced::widget::Id::from(PROMPT)) {
+            self.prompt_focused = state.is_focused();
+        }
+    }
+}
+
+impl Frames {
+    /// Starts drawing with nothing remembered and the mouse at `cursor`.
+    fn new(cursor: iced::Point) -> Self {
+        use iced::advanced::renderer::Headless;
+        let renderer = iced::futures::executor::block_on(iced::Renderer::new(
+            iced::Font::DEFAULT,
+            iced::Pixels(16.0),
+            None,
+        ))
+        .expect("a headless renderer");
+        Self {
+            renderer,
+            cache: iced_test::runtime::user_interface::Cache::default(),
+            cursor,
+        }
+    }
+
+    /// Draws `window` and does `act` to its widgets, returning the messages that sent and what
+    /// the widgets remember afterwards.
+    fn frame(
+        &mut self,
+        window: &Window,
+        act: impl FnOnce(&mut Ui<'_>, &mut iced::Renderer, iced::Point) -> Vec<Message>,
+    ) -> (Vec<Message>, Remembered) {
+        let cache = std::mem::take(&mut self.cache);
+        let size = iced::Size::new(1024.0, 768.0);
+        let mut ui = Ui::build(window.view(), size, cache, &mut self.renderer);
+        let messages = act(&mut ui, &mut self.renderer, self.cursor);
+        let mut remembered = Remembered::default();
+        ui.operate(&self.renderer, &mut remembered);
+        self.cache = ui.into_cache();
+        (messages, remembered)
+    }
+
+    /// Draws `window`, passes it `events`, and returns the messages they sent and how far the
+    /// transcript is scrolled afterwards.
+    fn draw(&mut self, window: &Window, events: &[iced::Event]) -> (Vec<Message>, f32) {
+        let (messages, remembered) = self.frame(window, |ui, renderer, cursor| {
+            let mut messages = Vec::new();
+            let _ = ui.update(
+                events,
+                mouse::Cursor::Available(cursor),
+                renderer,
+                &mut iced::advanced::clipboard::Null,
+                &mut messages,
+            );
+            messages
+        });
+        let offset = remembered.offset.expect("the transcript should be drawn");
+        (messages, offset)
+    }
+
+    /// Draws `window` with the keyboard given to the prompt.
+    fn focus_prompt(&mut self, window: &Window) {
+        let _ = self.frame(window, |ui, renderer, _| {
+            let mut focus = iced::advanced::widget::operation::focusable::focus(PROMPT.into());
+            ui.operate(renderer, &mut focus);
+            Vec::new()
+        });
+    }
+
+    /// Draws `window` and returns whether the prompt has the keyboard.
+    fn prompt_focused(&mut self, window: &Window) -> bool {
+        self.frame(window, |_, _, _| Vec::new()).1.prompt_focused
+    }
+}
+
+#[tokio::test]
+async fn opening_and_closing_the_menu_keeps_the_transcript_where_it_was_scrolled() {
+    let (_dir, mut window) = window(vec![]);
+    let _ = happened(&mut window, [AgentEvent::Text("line\n\n".repeat(200))]);
+    let mut frames = Frames::new(iced::Point::new(600.0, 300.0));
+    let wheel = iced::Event::Mouse(mouse::Event::WheelScrolled {
+        delta: ScrollDelta::Lines { x: 0.0, y: -20.0 },
+    });
+    let (messages, scrolled) = frames.draw(&window, &[wheel]);
+    for message in messages {
+        let _ = window.update(message);
+    }
+    assert!(scrolled > 0.0, "the wheel should scroll the transcript");
+    let (_, redrawn) = frames.draw(&window, &[]);
+    assert_eq!(
+        redrawn, scrolled,
+        "a redraw alone keeps the transcript where it was"
+    );
+
+    let menu = [
+        MenuEvent::Toggle,
+        MenuEvent::Connections,
+        MenuEvent::Rename,
+        MenuEvent::Close,
+    ];
+    for event in menu {
+        let shown = format!("{event:?}");
+        let _ = window.update(Message::Menu(event));
+        let (_, after) = frames.draw(&window, &[]);
+        assert_eq!(after, scrolled, "after {shown}");
+    }
+}
+
+#[tokio::test]
+async fn the_prompt_keeps_the_keyboard_when_the_rebuild_line_appears() {
+    let (_dir, mut window) = building_with(|_| future::pending().boxed(), vec![]);
+    let mut frames = Frames::new(iced::Point::ORIGIN);
+    frames.focus_prompt(&window);
+    assert!(frames.prompt_focused(&window));
+
+    let _ = window.update(Message::Rebuild);
+
+    assert!(simulator(window.view()).find(BUILDING).is_ok());
+    assert!(frames.prompt_focused(&window));
+}
+
+#[tokio::test]
+async fn an_open_menu_stays_open_as_time_passes_and_the_mouse_moves_into_it() {
+    let (_dir, mut window) = window(vec![]);
+    let mut frames = Frames::new(iced::Point::new(600.0, 300.0));
+    let _ = frames.draw(&window, &[]);
+    let _ = window.update(Message::Menu(MenuEvent::Toggle));
+
+    let _ = window.update(Message::Tick);
+    assert_eq!(window.menu, Menu::Session, "after a tick");
+
+    let moves: Vec<_> = (0..40_u8)
+        .map(|step| {
+            let position = iced::Point::new(330.0, 20.0 + f32::from(step) * 3.0);
+            iced::Event::Mouse(mouse::Event::CursorMoved { position })
+        })
+        .collect();
+    let (messages, _) = frames.draw(&window, &moves);
+    assert!(messages.is_empty(), "moving the mouse sent {messages:?}");
+}

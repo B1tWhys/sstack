@@ -8,10 +8,12 @@
 //! Sessions through [`OpenSessions`], which the interface implements over however it keeps them.
 
 use crate::agent::TurnEnd;
+use crate::connections::Connections;
 use crate::question::Response;
 use crate::running_harness::{Outcome, Refusal, SessionEvent, SessionState};
 use crate::session_name::Naming;
 use crate::session_report::{Reply, ReportSender, SessionReport};
+use crate::session_setup::SetupError;
 use crate::skills::{self, Lookup, Skill};
 use crate::tools::Verdict;
 use crate::turn_runner::AgentHandle;
@@ -34,6 +36,9 @@ pub struct SessionController {
     /// What the running Turn waits for the person to answer, if anything, so that a Rebuild can
     /// put it off.
     open: Option<Open>,
+    /// The Connections the Session can switch between. Missing for a Session that can never
+    /// leave the one it was opened on.
+    connections: Option<Connections>,
 }
 
 /// What a Session's running Turn waits for the person to answer, and where the answer goes.
@@ -88,7 +93,47 @@ impl SessionController {
             skills,
             naming: NameWork::Unwanted,
             open: None,
+            connections: None,
         }
+    }
+
+    /// Lets the person switch the Session between `connections`.
+    #[must_use]
+    pub fn with_connections(mut self, connections: Connections) -> Self {
+        self.connections = Some(connections);
+        self
+    }
+
+    /// Returns the Connections the Session can switch between, with the one it runs on now.
+    /// Missing for a Session that can never leave the one it was opened on.
+    #[must_use]
+    pub fn connections(&self) -> Option<&Connections> {
+        self.connections.as_ref()
+    }
+
+    /// Moves the Session to the Connection called `name`, from the next Turn on. A Turn that is
+    /// running finishes on the Connection it started on. The Session keeps the choice, also
+    /// after it is next opened, and the model that names it moves too if it has no name yet.
+    ///
+    /// # Errors
+    /// Returns an error, and leaves the Session on its Connection, if it cannot switch, if
+    /// settings have no such Connection, if its secret is in none of the places it is looked
+    /// for, or if the choice cannot be kept.
+    pub fn switch_connection(&mut self, name: &str) -> Result<(), SetupError> {
+        let Some(connections) = &mut self.connections else {
+            return Err(crate::config::ConfigError::UnknownConnection(name.to_owned()).into());
+        };
+        let Some(switch) = connections.switch(name)? else {
+            return Ok(());
+        };
+        if let NameWork::Wanted(naming, reports) =
+            std::mem::replace(&mut self.naming, NameWork::Unwanted)
+        {
+            let naming = naming.served_by(switch.namer, switch.name_model);
+            self.naming = NameWork::Wanted(naming, reports);
+        }
+        self.agent.switch(switch.service);
+        Ok(())
     }
 
     /// Has `naming` give the Session its Session Name from the first Turn the person starts,
@@ -416,6 +461,27 @@ mod tests {
 
         assert_eq!(ended, Some(Outcome::Withdrawn("more".into())));
         assert_eq!(working.state(), SessionState::Idle);
+    }
+
+    #[tokio::test]
+    async fn a_session_switches_only_between_the_connections_it_was_given() {
+        let (dir, _) = git_project();
+        let mut fixed = controller(&dir, "a");
+        assert!(fixed.connections().is_none());
+        assert!(fixed.switch_connection("openai").is_err());
+
+        let (naming, _) = naming(&dir, "b", "unused");
+        let connections = crate::connections::test_support::built_in(dir.path().join("b.jsonl"));
+        let mut session = controller(&dir, "b")
+            .with_connections(connections)
+            .with_naming(naming, ReportSender::new(|_| {}));
+
+        session.switch_connection("anthropic").unwrap();
+        session.switch_connection("openai").unwrap();
+        assert!(session.switch_connection("nope").is_err());
+
+        assert_eq!(session.connections().unwrap().current(), "openai");
+        assert!(matches!(session.naming, NameWork::Wanted(..)));
     }
 
     #[tokio::test]

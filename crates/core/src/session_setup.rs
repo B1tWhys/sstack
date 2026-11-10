@@ -12,11 +12,13 @@ use bon::builder;
 
 use crate::agent::{Agent, AgentConfig};
 use crate::config::{Config, ConfigError, Connection};
+use crate::connections::{self, Connections};
 use crate::credentials::{MissingSecret, SystemKeyring, resolve_secret};
-use crate::provider::{Effort, Provider, ProviderError};
+use crate::provider::{Provider, ProviderError};
 use crate::question::Asker;
 use crate::sandbox::{Containers, Sandbox};
 use crate::session::{Entry, SessionError, SessionLog};
+use crate::session_metadata::SessionMetadata;
 use crate::session_name::Naming;
 use crate::skills::{self, Skill};
 use crate::tools::project::Project;
@@ -80,6 +82,36 @@ pub enum Start<'a> {
     Resume(&'a str),
     /// A new Session in this place.
     New(Place),
+}
+
+/// The Connection a run was asked to use, as with `--connection`. It applies to the first
+/// Session the run opens and to every Session it starts, which then keep it, but never moves a
+/// stored Session opened later off the Connection that Session chose.
+#[derive(Debug, Clone, Default)]
+pub struct AskedConnection {
+    /// The name of the Connection asked for. Missing if the run asked for none.
+    name: Option<String>,
+    /// Whether the run has opened a Session yet.
+    opened: bool,
+}
+
+impl AskedConnection {
+    /// Remembers that the run asked for the Connection called `name`, if any.
+    #[must_use]
+    pub fn new(name: Option<String>) -> Self {
+        Self {
+            name,
+            opened: false,
+        }
+    }
+
+    /// Returns the Connection to open the Session that `start` asks for on, for
+    /// [`prepare`]. Missing leaves the Session on the one it chose.
+    pub fn for_opening(&mut self, start: Start<'_>) -> Option<&str> {
+        let first = !std::mem::replace(&mut self.opened, true);
+        let applies = first || matches!(start, Start::New(_));
+        self.name.as_deref().filter(|_| applies)
+    }
 }
 
 /// A Session log that is open and ready for an agent.
@@ -155,6 +187,8 @@ pub struct Run {
     /// The way to give the Session its Session Name from the first thing the person says in it.
     /// Missing if the Session already has a Session Name or a first prompt to be known by.
     pub naming: Option<Naming>,
+    /// The Connections the Session can switch between, with the one it runs on now.
+    pub connections: Connections,
 }
 
 /// Where a Session turned out to work.
@@ -195,7 +229,8 @@ pub fn prepare(
     /// The directory the person started in, which picks the project and any Skills of a
     /// directory nested inside it.
     directory: &Path,
-    /// The name of the Connection to use. Missing means the default in settings.
+    /// The name of the Connection to run the Session on from now on, which the Session keeps.
+    /// Missing means the one the Session last ran on, or else the default in settings.
     connection: Option<&str>,
     /// The identifier of the model to request. Missing means the Connection's model, or else the
     /// default in settings.
@@ -210,15 +245,24 @@ pub fn prepare(
     containers: Arc<Containers>,
 ) -> Result<Run, SetupError> {
     let config = load_settings()?;
-    let connection = config.connection(connection)?;
+    if let Some(asked) = connection {
+        config.connection(Some(asked))?;
+    }
     let main = main_checkout(directory)?;
+    let session = open_session(&project_sessions(&main)?, start)?;
+    let chosen = chosen_connection(&config, connection, &session.path)?;
+    let connection = config.connection(Some(&chosen.name))?;
     let backend = Backend {
         connection,
         model: model.unwrap_or_else(|| config.model(connection)).to_owned(),
         main: &main,
+        secrets: config
+            .connections
+            .values()
+            .map(|c| c.secret.clone())
+            .collect(),
     };
     let name_model = config.name_model(connection).to_owned();
-    let session = open_session(&project_sessions(&main)?, start)?;
     let id = workspace::session_id(&session.path);
     let place = workplace(&main, &id, session.wants_worktree);
     let installed = installed_skills(place.worktree.as_deref().unwrap_or(&main), directory);
@@ -240,14 +284,69 @@ pub fn prepare(
             None => naming,
         }
     });
+    let connections = Connections::builder()
+        .config(config.clone())
+        .current(chosen.name)
+        .log(session.path.clone())
+        .main(main)
+        .keyring(Arc::new(SystemKeyring))
+        .build();
     Ok(Run {
         agent: Agent::new(configured.agent, session.log, session.entries)?,
         session: session.path,
-        notices: place.notice.into_iter().collect(),
+        notices: chosen.notice.into_iter().chain(place.notice).collect(),
         descriptions_left_out: listing.without_descriptions,
         vim: config.vim,
         skills: installed,
         naming,
+        connections,
+    })
+}
+
+/// The Connection a Session runs on, as it is opened.
+struct Chosen {
+    /// The name of the Connection.
+    name: String,
+    /// What the person should know about the choice, when the Session could not have the
+    /// Connection it last ran on.
+    notice: Option<String>,
+}
+
+/// Decides which Connection the Session stored at `log` runs on: the one called `asked`, which
+/// the Session keeps from now on, or else the one it last ran on, or else the default.
+///
+/// # Errors
+/// Returns an error if the choice of `asked` cannot be recorded.
+fn chosen_connection(
+    config: &Config,
+    asked: Option<&str>,
+    log: &Path,
+) -> Result<Chosen, SetupError> {
+    if let Some(asked) = asked {
+        connections::record(log, asked)?;
+        return Ok(Chosen {
+            name: asked.to_owned(),
+            notice: None,
+        });
+    }
+    let saved = SessionMetadata::read(log)?.connection;
+    let default = config.default_connection.clone();
+    Ok(match saved {
+        Some(saved) if config.connections.contains_key(&saved) => Chosen {
+            name: saved,
+            notice: None,
+        },
+        Some(saved) => Chosen {
+            notice: Some(format!(
+                "this Session ran on the Connection {saved}, which settings no longer define, \
+                 so it runs on {default}"
+            )),
+            name: default,
+        },
+        None => Chosen {
+            name: default,
+            notice: None,
+        },
     })
 }
 
@@ -323,6 +422,9 @@ struct Backend<'a> {
     model: String,
     /// The main checkout, where a `.env` file would be, since git leaves it out of worktrees.
     main: &'a Path,
+    /// The names of the secrets of every Connection in settings, which are kept from commands
+    /// on the host, since the Session can switch to any of them.
+    secrets: Vec<String>,
 }
 
 /// Finds the [`Skill`]s for a Session working in the project at `root`: the project's own,
@@ -381,7 +483,7 @@ fn agent_config(
         .iter()
         .filter_map(|s| s.path.parent().map(Path::to_owned));
     let project = Arc::new(Project::new(root)?.with_readable(skill_directories));
-    let secret_env = vec![connection.secret.clone()];
+    let secret_env = backend.secrets.clone();
     let sandbox = Sandbox::new(containers, id, project.root());
     let tools = ToolBox::standard()
         .project(project.clone())
@@ -411,14 +513,11 @@ fn agent_config(
     } else {
         (tools, system)
     };
-    let namer = Connection {
-        effort: Effort::Low,
-        ..connection.clone()
-    };
+    let opened = connections::open(connection, secret)?;
     Ok(Configured {
-        namer: namer.provider(secret.clone())?,
+        namer: opened.namer,
         agent: AgentConfig {
-            provider: connection.provider(secret)?,
+            provider: opened.provider,
             model: backend.model.clone(),
             system,
             tools,
@@ -430,6 +529,16 @@ fn agent_config(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_asked_connection_applies_to_the_first_session_and_new_ones() {
+        let mut asked = AskedConnection::new(Some("work".into()));
+        assert_eq!(asked.for_opening(Start::Resume("1")), Some("work"));
+        assert_eq!(asked.for_opening(Start::Resume("2")), None);
+        assert_eq!(asked.for_opening(Start::New(Place::Worktree)), Some("work"));
+        let mut none = AskedConnection::default();
+        assert_eq!(none.for_opening(Start::New(Place::Worktree)), None);
+    }
 
     #[test]
     fn only_a_session_with_nothing_to_be_known_by_wants_a_name() {

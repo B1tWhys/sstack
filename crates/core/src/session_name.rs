@@ -49,6 +49,17 @@ impl Naming {
         }
     }
 
+    /// Has the name written by `model`, which `provider` serves, instead, as when the Session
+    /// moves to another Connection before it is named.
+    #[must_use]
+    pub fn served_by(self, provider: Arc<dyn Provider>, model: String) -> Self {
+        Self {
+            provider,
+            model,
+            ..self
+        }
+    }
+
     /// Also renames the branch of the Session's worktree, made from the project whose main
     /// checkout is `main`, after the name once it is made.
     #[must_use]

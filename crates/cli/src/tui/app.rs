@@ -289,7 +289,22 @@ impl App<'_> {
             Command::Archive { force } => self.archive(force),
             Command::Vim => self.panes[self.shown].toggle_vim(),
             Command::Rename(name) => self.rename(name),
+            Command::Connection(name) => self.connection(name),
             _ => {}
+        }
+    }
+
+    /// Moves the Session on screen to the Connection called `name` from its next Turn on, or
+    /// with `None` offers the Connections to choose from.
+    fn connection(&mut self, name: Option<&str>) {
+        if let Err(error) = self.ensure_agent(self.shown) {
+            self.notice(format!("could not open the Session: {error}"));
+            return;
+        }
+        let pane = &mut self.panes[self.shown];
+        match name {
+            Some(name) => pane.switch_connection(name),
+            None => pane.pick_connection(),
         }
     }
 
@@ -377,6 +392,7 @@ impl App<'_> {
             Action::PreviousSession => self.step(-1),
             Action::LongestWaiting => self.show_longest_waiting(),
             Action::Archive => self.archive(false),
+            Action::SwitchConnection(name) => self.connection(Some(&name)),
         }
         None
     }
@@ -1660,6 +1676,35 @@ mod tests {
         h.enter("/rename");
         assert_eq!(sidebar_order(&mut h), ["older", "younger", "new session"]);
         assert_eq!(stored_name(&h.dir, "first"), None);
+    }
+
+    #[tokio::test]
+    async fn the_connection_command_switches_the_session_on_screen_or_offers_a_choice() {
+        let mut h = harness(Arc::new(NeverResponds));
+        assert!(h.screen_of(WIDE).contains("| anthropic |"));
+
+        h.enter("/connection openai");
+        let screen = h.screen_of(WIDE);
+        assert!(screen.contains("| openai |"), "{screen}");
+        assert!(
+            screen.contains("runs on openai from the next Turn"),
+            "{screen}"
+        );
+        h.enter("/connection nope");
+        let screen = h.screen_of(WIDE);
+        assert!(
+            screen.contains("not switched: no connection named nope"),
+            "{screen}"
+        );
+
+        h.enter("/connection");
+        let screen = h.screen_of(WIDE);
+        assert!(screen.contains("> 2. openai (now)"), "{screen}");
+        h.app.handle(Event::Key(key(KeyCode::Up)));
+        h.app.handle(Event::Key(key(KeyCode::Enter)));
+        let screen = h.screen_of(WIDE);
+        assert!(screen.contains("| anthropic |"), "{screen}");
+        assert!(!screen.contains("(now)"), "{screen}");
     }
 
     #[tokio::test]

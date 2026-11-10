@@ -1,3 +1,5 @@
+use std::sync::{Arc, Mutex, PoisonError};
+
 use async_trait::async_trait;
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -19,15 +21,19 @@ pub struct SessionInfo {
     pub effort: Option<Effort>,
 }
 
+/// What the [`ShowSessionInfo`] tool tells the model, shared with whoever keeps it up to date
+/// when the Session moves to another Connection.
+pub(super) type SharedInfo = Arc<Mutex<SessionInfo>>;
+
 /// The tool that tells the model about the Session it is working in.
 pub(super) struct ShowSessionInfo {
-    /// What the tool tells the model.
-    info: SessionInfo,
+    /// What the tool tells the model, as of the moment it is called.
+    info: SharedInfo,
 }
 
 impl ShowSessionInfo {
-    /// Creates the tool, telling the model `info`.
-    pub(super) fn new(info: SessionInfo) -> Self {
+    /// Creates the tool, telling the model whatever `info` holds when it is called.
+    pub(super) fn new(info: SharedInfo) -> Self {
         Self { info }
     }
 }
@@ -46,7 +52,8 @@ impl Tool for ShowSessionInfo {
     }
 
     async fn run(&self, _input: Value) -> Result<String, ToolError> {
-        serde_json::to_string(&self.info).map_err(|error| ToolError::Failed(error.to_string()))
+        let info = self.info.lock().unwrap_or_else(PoisonError::into_inner);
+        serde_json::to_string(&*info).map_err(|error| ToolError::Failed(error.to_string()))
     }
 }
 
@@ -56,11 +63,11 @@ mod tests {
 
     /// Returns what the tool tells the model when it knows `effort`.
     async fn shown(effort: Option<Effort>) -> Value {
-        let tool = ShowSessionInfo::new(SessionInfo {
+        let tool = ShowSessionInfo::new(Arc::new(Mutex::new(SessionInfo {
             session_id: "0001794212925375".into(),
             model: "claude-opus-4-5".into(),
             effort,
-        });
+        })));
         let text = tool.run(json!({})).await.unwrap();
         serde_json::from_str(&text).unwrap()
     }

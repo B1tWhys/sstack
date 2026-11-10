@@ -5,6 +5,7 @@
 
 pub mod agent;
 pub mod config;
+pub mod connections;
 pub mod credentials;
 pub mod human_command;
 pub mod provider;

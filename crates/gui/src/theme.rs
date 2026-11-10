@@ -71,6 +71,17 @@ pub fn panel(_: &Theme) -> container::Style {
         .border(Border::default().rounded(CORNER_RADIUS))
 }
 
+/// Returns the style of an open menu: a panel with an edge in the main color, so that it stands
+/// apart from the bar it hangs from, which shares its color.
+pub fn menu(theme: &Theme) -> container::Style {
+    panel(theme).border(
+        Border::default()
+            .rounded(CORNER_RADIUS)
+            .width(1)
+            .color(PRIMARY),
+    )
+}
+
 /// Returns the style of text that matters less than what is around it, such as what the model
 /// thought or said on its way to an answer. It is dimmer than other text but still readable.
 pub fn muted(_: &Theme) -> text::Style {

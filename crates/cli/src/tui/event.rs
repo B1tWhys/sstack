@@ -119,6 +119,8 @@ pub enum Action {
     LongestWaiting,
     /// The person asked to put the Session on screen away.
     Archive,
+    /// The person chose the Connection with this name for the Session on screen.
+    SwitchConnection(String),
 }
 
 #[cfg(test)]

@@ -1,5 +1,6 @@
 ---
 source: crates/cli/src/tui/app.rs
+assertion_line: 1018
 expression: h.drawn_at(NARROW)
 ---
 "                                                            "
@@ -10,7 +11,7 @@ expression: h.drawn_at(NARROW)
 "                                                            "
 "                                                            "
 "                                                            "
-"session first | ready | Alt-C quit | Alt-E/Y switch | Alt-G "
+"session first | anthropic | ready | Alt-C quit | Alt-E/Y swi"
 "┌──────────────────────────────────────────────────────────┐"
 "│>                                                         │"
 "└──────────────────────────────────────────────────────────┘"

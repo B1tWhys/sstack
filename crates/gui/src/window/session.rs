@@ -7,6 +7,7 @@ use std::time::SystemTime;
 use iced::Subscription;
 use iced::widget::text_editor;
 use sstack::agent::TurnEnd;
+use sstack::connections::Connections;
 use sstack::question::{Answer, Response};
 use sstack::queue::Waits;
 use sstack::running_harness::SessionState;
@@ -136,7 +137,8 @@ impl SessionView {
             self.waits.put_off(since);
         }
         let agent = AgentHandle::spawn(run.agent, sender.clone());
-        let controller = SessionController::new(agent, run.skills, parked);
+        let controller =
+            SessionController::new(agent, run.skills, parked).with_connections(run.connections);
         self.controller = Some(match run.naming {
             Some(naming) => controller.with_naming(naming, sender),
             None => controller,
@@ -157,6 +159,23 @@ impl SessionView {
     /// Returns where the Session is stored.
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Returns the Connections the Session can switch between, with the one it runs on now.
+    /// Missing until the Session is opened.
+    pub fn connections(&self) -> Option<&Connections> {
+        self.controller.as_ref()?.connections()
+    }
+
+    /// Moves the Session to the Connection called `name` from its next Turn on, and tells the
+    /// person whether it did.
+    pub fn switch_connection(&mut self, name: &str) {
+        let switched = self.control(|controller| controller.switch_connection(name));
+        match switched {
+            Some(Ok(())) => self.notice(format!("runs on {name} from the next Turn")),
+            Some(Err(error)) => self.notice(format!("not switched: {error}")),
+            None => {}
+        }
     }
 
     /// Returns what the Session is doing.

@@ -326,7 +326,8 @@ pub enum Outcome<'a> {
     Refused(Refusal),
     /// A Human Command that only the interface can carry out, because it is about how the
     /// interface keeps its Sessions: [`Command::New`], [`Command::NewMain`],
-    /// [`Command::Archive`], [`Command::Vim`] or [`Command::Rename`]. No other comes back.
+    /// [`Command::Archive`], [`Command::Vim`], [`Command::Rename`] or [`Command::Connection`]. No
+    /// other comes back.
     Command(Command<'a>),
     /// A request to start building this checkout of the Harness Source for a Rebuild, whose
     /// result the interface passes to [`RunningHarness::build_finished`]. A

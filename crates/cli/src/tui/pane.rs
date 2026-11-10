@@ -8,6 +8,7 @@ use crossterm::event::KeyEvent;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use sstack::agent::TurnEnd;
+use sstack::connections::Connections;
 use sstack::queue::Waits;
 use sstack::running_harness::SessionState;
 use sstack::session::{self, Entry};
@@ -19,7 +20,9 @@ use sstack::turn_runner::AgentHandle;
 use sstack::workspace::{self, SessionSummary};
 
 use super::component::{Component, KeyOutcome};
-use super::components::{Activity, Approval, Input, Questions, Row, Status, Transcript};
+use super::components::{
+    Activity, Approval, ConnectionPicker, Input, Questions, Row, Status, Transcript,
+};
 use super::event::{Event, SessionSender};
 
 /// A Session the harness has started an agent for.
@@ -40,6 +43,8 @@ pub struct Opened {
     /// The way to give the Session its Session Name from the first thing the person says in it.
     /// Missing if it needs none.
     pub naming: Option<Naming>,
+    /// The Connections the Session can switch between, with the one it runs on now.
+    pub connections: Connections,
 }
 
 /// Something that ended while the person was looking at another Session.
@@ -77,6 +82,8 @@ pub struct Pane {
     unseen: Option<Unseen>,
     /// The questions about shell commands, shown over everything else.
     approval: Approval,
+    /// The Connections the person can switch the Session to, shown when they ask.
+    picker: ConnectionPicker,
     /// The model's Questions, shown over everything else.
     questions: Questions,
     /// Where the person types.
@@ -121,6 +128,7 @@ impl Pane {
             waits: Waits::since(waiting_since),
             unseen: None,
             approval: Approval::default(),
+            picker: ConnectionPicker::default(),
             questions: Questions::default(),
             input: Input::default(),
             transcript: Transcript::default(),
@@ -162,7 +170,9 @@ impl Pane {
         if parked {
             self.keep_put_off_wait();
         }
-        let controller = SessionController::new(opened.agent, opened.skills, parked);
+        self.status.set_connection(opened.connections.current());
+        let controller = SessionController::new(opened.agent, opened.skills, parked)
+            .with_connections(opened.connections);
         self.controller = Some(match opened.naming {
             Some(naming) => controller.with_naming(naming, opened.events.reporter()),
             None => controller,
@@ -261,10 +271,11 @@ impl Pane {
     }
 
     /// Returns every component, topmost first, which is the order key presses are offered in.
-    fn components(&mut self) -> [&mut dyn Component; 5] {
+    fn components(&mut self) -> [&mut dyn Component; 6] {
         [
             &mut self.approval,
             &mut self.questions,
+            &mut self.picker,
             &mut self.input,
             &mut self.transcript,
             &mut self.status,
@@ -341,6 +352,30 @@ impl Pane {
         }
     }
 
+    /// Offers the person the Connections the Session can switch to. Does nothing before the
+    /// Session is opened.
+    pub fn pick_connection(&mut self) {
+        let offer = self.controller.as_ref().and_then(|c| c.connections());
+        if let Some(connections) = offer {
+            let (names, current) = (connections.names(), connections.current().to_owned());
+            self.picker.open(names, &current);
+        }
+    }
+
+    /// Moves the Session to the Connection called `name` from its next Turn on, and tells the
+    /// person whether it did.
+    pub fn switch_connection(&mut self, name: &str) {
+        let switched = self.control(|controller| controller.switch_connection(name));
+        match switched {
+            Some(Ok(())) => {
+                self.status.set_connection(name);
+                self.notice(&format!("runs on {name} from the next Turn"));
+            }
+            Some(Err(error)) => self.notice(&format!("not switched: {error}")),
+            None => {}
+        }
+    }
+
     /// Sets what the status line says about other Sessions.
     pub fn set_others(&mut self, others: Option<String>) {
         self.status.set_others(others);
@@ -360,6 +395,7 @@ impl Pane {
         self.transcript.render(frame, transcript);
         self.status.render(frame, status);
         self.input.render(frame, input);
+        self.picker.render(frame, area);
         self.approval.render(frame, area);
         self.questions.render(frame, area);
     }

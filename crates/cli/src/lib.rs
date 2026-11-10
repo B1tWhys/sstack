@@ -22,7 +22,8 @@ struct Args {
     /// Run one prompt without interaction. Shell commands are denied.
     #[arg(short, long)]
     prompt: Option<String>,
-    /// Connection to use, instead of the default in settings.
+    /// Connection to run on, instead of the one the Session last ran on or the default in
+    /// settings. Sessions started in this run use it too, and each keeps it.
     #[arg(long)]
     connection: Option<String>,
     /// Model to use, instead of the one the Connection names in settings.
@@ -41,14 +42,12 @@ const HARNESS: Binary = Binary {
 
 impl Args {
     /// Returns the arguments that bring a rebuilt harness back to the Session stored at
-    /// `session`, with the same Connection and model as this run.
+    /// `session`, with the same model as this run. Each Session keeps its own Connection, so the
+    /// Connection this run was asked for is not passed on.
     fn relaunch(&self, session: &Path) -> Vec<String> {
         let mut relaunch = vec!["--resume".to_owned(), workspace::session_id(session)];
-        let options = [("--connection", &self.connection), ("--model", &self.model)];
-        for (flag, value) in options {
-            if let Some(value) = value {
-                relaunch.extend([flag.to_owned(), value.clone()]);
-            }
+        if let Some(model) = &self.model {
+            relaunch.extend(["--model".to_owned(), model.clone()]);
         }
         relaunch
     }
@@ -98,13 +97,13 @@ mod tests {
     }
 
     #[test]
-    fn relaunching_keeps_the_session_and_chosen_options() {
+    fn relaunching_keeps_the_session_and_model_but_not_the_connection() {
         let plain = args(&[]).relaunch(Path::new("/s/123.jsonl"));
         assert_eq!(plain, ["--resume", "123"]);
         let chosen = args(&["--connection", "work", "--model", "m"]);
         assert_eq!(
             chosen.relaunch(Path::new("/s/123.jsonl")),
-            ["--resume", "123", "--connection", "work", "--model", "m"]
+            ["--resume", "123", "--model", "m"]
         );
     }
 

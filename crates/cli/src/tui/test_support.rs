@@ -7,6 +7,9 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::backend::TestBackend;
 use ratatui::{Frame, Terminal};
 use sstack::agent::{Agent, AgentConfig};
+use sstack::config::Config;
+use sstack::connections::Connections;
+use sstack::credentials::SecretStore;
 use sstack::provider::Provider;
 use sstack::sandbox::Sandbox;
 use sstack::session::{AssistantEntry, SessionLog, StopReason, ToolCall, Usage};
@@ -146,7 +149,30 @@ pub fn opened(path: &Path, provider: Arc<dyn Provider>, events: &EventSender) ->
             scope: Scope::Project,
         }]),
         naming: None,
+        connections: connections(path),
     }
+}
+
+/// A keyring that has a secret for every name, so that a test can switch to any Connection.
+struct AnyKey;
+
+impl SecretStore for AnyKey {
+    fn get(&self, _name: &str) -> Option<String> {
+        Some("test-key".into())
+    }
+}
+
+/// Returns the built-in Connections for the Session stored at `path`, running on the default
+/// one, with a secret for each.
+pub fn connections(path: &Path) -> Connections {
+    let config = Config::default();
+    Connections::builder()
+        .current(config.default_connection.clone())
+        .config(config)
+        .log(path.to_owned())
+        .main(path.parent().unwrap().to_owned())
+        .keyring(Arc::new(AnyKey))
+        .build()
 }
 
 /// Returns what a test agent working in `directory` runs on, with no system prompt.

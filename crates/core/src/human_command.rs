@@ -25,6 +25,10 @@ pub enum Command<'a> {
     /// The `/rename` Human Command, which makes the text after it the Session Name of the Session
     /// on screen. With nothing after it, the Session is known by its first prompt again.
     Rename(Option<&'a str>),
+    /// The `/connection` Human Command, which moves the Session on screen to the Connection
+    /// named after it from its next Turn on. With nothing after it, the interface offers the
+    /// Connections to choose from.
+    Connection(Option<&'a str>),
     /// The `/quit` Human Command, also spelled `/exit`.
     Quit,
     /// A slash-prefixed line that is not a known Human Command.
@@ -71,6 +75,7 @@ fn with_argument(line: &str) -> Command<'_> {
     let (name, argument) = line.split_once(char::is_whitespace).unwrap_or((line, ""));
     match name {
         "/rename" => Command::Rename(Some(argument.trim()).filter(|name| !name.is_empty())),
+        "/connection" => Command::Connection(Some(argument.trim()).filter(|name| !name.is_empty())),
         _ => Command::Unknown(line),
     }
 }
@@ -113,6 +118,15 @@ mod tests {
         assert_eq!(parse_command("/rename"), Command::Rename(None));
         assert_eq!(parse_command("/rename   "), Command::Rename(None));
         assert_eq!(parse_command("/renamed"), Command::Unknown("/renamed"));
+    }
+
+    #[test]
+    fn connection_takes_the_name_after_it() {
+        assert_eq!(
+            parse_command("/connection  openai "),
+            Command::Connection(Some("openai"))
+        );
+        assert_eq!(parse_command("/connection"), Command::Connection(None));
     }
 
     #[test]

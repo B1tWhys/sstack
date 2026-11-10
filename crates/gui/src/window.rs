@@ -2,6 +2,7 @@
 //! said in it and a prompt to say more.
 
 mod input;
+mod menu;
 mod session;
 mod sidebar;
 
@@ -15,13 +16,16 @@ use iced::futures::future::{self, BoxFuture, FutureExt};
 use iced::widget::scrollable::Viewport;
 use iced::widget::text_editor::{Binding, KeyPress};
 use iced::widget::{
-    button, column, container, operation, row, scrollable, stack, text, text_editor,
+    button, column, container, mouse_area, opaque, operation, row, scrollable, space, stack, text,
+    text_editor,
 };
 use iced::{
     Element, Fill, Size, Subscription, Task, Theme, clipboard, keyboard, task, time, window,
 };
 use input::Input;
+use menu::{Menu, MenuEvent};
 use session::SessionView;
+use sstack::connections::Connections;
 use sstack::human_command::Command;
 use sstack::rebuild::Checkout;
 use sstack::running_harness::{
@@ -168,6 +172,8 @@ pub struct Window {
     building: Option<task::Handle>,
     /// Where the window leaves what to relaunch into, once a Rebuild is ready.
     relaunch: Arc<OnceLock<Relaunch>>,
+    /// Which part of the menu bar's menu is open.
+    menu: Menu,
 }
 
 /// Something that happened in the window, for [`Window::update`] to act on.
@@ -232,6 +238,15 @@ pub enum Message {
     Show(String),
     /// The person asked for a new Session in its own worktree, as `/new` does.
     NewSession,
+    /// The person asked for a new Session in the main checkout, as `/new-main` does.
+    NewMainSession,
+    /// The person opened, closed or typed into the menu.
+    Menu(MenuEvent),
+    /// The person confirmed the name typed into the menu's Rename field, as `/rename` does.
+    Renamed,
+    /// The person chose the Connection with this name for the Session on screen, as
+    /// `/connection` does.
+    SwitchConnection(String),
     /// The person asked to put the Session on screen away, as `/archive` does, which refuses if
     /// that would lose work.
     Archive,
@@ -275,6 +290,7 @@ impl Window {
             build,
             building: None,
             relaunch,
+            menu: Menu::Closed,
         };
         window.continue_parked();
         window
@@ -321,7 +337,31 @@ impl Window {
             Message::Built(built) => self.built(built),
             Message::Rebuild => self.command("/rebuild"),
             Message::CloseRequested => self.close(),
+            Message::Menu(event) => self.menu(event),
+            Message::Renamed => self.renamed(),
             message => self.switch(message),
+        }
+    }
+
+    /// Renames the Session on screen to what the person typed into the menu's Rename field, as
+    /// `/rename` does, and closes the menu.
+    fn renamed(&mut self) -> Task<Message> {
+        let Menu::Renaming(name) = std::mem::take(&mut self.menu) else {
+            return Task::none();
+        };
+        self.command(&format!("/rename {name}"))
+    }
+
+    /// Acts on what the person did to the menu itself, focusing the Rename field once it shows.
+    fn menu(&mut self, event: MenuEvent) -> Task<Message> {
+        let renaming = event == MenuEvent::Rename;
+        let menu = std::mem::take(&mut self.menu);
+        let view = self.view_ref();
+        self.menu = menu.after(event, || view.known_name().unwrap_or_default());
+        if renaming {
+            operation::focus(menu::RENAME)
+        } else {
+            Task::none()
         }
     }
 
@@ -347,12 +387,28 @@ impl Window {
         }
     }
 
-    /// Acts on a request to show another Session, or to start a new one.
+    /// Acts on a request to show another Session, to start a new one, or to change the one on
+    /// screen from the menu. Choosing something from the menu, or another Session from the
+    /// sidebar, closes the menu. Nothing else does, so that passing time and keys pressed
+    /// elsewhere leave it open.
     fn switch(&mut self, message: Message) -> Task<Message> {
+        let chosen = matches!(
+            message,
+            Message::Show(_)
+                | Message::NewSession
+                | Message::NewMainSession
+                | Message::Archive
+                | Message::SwitchConnection(_)
+        );
+        if chosen {
+            self.menu = Menu::Closed;
+        }
         match message {
             Message::Show(id) => self.show_id(&id),
             Message::NewSession => self.command("/new"),
+            Message::NewMainSession => self.command("/new-main"),
             Message::Archive => self.command("/archive"),
+            Message::SwitchConnection(name) => self.command(&format!("/connection {name}")),
             Message::NextSession => self.step(1),
             Message::PreviousSession => self.step(-1),
             Message::LongestWaiting => self.show_longest_waiting(),
@@ -361,6 +417,12 @@ impl Window {
     }
 
     /// Draws the window: the sidebar, and the Session on screen beside it.
+    ///
+    /// iced keeps what each widget remembers, such as how far the transcript is scrolled, by the
+    /// widget's place and kind in the tree this returns. A widget that moves, or whose parent
+    /// becomes another kind of widget, starts over with nothing remembered. So whatever comes
+    /// and goes in the window takes a place of its own that is always there, empty while it is
+    /// not shown, and never wraps or shifts what is around it.
     pub fn view(&self) -> Element<'_, Message> {
         let now = SystemTime::now();
         let queue = self.queue();
@@ -376,10 +438,11 @@ impl Window {
             .into()
     }
 
-    /// Draws the Session on screen: its transcript with any questions for the person, what the
-    /// Running Harness is doing on its way out, and the prompt with its buttons. A pill floats
-    /// over the bottom of the transcript while a question waits out of view. The button that
-    /// archives the Session does nothing while a Turn runs in it.
+    /// Draws the Session on screen: its bar with the Session menu, its transcript with any
+    /// questions for the person, what the Running Harness is doing on its way out, and the prompt
+    /// with its buttons. A pill floats over the bottom of the transcript while a question waits
+    /// out of view. An open menu hangs from the bar over the transcript, and a click on the
+    /// transcript outside it closes it.
     fn session_view(&self) -> Element<'_, Message> {
         let view = self.view_ref();
         let handlers = Handlers {
@@ -400,7 +463,27 @@ impl Window {
             })
             .height(Fill)
             .width(Fill);
-        let transcript = stack![transcript].push(waiting_pill(view));
+        let open = self.menu != Menu::Closed;
+        let connections = view.connections();
+        let current = connections.map(Connections::current);
+        let offer = menu::Offer {
+            archivable: !view.state().in_turn(),
+            connections: connections.map_or_default(Connections::names),
+            current,
+        };
+        let outside: Element<'_, Message> = if open {
+            mouse_area(space().width(Fill).height(Fill))
+                .on_press(Message::Menu(MenuEvent::Close))
+                .into()
+        } else {
+            space().into()
+        };
+        let transcript = stack![
+            transcript,
+            waiting_pill(view).unwrap_or_else(|| space().into()),
+            outside,
+            opaque(menu::dropdown(&self.menu, &offer)),
+        ];
         let prompt = match &view.prompt {
             Input::Plain(content) => text_editor(content)
                 .id(PROMPT)
@@ -416,12 +499,10 @@ impl Window {
         let interrupt =
             button("Interrupt").on_press_maybe(interruptible.then_some(Message::Interrupt));
         let rebuild = button("Rebuild").on_press_maybe((!draining).then_some(Message::Rebuild));
-        let archive =
-            button("Archive").on_press_maybe((!view.state().in_turn()).then_some(Message::Archive));
-        let progress = progress(self.harness.phase()).map(text);
-        column![transcript]
-            .push(progress)
-            .push(row![prompt, send, interrupt, rebuild, archive].spacing(SPACING))
+        let progress: Element<'_, Message> = progress(self.harness.phase())
+            .map_or_else(|| space().into(), |words| text(words).into());
+        column![menu::bar(current, open), transcript, progress]
+            .push(row![prompt, send, interrupt, rebuild].spacing(SPACING))
             .spacing(SPACING)
             .width(Fill)
             .into()
@@ -434,14 +515,17 @@ impl Window {
 
     /// Returns where every open Session's reports come from, with the keys, requests to close
     /// and passing time that the window acts on. While the person types into nvim in the Session
-    /// on screen, every key goes to the window, to pass on to nvim.
+    /// on screen, every key goes to the window, to pass on to nvim, unless the menu is open, whose
+    /// Rename field takes the keys then.
     ///
     /// The window hears a request to close only if iced is told not to exit on one itself.
     pub fn subscription(&self) -> Subscription<Message> {
         let reports = self.views.iter().map(SessionView::subscription);
-        let keys = match self.view_ref().prompt {
-            Input::Plain(_) => keyboard::listen().filter_map(|event| shortcut(&event)),
-            Input::Vim(_) => keyboard::listen().filter_map(pressed),
+        let typing_into_nvim = matches!(self.view_ref().prompt, Input::Vim(_));
+        let keys = if typing_into_nvim && self.menu == Menu::Closed {
+            keyboard::listen().filter_map(pressed)
+        } else {
+            keyboard::listen().filter_map(|event| shortcut(&event))
         };
         let window = [
             keys,
@@ -608,6 +692,14 @@ impl Window {
             Command::Archive { force } => self.archive(force),
             Command::Rename(name) => {
                 self.rename(name);
+                Task::none()
+            }
+            Command::Connection(Some(name)) => {
+                self.view_mut().switch_connection(name);
+                Task::none()
+            }
+            Command::Connection(None) => {
+                self.menu = Menu::Connections;
                 Task::none()
             }
             // Only /vim is left.

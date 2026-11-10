@@ -7,7 +7,7 @@ use std::time::SystemTime;
 
 use tokio_util::sync::CancellationToken;
 
-use crate::provider::{ModelRequest, Provider, ProviderError, StreamEvent, ToolSpec};
+use crate::provider::{Effort, ModelRequest, Provider, ProviderError, StreamEvent, ToolSpec};
 use crate::queued_prompts::QueuedPrompts;
 use crate::session::{AssistantEntry, Entry, SessionError, SessionLog, StopReason, ToolCall};
 use crate::tools::ToolBox;
@@ -99,6 +99,18 @@ pub struct AgentConfig {
     pub context_limit: u64,
 }
 
+/// The model a Session moves to when the person switches its Connection, and what serves it.
+pub struct ModelService {
+    /// The service that runs the model.
+    pub provider: Arc<dyn Provider>,
+    /// The identifier of the model to request.
+    pub model: String,
+    /// How much effort the model is asked to spend, which the model can learn about the Session.
+    pub effort: Effort,
+    /// The model's context window, in tokens.
+    pub context_limit: u64,
+}
+
 /// The agent loop for one Session, which keeps every Turn durable and resumable.
 pub struct Agent {
     /// What this agent runs on.
@@ -155,6 +167,17 @@ impl Agent {
             agent.settle_unanswered_calls(INTERRUPTED)?;
         }
         Ok(agent)
+    }
+
+    /// Has every request from now on go to `service`. Call it between Turns, so that each Turn
+    /// is served by one model. The system prompt and tools stay as they are.
+    pub fn switch(&mut self, service: ModelService) {
+        self.config
+            .tools
+            .served_by(&service.model, Some(service.effort));
+        self.config.provider = service.provider;
+        self.config.model = service.model;
+        self.config.context_limit = service.context_limit;
     }
 
     /// Returns every entry in the Session so far, oldest first.
@@ -591,6 +614,35 @@ mod tests {
         }));
         let stored = crate::session::lock_free_read(&h.session).unwrap();
         assert_eq!(stored, h.agent.entries());
+    }
+
+    #[tokio::test]
+    async fn after_a_switch_the_next_turn_goes_to_the_new_model_with_its_limit() {
+        let mut h = harness(vec![Ok(reply("first"))], Arc::new(DenyAll));
+        run(&mut h.agent).await.0.unwrap();
+        let mut answer = reply("second");
+        answer.usage.input_tokens = 90;
+        let other = Arc::new(ScriptedProvider::new(vec![Ok(answer)]));
+
+        h.agent.switch(ModelService {
+            provider: other.clone(),
+            model: "other".into(),
+            effort: Effort::Low,
+            context_limit: 100,
+        });
+        let (end, events) = run(&mut h.agent).await;
+
+        assert_eq!(end.unwrap(), TurnEnd::Finished);
+        assert_eq!(h.provider.requests().len(), 1);
+        assert_eq!(
+            other.requests()[0].len(),
+            3,
+            "the new model sees the Session so far"
+        );
+        assert!(events.contains(&AgentEvent::ContextNearLimit {
+            used: 90,
+            limit: 100
+        }));
     }
 
     #[tokio::test]

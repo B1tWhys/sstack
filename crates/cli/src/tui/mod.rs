@@ -42,8 +42,8 @@ use sstack::running_harness::Exit;
 use sstack::sandbox::Containers;
 use sstack::session_report::{ReportingApprover, ReportingAsker, SessionReport};
 use sstack::session_setup::{
-    Start, installed_skills, listed_sessions, main_checkout, prepare, sessions_directory,
-    starting_session,
+    AskedConnection, Start, installed_skills, listed_sessions, main_checkout, prepare,
+    sessions_directory, starting_session,
 };
 use sstack::tools::Approver;
 use sstack::turn_runner::AgentHandle;
@@ -67,6 +67,7 @@ pub async fn run(args: &Args) -> Result<ExitCode> {
     let main = main_checkout(&started_in)?;
     let mut sessions = LiveSessions {
         args,
+        connection: AskedConnection::new(args.connection.clone()),
         events: sender.clone(),
         directory: sessions_directory(&started_in)?,
         main: main.clone(),
@@ -101,6 +102,8 @@ pub async fn run(args: &Args) -> Result<ExitCode> {
 struct LiveSessions<'a> {
     /// The arguments of this run.
     args: &'a Args,
+    /// The Connection this run was asked to use, and which Sessions it applies to.
+    connection: AskedConnection,
     /// Where each Session reports.
     events: EventSender,
     /// The main checkout of the project.
@@ -131,7 +134,7 @@ impl Sessions for LiveSessions<'_> {
         let run = prepare()
             .start(start)
             .directory(&self.started_in)
-            .maybe_connection(self.args.connection.as_deref())
+            .maybe_connection(self.connection.for_opening(start))
             .maybe_model(self.args.model.as_deref())
             .approver(approver)
             .asker(asker)
@@ -150,6 +153,7 @@ impl Sessions for LiveSessions<'_> {
             vim: run.vim,
             skills: run.skills,
             naming: run.naming,
+            connections: run.connections,
         })
     }
 

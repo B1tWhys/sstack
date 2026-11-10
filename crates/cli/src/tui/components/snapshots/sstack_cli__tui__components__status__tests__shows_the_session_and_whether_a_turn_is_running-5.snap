@@ -1,0 +1,6 @@
+---
+source: crates/cli/src/tui/components/status.rs
+assertion_line: 113
+expression: shown.backend()
+---
+"session 42 | openai | ready | "

@@ -10,6 +10,9 @@ use anyhow::{Result, bail};
 use iced::futures::future::{self, BoxFuture, FutureExt};
 use iced::widget::text_editor::{Action, Edit};
 use sstack::agent::{Agent, AgentConfig};
+use sstack::config::Config;
+use sstack::connections::Connections;
+use sstack::credentials::SecretStore;
 use sstack::provider::scripted::{Scripted, ScriptedProvider};
 use sstack::rebuild::Checkout;
 use sstack::sandbox::Sandbox;
@@ -103,6 +106,7 @@ fn open_stored(dir: &Path, path: PathBuf, script: Vec<Scripted>) -> Opened {
     };
     let run = Run {
         agent: Agent::new(config, log, entries).unwrap(),
+        connections: connections(&path),
         session: path,
         notices: Vec::new(),
         descriptions_left_out: 0,
@@ -115,6 +119,28 @@ fn open_stored(dir: &Path, path: PathBuf, script: Vec<Scripted>) -> Opened {
         reports,
         sender,
     }
+}
+
+/// A keyring that has a secret for every name, so that a test can switch to any Connection.
+struct AnyKey;
+
+impl SecretStore for AnyKey {
+    fn get(&self, _name: &str) -> Option<String> {
+        Some("test-key".into())
+    }
+}
+
+/// Returns the built-in Connections for the Session stored at `path`, running on the default
+/// one, with a secret for each.
+pub fn connections(path: &Path) -> Connections {
+    let config = Config::default();
+    Connections::builder()
+        .current(config.default_connection.clone())
+        .config(config)
+        .log(path.to_owned())
+        .main(path.parent().unwrap().to_owned())
+        .keyring(Arc::new(AnyKey))
+        .build()
 }
 
 /// Returns a window readied in `dir` on one Session, with id 1, whose model gives the

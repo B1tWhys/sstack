@@ -16,6 +16,8 @@ use crate::tui::theme;
 pub struct Status {
     /// The id of the Session, which `--resume` accepts.
     session: String,
+    /// The name of the Connection the Session runs on. Missing until the Session is opened.
+    connection: Option<String>,
     /// Whether a Turn is running.
     working: bool,
     /// What other Sessions are doing, when the sidebar is not there to say.
@@ -27,6 +29,7 @@ impl Status {
     pub fn new(session: String) -> Self {
         Self {
             session,
+            connection: None,
             working: false,
             others: None,
         }
@@ -35,6 +38,11 @@ impl Status {
     /// Sets what to say about other Sessions, replacing whatever was said before.
     pub fn set_others(&mut self, others: Option<String>) {
         self.others = others;
+    }
+
+    /// Sets the name of the Connection the Session runs on.
+    pub fn set_connection(&mut self, connection: &str) {
+        self.connection = Some(connection.to_owned());
     }
 
     /// Returns what the status line says.
@@ -48,9 +56,13 @@ impl Status {
             .others
             .as_ref()
             .map_or_else(String::new, |others| format!(" | {others}"));
+        let connection = self
+            .connection
+            .as_ref()
+            .map_or_else(String::new, |connection| format!(" | {connection}"));
         format!(
-            "session {} | {state}{others} | {stop} | Alt-E/Y switch | Alt-G next | \
-             PgUp/PgDn scroll | /new /vim /rebuild /quit",
+            "session {}{connection} | {state}{others} | {stop} | Alt-E/Y switch | Alt-G next | \
+             PgUp/PgDn scroll | /new /vim /connection /rebuild /quit",
             self.session
         )
     }
@@ -90,6 +102,8 @@ mod tests {
         status.set_others(Some("1 blocked".into()));
         assert_snapshot!(status.text());
         status.set_others(None);
+        status.set_connection("openai");
+        assert_snapshot!(status.text());
 
         status.update(&Event::Resize);
         status.update(&Event::Report(SessionReport::TurnEnded(Ok(
