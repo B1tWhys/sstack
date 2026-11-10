@@ -384,8 +384,8 @@ mod tests {
             async fn ask(
                 &self,
                 _questions: Vec<crate::question::Question>,
-            ) -> Option<Vec<crate::question::Answer>> {
-                None
+            ) -> crate::question::Response {
+                crate::question::Response::Declined
             }
         }
 

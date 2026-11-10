@@ -57,6 +57,9 @@ pub enum Asking {
     Declined,
     /// The Turn ended before the person answered.
     Unanswered,
+    /// A Rebuild put the Questions off, and they show nothing until the Turn asks them again,
+    /// which opens them once more as the person left them.
+    PutOff,
 }
 
 impl Asked {
@@ -115,6 +118,7 @@ impl Asked {
             .into(),
             Asking::Declined => text("Note: you chose to answer the questions in the chat").into(),
             Asking::Unanswered => text("Note: the questions were not answered").into(),
+            Asking::PutOff => column![].into(),
         }
     }
 

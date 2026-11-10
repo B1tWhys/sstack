@@ -7,7 +7,7 @@ use std::time::SystemTime;
 use iced::Subscription;
 use iced::widget::text_editor;
 use sstack::agent::TurnEnd;
-use sstack::question::Answer;
+use sstack::question::{Answer, Response};
 use sstack::queue::Waits;
 use sstack::running_harness::SessionState;
 use sstack::session::{self, Entry};
@@ -132,6 +132,9 @@ impl SessionView {
             self.prompt.start_vim();
         }
         let parked = session::is_parked(&run.session).unwrap_or(false);
+        if let Ok(Some(since)) = session::put_off_since(&run.session) {
+            self.waits.put_off(since);
+        }
         let agent = AgentHandle::spawn(run.agent, sender.clone());
         let controller = SessionController::new(agent, run.skills, parked);
         self.controller = Some(match run.naming {
@@ -271,7 +274,7 @@ impl SessionView {
             SessionReport::Named(Some(name)) => {
                 self.name.get_or_insert_with(|| name.clone());
             }
-            SessionReport::TurnEnded(Ok(TurnEnd::Paused)) => {
+            SessionReport::TurnEnded(Ok(TurnEnd::Paused | TurnEnd::PutOff)) => {
                 self.approvals.clear();
                 self.asked.clear();
             }
@@ -350,7 +353,9 @@ impl SessionView {
         if let Some(asked) = self.transcript.open_questions() {
             asked.state = answers.clone().map_or(Asking::Declined, Asking::Answered);
         }
-        request.reply.send(answers);
+        request
+            .reply
+            .send(answers.map_or(Response::Declined, Response::Answered));
         self.control(SessionController::answered);
     }
 

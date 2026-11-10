@@ -22,6 +22,15 @@ impl QueuedPrompts {
             .push(text);
     }
 
+    /// Puts `text`, taken earlier, back before any prompts sent since, so that it still reaches
+    /// the model first.
+    pub fn put_back(&self, text: String) {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(0, text);
+    }
+
     /// Takes every waiting prompt, joined into one message in the order they were sent, or
     /// returns `None` if none is waiting.
     #[must_use]
@@ -44,5 +53,13 @@ mod tests {
 
         assert_eq!(other_side.take().as_deref(), Some("one\n\ntwo"));
         assert_eq!(queued.take(), None);
+    }
+
+    #[test]
+    fn a_prompt_put_back_comes_before_those_sent_since() {
+        let queued = QueuedPrompts::default();
+        queued.push("later".into());
+        queued.put_back("earlier".into());
+        assert_eq!(queued.take().as_deref(), Some("earlier\n\nlater"));
     }
 }

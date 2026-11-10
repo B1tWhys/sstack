@@ -3,6 +3,7 @@
 use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::Path;
+use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -93,6 +94,28 @@ pub enum Entry {
     /// The Turn stopped here between Steps so that the harness could stop, and should carry on
     /// once it runs again.
     TurnParked,
+    /// The Turn stopped here because a Rebuild put off what it asked the person, and should carry
+    /// on once the harness runs again by asking the same thing. The tool call that asked is left
+    /// without a result until then.
+    TurnPutOff {
+        /// When the person was first asked, which a put-off question keeps however many times it
+        /// is put off.
+        waiting_since: SystemTime,
+        /// The Queued Prompts the Turn had not taken yet, joined into one message, which it takes
+        /// once the call that asked has run. They cannot go to the model before then, because a
+        /// call's result has to follow it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        queued: Option<String>,
+    },
+}
+
+impl Entry {
+    /// Returns whether the Turn stopped here to carry on later, between Steps or at something a
+    /// Rebuild put off.
+    #[must_use]
+    pub fn is_parked(&self) -> bool {
+        matches!(self, Self::TurnParked | Self::TurnPutOff { .. })
+    }
 }
 
 /// A failure reading or writing a Session log.
@@ -239,15 +262,34 @@ pub fn first_prompt(path: &Path) -> io::Result<Option<String>> {
         }))
 }
 
-/// Returns whether the Session stored at `path` stopped between Steps and should carry on. Does
-/// not disturb the log, so it is safe on a Session in use.
+/// Returns whether the Session stored at `path` stopped to carry on later, between Steps or at
+/// something a Rebuild put off. Does not disturb the log, so it is safe on a Session in use.
 ///
 /// # Errors
 /// Returns an error if the file cannot be read.
 pub fn is_parked(path: &Path) -> io::Result<bool> {
+    Ok(last_entry(path)?.is_some_and(|entry| entry.is_parked()))
+}
+
+/// Returns when the person was first asked what the Session stored at `path` waits on, if its
+/// Turn stopped because a Rebuild put that off. Does not disturb the log, so it is safe on a
+/// Session in use.
+///
+/// # Errors
+/// Returns an error if the file cannot be read.
+pub fn put_off_since(path: &Path) -> io::Result<Option<SystemTime>> {
+    Ok(match last_entry(path)? {
+        Some(Entry::TurnPutOff { waiting_since, .. }) => Some(waiting_since),
+        _ => None,
+    })
+}
+
+/// Returns the newest entry in the Session stored at `path`, or nothing if it has none or the
+/// newest cannot be read.
+fn last_entry(path: &Path) -> io::Result<Option<Entry>> {
     let contents = fs::read_to_string(path)?;
     let last = contents.lines().next_back().unwrap_or_default();
-    Ok(serde_json::from_str::<Entry>(last).is_ok_and(|entry| entry == Entry::TurnParked))
+    Ok(serde_json::from_str(last).ok())
 }
 
 #[cfg(test)]
@@ -433,8 +475,19 @@ mod tests {
 
         log.append(&Entry::TurnParked).unwrap();
         assert!(is_parked(&path).unwrap());
+        assert_eq!(put_off_since(&path).unwrap(), None);
+
+        let waiting_since = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(9);
+        let put_off = Entry::TurnPutOff {
+            waiting_since,
+            queued: None,
+        };
+        log.append(&put_off).unwrap();
+        assert!(is_parked(&path).unwrap());
+        assert_eq!(put_off_since(&path).unwrap(), Some(waiting_since));
 
         log.append(&Entry::TurnCancelled).unwrap();
         assert!(!is_parked(&path).unwrap());
+        assert_eq!(put_off_since(&path).unwrap(), None);
     }
 }

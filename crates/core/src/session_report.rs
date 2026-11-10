@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use tokio::sync::oneshot;
 
 use crate::agent::{AgentEvent, TurnEnd};
-use crate::question::{Answer, Asker, Question};
+use crate::question::{Asker, Question, Response};
 use crate::session::Entry;
 use crate::tools::{Approver, Verdict};
 
@@ -32,7 +32,8 @@ pub enum SessionReport {
     /// The model wants to run a shell command, and the Turn is waiting for the person to decide,
     /// unless a Rebuild puts the question off.
     Approval(ApprovalRequest),
-    /// The model put Questions to the person, and the Turn is waiting for their answers.
+    /// The model put Questions to the person, and the Turn is waiting for their answers, unless
+    /// a Rebuild puts the Questions off.
     Question(QuestionRequest),
     /// The Rebuild's build finished, with the new binary or what went wrong.
     BuildFinished(Result<PathBuf, String>),
@@ -80,9 +81,10 @@ pub struct ApprovalRequest {
 pub struct QuestionRequest {
     /// The Questions, in the order the person answers them.
     pub questions: Vec<Question>,
-    /// Where the answers go: one for each Question, in order, or `None` if the person would
-    /// rather answer in the conversation. Dropping it unanswered counts as `None`.
-    pub reply: Reply<Option<Vec<Answer>>>,
+    /// Where the answers go, or word that the person would rather answer in the conversation.
+    /// Dropping it unanswered counts as declining. Only the first response counts, so answers
+    /// sent after a Rebuild put the Questions off do nothing.
+    pub reply: Reply<Response>,
 }
 
 /// A reply to a question that another task is waiting on.
@@ -162,17 +164,18 @@ impl ReportingAsker {
 
 #[async_trait]
 impl Asker for ReportingAsker {
-    async fn ask(&self, questions: Vec<Question>) -> Option<Vec<Answer>> {
+    async fn ask(&self, questions: Vec<Question>) -> Response {
         let (reply, answer) = Reply::new();
         let request = QuestionRequest { questions, reply };
         self.reports.send(SessionReport::Question(request));
-        answer.await.ok().flatten()
+        answer.await.unwrap_or(Response::Declined)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::question::Answer;
     use tokio::sync::mpsc;
 
     /// Returns a sender whose reports arrive on the returned receiver, or go nowhere once it is
@@ -244,10 +247,15 @@ mod tests {
             panic!("expected questions");
         };
         assert_eq!(request.questions, [question()]);
-        request.reply.send(Some(vec![Answer::Own("sstack".into())]));
+        request
+            .reply
+            .send(Response::Answered(vec![Answer::Own("sstack".into())]));
 
         let answers = asking.await.unwrap();
-        assert_eq!(answers, Some(vec![Answer::Own("sstack".into())]));
+        assert_eq!(
+            answers,
+            Response::Answered(vec![Answer::Own("sstack".into())])
+        );
     }
 
     #[tokio::test]
@@ -255,7 +263,7 @@ mod tests {
         let (reports, received) = channel();
         drop(received);
         let asker = ReportingAsker::new(reports);
-        assert_eq!(asker.ask(vec![question()]).await, None);
+        assert_eq!(asker.ask(vec![question()]).await, Response::Declined);
     }
 
     #[tokio::test]

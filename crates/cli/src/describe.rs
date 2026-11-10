@@ -56,7 +56,8 @@ pub fn listing_shortened(count: usize) -> Option<String> {
 /// Describes how a Turn ended, if that needs saying.
 pub fn turn_end_text(end: TurnEnd) -> Option<&'static str> {
     match end {
-        TurnEnd::Finished => None,
+        // A Turn put off by a Rebuild comes back as it was, so its stop shows nothing.
+        TurnEnd::Finished | TurnEnd::PutOff => None,
         TurnEnd::Truncated => Some("[stopped: the response hit the output limit]"),
         TurnEnd::Refused => Some("[stopped: the model declined this request]"),
         TurnEnd::Cancelled => Some("[cancelled]"),
@@ -134,6 +135,7 @@ mod tests {
     #[test]
     fn unusual_turn_ends_are_described() {
         assert_eq!(turn_end_text(TurnEnd::Finished), None);
+        assert_eq!(turn_end_text(TurnEnd::PutOff), None);
         for end in [
             TurnEnd::Truncated,
             TurnEnd::Refused,

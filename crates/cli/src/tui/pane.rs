@@ -10,7 +10,7 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use sstack::agent::TurnEnd;
 use sstack::queue::Waits;
 use sstack::running_harness::SessionState;
-use sstack::session::Entry;
+use sstack::session::{self, Entry};
 use sstack::session_controller::SessionController;
 use sstack::session_name::{self, Naming};
 use sstack::session_report::SessionReport;
@@ -159,6 +159,9 @@ impl Pane {
     /// spares a Session never opened from running one.
     pub fn attach(&mut self, opened: Opened) {
         let parked = self.stored == SessionState::Parked;
+        if parked {
+            self.keep_put_off_wait();
+        }
         let controller = SessionController::new(opened.agent, opened.skills, parked);
         self.controller = Some(match opened.naming {
             Some(naming) => controller.with_naming(naming, opened.events.reporter()),
@@ -170,6 +173,15 @@ impl Pane {
         self.events = Some(opened.events);
         for notice in opened.notices {
             self.update(&Event::Report(SessionReport::Notice(notice)));
+        }
+    }
+
+    /// Keeps how long the Session has waited for the person, if its Turn parked because a
+    /// Rebuild put off what it asked them, so that asking again does not send it down the
+    /// sidebar.
+    fn keep_put_off_wait(&mut self) {
+        if let Ok(Some(since)) = session::put_off_since(&self.path) {
+            self.waits.put_off(since);
         }
     }
 
@@ -225,7 +237,7 @@ impl Pane {
             Event::Report(SessionReport::Named(Some(name))) => {
                 self.name.get_or_insert_with(|| name.clone());
             }
-            Event::Report(SessionReport::TurnEnded(Ok(TurnEnd::Paused))) => {}
+            Event::Report(SessionReport::TurnEnded(Ok(TurnEnd::Paused | TurnEnd::PutOff))) => {}
             Event::Report(SessionReport::TurnEnded(outcome)) => {
                 self.unseen = (!on_screen).then_some(if outcome.is_ok() {
                     Unseen::Finished

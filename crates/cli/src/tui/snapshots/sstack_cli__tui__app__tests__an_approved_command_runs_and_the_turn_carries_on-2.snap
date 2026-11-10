@@ -4,9 +4,9 @@ expression: h.drawn_at(NARROW)
 ---
 "                                                            "
 "> go                                                        "
-"                                                            "
 "[bash] {"command":"touch ran"}                              "
 "all done                                                    "
+"                                                            "
 "                                                            "
 "                                                            "
 "                                                            "

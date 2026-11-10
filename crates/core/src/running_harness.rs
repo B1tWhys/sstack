@@ -15,7 +15,7 @@ use crate::session_report::SessionReport;
 
 /// What a Session is doing, which decides how the person can interact with it.
 ///
-/// A Turn awaiting approval parks when a Rebuild puts off its question.
+/// A Turn awaiting an answer parks when a Rebuild puts off what it asked.
 ///
 /// ```text
 ///                  turn started
@@ -39,11 +39,10 @@ pub enum SessionState {
     /// A Turn is running without needing the person.
     Working,
     /// A Turn cannot continue until the person answers a question: whether a shell command may
-    /// run, or the model's Questions. A Rebuild puts off a question about a shell command, which
-    /// parks the Turn.
+    /// run, or the model's Questions. A Rebuild puts the question off, which parks the Turn.
     AwaitingAnswer,
     /// A Turn stopped so that the Running Harness could stop, and will carry on. It stopped
-    /// between Steps, or at a question about a shell command that a Rebuild put off.
+    /// between Steps, or at a question that a Rebuild put off, which it asks again.
     Parked,
 }
 
@@ -116,8 +115,8 @@ impl SessionState {
     }
 
     /// Returns whether a Turn is running, which a Rebuild or a quit has to wait for. A Rebuild
-    /// first puts off any question about a shell command, so a Turn waiting on one parks at once
-    /// rather than wait for the person. A Turn waiting on the model's Questions still holds it up.
+    /// first puts off every question, so a Turn waiting on the person parks at once rather than
+    /// wait for them.
     #[must_use]
     pub fn in_turn(self) -> bool {
         matches!(self, Self::Working | Self::AwaitingAnswer)
@@ -133,11 +132,11 @@ impl SessionState {
 /// Whether the Running Harness is carrying on or on its way out.
 ///
 /// Every Session's Turns stop at the end of their Step while draining, so that nothing is cut
-/// short. A Rebuild does not wait for the person to approve a command, though. It puts off every
-/// question about a shell command, and a Turn that asked one parks before running that command.
-/// It still waits for answers to the model's Questions. A quit waits for every answer, unless the
-/// person quits again. Parked Turns carry on afterwards, in this process if the drain is
-/// abandoned, or in the next one, and ask any question that was put off again.
+/// short. A Rebuild does not wait for the person, though. It puts off every question, about a
+/// shell command or the model's Questions, and a Turn that asked one parks before going on. A quit
+/// waits for every answer, unless the person quits again. Parked Turns carry on afterwards, in
+/// this process if the drain is abandoned, or in the next one, and ask anything that was put off
+/// again, as it was.
 ///
 /// ```text
 ///                     /quit
@@ -431,7 +430,7 @@ impl RunningHarness {
             }
             Effect::DrainAndBuild(checkout) => {
                 set_paused(sessions, true);
-                sessions.visit(&mut SessionController::defer_approval);
+                sessions.visit(&mut SessionController::defer_open);
                 Some(Outcome::StartBuild(checkout))
             }
             Effect::Abandon => {
@@ -478,13 +477,13 @@ impl InSession<'_> {
         }
     }
 
-    /// Acts on what core reported about the Session. A question about a shell command asked
-    /// during a Rebuild is put off at once.
+    /// Acts on what core reported about the Session. A question asked during a Rebuild is put
+    /// off at once.
     #[must_use]
     pub fn report(mut self, report: &SessionReport) -> Option<Outcome<'static>> {
         self.sessions.focus.report(report);
         if self.harness.phase.is_rebuilding() {
-            self.sessions.focus.defer_approval();
+            self.sessions.focus.defer_open();
         }
         let next = if matches!(report, SessionReport::TurnEnded(_)) {
             self.turn_ended()

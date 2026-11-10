@@ -9,11 +9,12 @@
 
 mod reply;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use iced::widget::{button, column, container, row, text};
 use iced::{Element, Fill, Font};
-use sstack::agent::{AgentEvent, ToolCallSummary, TurnEnd};
+use sstack::agent::{self, AgentEvent, ToolCallSummary, TurnEnd};
+use sstack::question::Question;
 use sstack::session::{AssistantEntry, Entry};
 use sstack::session_report::{ApprovalRequest, SessionReport};
 
@@ -79,6 +80,14 @@ pub enum Block {
     Notice(String),
 }
 
+/// What showing a resumed Session needs to know beyond the entry at hand.
+struct Replaying<'a> {
+    /// Where the block of each tool call shown so far is, so that its result can mark it failed.
+    calls: HashMap<&'a str, usize>,
+    /// The ids of calls never shown as starting, which a Turn carrying on shows once they start.
+    not_started: HashSet<String>,
+}
+
 /// A question to the person whether a command may run, and what became of it.
 ///
 /// Once answered it shows as a word on its tool call's line, but the transcript keeps the whole
@@ -104,9 +113,6 @@ pub enum Decision {
     Denied,
     /// The Turn ended before the person answered, which refuses the command.
     Unanswered,
-    /// A Rebuild put the question off and the Turn parked. The Turn asks again, on a new tool
-    /// call, when it carries on.
-    PutOff,
 }
 
 impl Transcript {
@@ -135,8 +141,7 @@ impl Transcript {
             }
             SessionReport::Approval(request) => self.ask(request),
             SessionReport::Question(request) => {
-                let asked = Asked::new(request.questions.clone());
-                self.blocks.push(Block::Questions(asked));
+                self.questions(request.questions.clone());
                 true
             }
             _ => false,
@@ -159,6 +164,19 @@ impl Transcript {
     /// Returns the oldest set of the model's Questions still open, to work on or settle.
     pub fn open_questions(&mut self) -> Option<&mut Asked> {
         self.open_asked().next()
+    }
+
+    /// Puts `questions` to the person, in the place they had if a Rebuild put them off and the
+    /// Turn now asks them again.
+    fn questions(&mut self, questions: Vec<Question>) {
+        let put_off = self.blocks.iter_mut().find_map(|block| match block {
+            Block::Questions(asked) if asked.state == Asking::PutOff => Some(asked),
+            _ => None,
+        });
+        match put_off {
+            Some(asked) => asked.state = Asking::Open,
+            None => self.blocks.push(Block::Questions(Asked::new(questions))),
+        }
     }
 
     /// Returns every set of the model's Questions still open, oldest first.
@@ -298,23 +316,15 @@ impl Transcript {
     }
 
     /// Notes how a Turn ended or the error that stopped it, returning whether the transcript
-    /// changed. Questions the Turn left open, of either kind, are marked unanswered, or put off
-    /// if it parked.
+    /// changed. Questions the Turn left open, of either kind, are marked unanswered. If a
+    /// Rebuild put them off instead, they show as they did before they were asked, until the
+    /// Turn asks them again.
     fn ended(&mut self, outcome: Result<TurnEnd, &String>) -> bool {
-        let lapsed_as = if outcome == Ok(TurnEnd::Paused) {
-            Decision::PutOff
+        let lapsed = if outcome == Ok(TurnEnd::PutOff) {
+            self.put_off_open()
         } else {
-            Decision::Unanswered
+            self.lapse_open()
         };
-        let mut lapsed = false;
-        for approval in self.open_approvals() {
-            approval.decision = lapsed_as;
-            lapsed = true;
-        }
-        for asked in self.open_asked() {
-            asked.state = Asking::Unanswered;
-            lapsed = true;
-        }
         let words = match outcome {
             Ok(end) => turn_end_text(end).map(str::to_owned),
             Err(error) => Some(format!("the Turn failed: {error}")),
@@ -322,47 +332,87 @@ impl Transcript {
         words.map(|words| self.notice(words)).is_some() || lapsed
     }
 
+    /// Marks every question still open, of either kind, as unanswered, returning whether there
+    /// was one.
+    fn lapse_open(&mut self) -> bool {
+        let mut lapsed = false;
+        for approval in self.open_approvals() {
+            approval.decision = Decision::Unanswered;
+            lapsed = true;
+        }
+        for asked in self.open_asked() {
+            asked.state = Asking::Unanswered;
+            lapsed = true;
+        }
+        lapsed
+    }
+
+    /// Hides every question still open, of either kind, because a Rebuild put it off, returning
+    /// whether there was one. A tool call goes back to its line alone, and the model's Questions
+    /// keep what the person had chosen, in case the Turn asks them again in this run.
+    fn put_off_open(&mut self) -> bool {
+        let mut put_off = false;
+        for block in &mut self.blocks {
+            match block {
+                Block::Tool { approval, .. }
+                    if approval
+                        .as_ref()
+                        .is_some_and(|open| open.decision == Decision::Open) =>
+                {
+                    *approval = None;
+                }
+                Block::Questions(asked) if asked.state == Asking::Open => {
+                    asked.state = Asking::PutOff;
+                }
+                _ => continue,
+            }
+            put_off = true;
+        }
+        put_off
+    }
+
     /// Shows the Turns the Session already held, before everything already shown, returning
     /// whether it held any.
     ///
     /// The Session does not record the model's thinking or errors that stopped a Turn, so those
-    /// are missing. Tool calls left unfinished by a cancelled Turn show as failed.
+    /// are missing. Tool calls left unfinished by a cancelled Turn show as failed. A Turn that a
+    /// Rebuild put off shows as it was before, so its calls that never started are left out.
     fn resume(&mut self, entries: &[Entry]) -> bool {
         let mut earlier = Self::default();
-        let mut calls = HashMap::new();
+        let mut replaying = Replaying {
+            calls: HashMap::new(),
+            not_started: agent::calls_not_started(entries),
+        };
         for entry in entries {
-            earlier.replay(entry, &mut calls);
+            earlier.replay(entry, &mut replaying);
         }
         self.blocks.splice(0..0, earlier.blocks);
         !entries.is_empty()
     }
 
-    /// Shows one recorded entry. `calls` maps the id of each tool call shown so far to where its
-    /// block is, so that its result can mark it failed.
-    fn replay<'a>(&mut self, entry: &'a Entry, calls: &mut HashMap<&'a str, usize>) {
+    /// Shows one recorded entry, as `replaying` says to.
+    fn replay<'a>(&mut self, entry: &'a Entry, replaying: &mut Replaying<'a>) {
         match entry {
             Entry::User { text } => self.prompt(text.clone()),
-            Entry::Assistant(response) => self.replay_response(response, calls),
+            Entry::Assistant(response) => self.replay_response(response, replaying),
             Entry::ToolResult {
                 call_id, is_error, ..
-            } => self.replay_result(calls.get(call_id.as_str()), *is_error),
+            } => self.replay_result(replaying.calls.get(call_id.as_str()), *is_error),
             Entry::TurnCancelled => self.replay_end(TurnEnd::Cancelled),
             Entry::TurnParked => self.replay_end(TurnEnd::Paused),
+            Entry::TurnPutOff { .. } => self.replay_end(TurnEnd::PutOff),
         }
     }
 
-    /// Shows a recorded model response: its reply, the tools it called, and how it ended the Turn
-    /// if that needs saying.
-    fn replay_response<'a>(
-        &mut self,
-        response: &'a AssistantEntry,
-        calls: &mut HashMap<&'a str, usize>,
-    ) {
+    /// Shows a recorded model response: its reply, the tools it called that started, and how it
+    /// ended the Turn if that needs saying.
+    fn replay_response<'a>(&mut self, response: &'a AssistantEntry, replaying: &mut Replaying<'a>) {
         if !response.text.is_empty() {
             self.reply(&response.text);
         }
-        for call in &response.tool_calls {
-            calls.insert(call.id.as_str(), self.blocks.len());
+        let calls = response.tool_calls.iter();
+        for call in calls.filter(|call| !replaying.not_started.contains(&call.id)) {
+            replaying.calls.insert(call.id.as_str(), self.blocks.len());
             self.tool(call.into());
         }
         self.replay_end(response.stop.into());
@@ -443,7 +493,6 @@ impl Decision {
             Self::Allowed => Some("allowed"),
             Self::Denied => Some("denied"),
             Self::Unanswered => Some("not answered"),
-            Self::PutOff => Some("put off"),
         }
     }
 }
@@ -495,7 +544,8 @@ fn marks(failed: bool, decision: Option<Decision>) -> String {
 /// Describes how a Turn ended, if that needs saying.
 fn turn_end_text(end: TurnEnd) -> Option<&'static str> {
     match end {
-        TurnEnd::Finished => None,
+        // A Turn put off by a Rebuild comes back as it was, so its stop shows nothing.
+        TurnEnd::Finished | TurnEnd::PutOff => None,
         TurnEnd::Truncated => Some("the reply stopped at the model's output limit"),
         TurnEnd::Refused => Some("the model declined this request"),
         TurnEnd::Cancelled => Some("the Turn was cancelled"),

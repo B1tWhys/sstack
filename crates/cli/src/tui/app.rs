@@ -1889,8 +1889,64 @@ mod tests {
         assert!(screen.contains("parked"), "{screen}");
 
         assert_eq!(h.app.handle(built()), Some(Exit::Rebuild(binary())));
-        assert_eq!(h.session().last(), Some(&Entry::TurnParked));
+        assert!(matches!(h.session().last(), Some(Entry::TurnPutOff { .. })));
         assert!(!h.dir.path().join("ran").exists());
+    }
+
+    /// Runs a Turn in the first Session of `h` until it asks, and returns the screen as the
+    /// person sees it then. Then rebuilds from a new Session, relaunches into the first Session
+    /// with a model that gives `script`, and carries its Turn on until it asks again.
+    async fn asked_across_a_relaunch(mut h: Harness, script: Vec<Scripted>) -> (String, Harness) {
+        h.enter("go");
+        h.enter_new();
+        h.until(|event| {
+            matches!(
+                event,
+                Event::Report(SessionReport::Approval(_) | SessionReport::Question(_))
+            )
+        })
+        .await;
+        h.press('g');
+        let before = h.screen();
+        h.press('e');
+        h.enter("/rebuild");
+        h.until_turn_ends().await;
+        h.app.handle(built());
+        let provider = Arc::new(ScriptedProvider::new(script));
+        let stored = workspace::list_sessions(h.dir.path()).unwrap();
+        let stored = stored
+            .into_iter()
+            .filter(|summary| summary.parked)
+            .collect();
+        let mut h = start(h.stopped().await, provider, stored);
+        h.app.continue_parked();
+        h.until(|event| {
+            matches!(
+                event,
+                Event::Report(SessionReport::Approval(_) | SessionReport::Question(_))
+            )
+        })
+        .await;
+        (before, h)
+    }
+
+    #[tokio::test]
+    async fn after_a_relaunch_a_put_off_question_is_shown_as_it_was() {
+        let (before, mut h) = asked_across_a_relaunch(two_steps(), vec![Ok(reply("done"))]).await;
+
+        assert_eq!(h.screen(), before);
+        h.approve();
+        h.until_turn_ends().await;
+        assert!(h.dir.path().join("ran").exists());
+    }
+
+    #[tokio::test]
+    async fn after_a_relaunch_the_models_questions_are_shown_as_they_were() {
+        let script = vec![Ok(ask_call("Which store?", &["Files", "SQLite"]))];
+        let (before, mut h) = asked_across_a_relaunch(scripted(script), vec![]).await;
+
+        assert_eq!(h.screen(), before);
+        assert_eq!(h.app.panes[0].state(), SessionState::AwaitingAnswer);
     }
 
     #[tokio::test]

@@ -7,7 +7,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Rect};
 use ratatui::text::{Line, Text};
 use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
-use sstack::question::{self, Answer, Question};
+use sstack::question::{self, Answer, Question, Response};
 use sstack::session_report::{QuestionRequest, SessionReport};
 
 use crate::describe;
@@ -27,7 +27,8 @@ const HINT: &str = "Up/Down choose, Enter confirms, Shift-Tab goes back, Esc ans
 ///
 /// Every Question offers the model's choices and a last row for the person's own words, which
 /// they reach by moving down or simply by typing. Questions still open are dropped, giving no
-/// answer, when their Turn ends.
+/// answer, when their Turn ends. If a Rebuild put them off instead, the Turn asks them again when
+/// it carries on, and they start again from the recommended choices.
 #[derive(Debug, Default)]
 pub struct Questions {
     /// Sets of Questions still to answer, oldest first. Only the oldest is shown.
@@ -233,11 +234,11 @@ impl Component for Questions {
             Step::Answering => return KeyOutcome::Handled,
             Step::Done(answers) => {
                 let described = question::describe_all(&form.request.questions, &answers);
-                form.request.reply.send(Some(answers));
+                form.request.reply.send(Response::Answered(answers));
                 describe::answered(&described)
             }
             Step::Declined => {
-                form.request.reply.send(None);
+                form.request.reply.send(Response::Declined);
                 describe::DECLINED.to_owned()
             }
         };
@@ -275,7 +276,7 @@ mod tests {
     use tokio::sync::oneshot;
 
     /// What the person answered, or `None` if they declined.
-    type Answered = oneshot::Receiver<Option<Vec<Answer>>>;
+    type Answered = oneshot::Receiver<Response>;
 
     /// Returns a Question headed `header` offering `labels`, recommending the one at
     /// `recommended`.
@@ -331,7 +332,7 @@ mod tests {
         let note = "[answered] Store: SQLite\nName: a".to_owned();
         assert_eq!(outcome, KeyOutcome::Act(Action::QuestionsAnswered(note)));
         let answers = vec![Answer::Choice(1), Answer::Choice(0)];
-        assert_eq!(answered.try_recv(), Ok(Some(answers)));
+        assert_eq!(answered.try_recv(), Ok(Response::Answered(answers)));
     }
 
     #[test]
@@ -361,7 +362,7 @@ mod tests {
             Answer::Choice(1),
             Answer::Own("x1".into()),
         ];
-        assert_eq!(answered.try_recv(), Ok(Some(answers)));
+        assert_eq!(answered.try_recv(), Ok(Response::Answered(answers)));
     }
 
     #[test]
@@ -378,7 +379,7 @@ mod tests {
         press(&mut panel, KeyCode::Enter);
         assert_eq!(
             answered.try_recv(),
-            Ok(Some(vec![Answer::Own("sstack".into())]))
+            Ok(Response::Answered(vec![Answer::Own("sstack".into())]))
         );
     }
 
@@ -401,7 +402,7 @@ mod tests {
         press(&mut panel, KeyCode::Enter);
 
         let answers = vec![Answer::Choice(1), Answer::Choice(0)];
-        assert_eq!(answered.try_recv(), Ok(Some(answers)));
+        assert_eq!(answered.try_recv(), Ok(Response::Answered(answers)));
     }
 
     #[test]
@@ -413,7 +414,7 @@ mod tests {
 
         let note = describe::DECLINED.to_owned();
         assert_eq!(outcome, KeyOutcome::Act(Action::QuestionsAnswered(note)));
-        assert_eq!(answered.try_recv(), Ok(None));
+        assert_eq!(answered.try_recv(), Ok(Response::Declined));
         assert_eq!(press(&mut panel, KeyCode::Esc), KeyOutcome::Ignored);
     }
 

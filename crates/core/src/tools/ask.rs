@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 
 use super::{Tool, ToolError, parse_input};
 use crate::provider::ToolSpec;
-use crate::question::{self, Asker, Question};
+use crate::question::{self, Asker, Question, Response};
 
 /// The most Questions the model may ask at once, so the person is not buried in them.
 const MAX_QUESTIONS: usize = 4;
@@ -140,9 +140,11 @@ impl Tool for Ask {
     async fn run(&self, input: Value) -> Result<String, ToolError> {
         let AskInput { questions } = parse_input(input)?;
         check(&questions)?;
-        let answers = (self.asker.ask(questions.clone()).await)
-            .ok_or_else(|| ToolError::Failed(DECLINED.to_owned()))?;
-        Ok(question::describe_all(&questions, &answers))
+        match self.asker.ask(questions.clone()).await {
+            Response::Answered(answers) => Ok(question::describe_all(&questions, &answers)),
+            Response::Declined => Err(ToolError::Failed(DECLINED.to_owned())),
+            Response::Deferred => Err(ToolError::Deferred),
+        }
     }
 }
 
@@ -158,15 +160,21 @@ mod tests {
     struct Scripted {
         /// What to answer.
         answers: Option<Vec<Answer>>,
+        /// Whether a Rebuild puts the Questions off, whatever `answers` says.
+        put_off: bool,
         /// The Questions it was asked, if any.
         asked: Mutex<Vec<Question>>,
     }
 
     #[async_trait]
     impl Asker for Scripted {
-        async fn ask(&self, questions: Vec<Question>) -> Option<Vec<Answer>> {
+        async fn ask(&self, questions: Vec<Question>) -> Response {
             *self.asked.lock().unwrap() = questions;
-            self.answers.clone()
+            match &self.answers {
+                _ if self.put_off => Response::Deferred,
+                Some(answers) => Response::Answered(answers.clone()),
+                None => Response::Declined,
+            }
         }
     }
 
@@ -197,6 +205,20 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(error.to_string(), DECLINED);
+    }
+
+    #[tokio::test]
+    async fn questions_put_off_leave_the_call_without_a_result() {
+        let asker = Arc::new(Scripted {
+            put_off: true,
+            ..Scripted::default()
+        });
+        let tool = Ask::new(asker);
+        let error = tool
+            .run(json!({"questions": [question("One")]}))
+            .await
+            .unwrap_err();
+        assert_eq!(error, ToolError::Deferred);
     }
 
     #[tokio::test]

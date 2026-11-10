@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use iced::futures::future::{self, BoxFuture, FutureExt};
 use iced::futures::{Stream, StreamExt};
@@ -222,6 +223,29 @@ async fn a_rebuild_of_a_worktree_the_session_lacks_says_why_and_work_carries_on(
     assert_eq!(blocks(&window), [failure]);
 }
 
+/// Returns the call of `bash` with `command` as it appears in the transcript before anything is
+/// asked about it.
+fn bash_line(command: &str) -> Block {
+    let input = serde_json::to_string(&json!({ "command": command })).unwrap();
+    tool("bash", &input, false)
+}
+
+/// Returns what the transcript of the Session on screen shows, as text to compare later, since
+/// replies cannot be copied.
+fn shown(window: &Window) -> String {
+    format!("{:?}", blocks(window))
+}
+
+/// Opens a window on a copy of the Session that `window` keeps in `dir`, as a relaunch does,
+/// whose model gives the `script`ed responses in order. The copy is in a directory of its own, so
+/// the old window need not let go of the Session first.
+fn relaunched_from(dir: &Path, script: Vec<Scripted>) -> (TempDir, Window) {
+    let entries = sstack::session::lock_free_read(&path_of(dir, "1")).unwrap();
+    let copy = TempDir::new().unwrap();
+    let window = Window::open(readied(copy.path(), script, &entries));
+    (copy, window)
+}
+
 #[tokio::test]
 async fn a_rebuild_puts_off_an_open_question_and_relaunches_once_the_turn_parks() {
     let (dir, mut window) = window(vec![Ok(bash_call("touch ran")), Ok(reply("later"))]);
@@ -237,9 +261,57 @@ async fn a_rebuild_puts_off_an_open_question_and_relaunches_once_the_turn_parks(
     assert_eq!(relaunched(&window), Some(&PathBuf::from(NEW_BINARY)));
     assert!(!window.view_ref().asking());
     assert!(!dir.path().join("ran").exists());
-    let put_off = asked_bash("touch ran", Decision::PutOff, false);
-    let parked = notice("the Turn paused until sstack runs again");
-    assert_eq!(blocks(&window)[1..], [put_off, parked]);
+    assert_eq!(blocks(&window)[1..], [bash_line("touch ran")]);
+}
+
+#[tokio::test]
+async fn after_a_relaunch_a_put_off_question_comes_back_as_it_was() {
+    let (dir, mut window) = window(vec![Ok(bash_call("touch ran"))]);
+    let mut reports = reports(&window);
+    let _ = send(&mut window, "go");
+    until_asked(&mut window, &mut reports).await;
+    let asked = shown(&window);
+    let waiting = window.view_ref().queue_position();
+    let _ = send(&mut window, "/rebuild");
+    let _ = until_turn_ends_on(&mut window, &mut reports).await;
+
+    let (copy, mut window) = relaunched_from(dir.path(), vec![Ok(reply("later"))]);
+    let mut reports = self::reports(&window);
+    until_asked(&mut window, &mut reports).await;
+
+    assert_eq!(shown(&window), asked);
+    // The agent notes when it asks a moment before the window does, so the two can differ by
+    // that moment, but by no more.
+    let (waits, since) = window.view_ref().queue_position();
+    assert!(!waits);
+    let apart = since
+        .duration_since(waiting.1)
+        .unwrap_or_else(|early| early.duration());
+    assert!(apart < Duration::from_secs(1), "{apart:?}");
+    let _ = window.update(Message::Answer(true));
+    let _ = until_turn_ends_on(&mut window, &mut reports).await;
+    assert!(copy.path().join("ran").exists());
+}
+
+#[tokio::test]
+async fn backing_out_of_a_rebuild_asks_again_where_it_asked_before() {
+    let (dir, mut window) = window(vec![Ok(bash_call("touch ran")), Ok(reply("later"))]);
+    let mut reports = reports(&window);
+    let _ = send(&mut window, "go");
+    until_asked(&mut window, &mut reports).await;
+    let asked = shown(&window);
+    let waiting = window.view_ref().queue_position();
+    let _ = send(&mut window, "/rebuild");
+    let _ = until_turn_ends_on(&mut window, &mut reports).await;
+
+    let _ = window.update(Message::Interrupt);
+    until_asked(&mut window, &mut reports).await;
+
+    assert_eq!(shown(&window), asked);
+    assert_eq!(window.view_ref().queue_position(), waiting);
+    let _ = window.update(Message::Answer(true));
+    let _ = until_turn_ends_on(&mut window, &mut reports).await;
+    assert!(dir.path().join("ran").exists());
 }
 
 #[tokio::test]
@@ -295,8 +367,8 @@ async fn a_build_that_ends_after_it_was_stopped_changes_nothing() {
 
 /// What the window says while a Rebuild's build runs.
 const BUILDING: &str = "Building sstack-gui for a Rebuild, which relaunches into this Session \
-                        once built and once no Turn is running. Commands waiting for approval are \
-                        asked about again after the relaunch. Interrupt to back out, or close \
+                        once built and once no Turn is running. Anything waiting for your answer \
+                        comes back as it was after the relaunch. Interrupt to back out, or close \
                         the window to quit instead.";
 
 /// What the window says once a Rebuild's build has worked and a Turn is still running.
@@ -1282,6 +1354,49 @@ fn questions_state(window: &Window) -> Option<Asking> {
         Block::Questions(asked) => Some(asked.state.clone()),
         _ => None,
     })
+}
+
+#[tokio::test]
+async fn a_rebuild_puts_off_the_models_questions_and_backing_out_reopens_them_as_left() {
+    let (dir, mut window, mut reports) = questioned().await;
+    interact(&mut window, |ui| {
+        let _ = ui.click("SQLite").unwrap();
+    });
+    let _ = send(&mut window, "/rebuild");
+    let _ = until_turn_ends_on(&mut window, &mut reports).await;
+    assert_eq!(questions_state(&window), Some(Asking::PutOff));
+    assert!(simulator(window.view()).find("Which store?").is_err());
+
+    let _ = window.update(Message::Interrupt);
+    until_questioned(&mut window, &mut reports).await;
+
+    let sets = blocks(&window).iter();
+    assert_eq!(
+        sets.filter(|block| matches!(block, Block::Questions(_)))
+            .count(),
+        1
+    );
+    assert_eq!(questions_state(&window), Some(Asking::Open));
+    interact(&mut window, |ui| {
+        let _ = ui.click("Send answers").unwrap();
+    });
+    let _ = until_turn_ends_on(&mut window, &mut reports).await;
+    let (output, _) = tool_result(dir.path()).unwrap();
+    assert!(output.contains("SQLite"), "{output}");
+}
+
+#[tokio::test]
+async fn after_a_relaunch_the_models_questions_come_back_in_their_place() {
+    let (dir, mut window, mut reports) = questioned().await;
+    let asked = shown(&window);
+    let _ = send(&mut window, "/rebuild");
+    let _ = until_turn_ends_on(&mut window, &mut reports).await;
+
+    let (_copy, mut window) = relaunched_from(dir.path(), vec![Ok(reply("noted"))]);
+    let mut reports = self::reports(&window);
+    until_questioned(&mut window, &mut reports).await;
+
+    assert_eq!(shown(&window), asked);
 }
 
 #[tokio::test]

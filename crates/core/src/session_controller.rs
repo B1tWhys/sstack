@@ -8,6 +8,7 @@
 //! Sessions through [`OpenSessions`], which the interface implements over however it keeps them.
 
 use crate::agent::TurnEnd;
+use crate::question::Response;
 use crate::running_harness::{Outcome, Refusal, SessionEvent, SessionState};
 use crate::session_name::Naming;
 use crate::session_report::{Reply, ReportSender, SessionReport};
@@ -30,9 +31,27 @@ pub struct SessionController {
     skills: Vec<Skill>,
     /// How far the Session is from having a Session Name made for it.
     naming: NameWork,
-    /// Where the verdict goes on the shell command the running Turn waits to have approved, if
-    /// it waits on one, so that a Rebuild can put the question off.
-    approval: Option<Reply<Verdict>>,
+    /// What the running Turn waits for the person to answer, if anything, so that a Rebuild can
+    /// put it off.
+    open: Option<Open>,
+}
+
+/// What a Session's running Turn waits for the person to answer, and where the answer goes.
+enum Open {
+    /// Whether a shell command may run.
+    Approval(Reply<Verdict>),
+    /// The model's Questions.
+    Questions(Reply<Response>),
+}
+
+impl Open {
+    /// Puts off what the Turn asked, so that it parks and asks again when it carries on.
+    fn defer(self) {
+        match self {
+            Self::Approval(reply) => reply.send(Verdict::Defer),
+            Self::Questions(reply) => reply.send(Response::Deferred),
+        }
+    }
 }
 
 /// How far a Session is from having a Session Name made from the first thing the person says in
@@ -68,7 +87,7 @@ impl SessionController {
             state,
             skills,
             naming: NameWork::Unwanted,
-            approval: None,
+            open: None,
         }
     }
 
@@ -96,16 +115,16 @@ impl SessionController {
     /// Notes that the person answered what the Session's Turn asked: whether a shell command may
     /// run, or its Questions.
     pub fn answered(&mut self) {
-        self.approval = None;
+        self.open = None;
         self.moved(SessionEvent::Answered);
     }
 
-    /// Puts off the question about a shell command that the running Turn waits on, if there is
-    /// one, so that the Turn parks and asks it again when it carries on. The person's own answer,
-    /// if it comes later, does nothing. The model's Questions are not put off.
-    pub(crate) fn defer_approval(&mut self) {
-        if let Some(approval) = self.approval.take() {
-            approval.send(Verdict::Defer);
+    /// Puts off what the running Turn waits for the person to answer, if anything, so that the
+    /// Turn parks and asks the same thing again when it carries on. The person's own answer, if
+    /// it comes later, does nothing.
+    pub(crate) fn defer_open(&mut self) {
+        if let Some(open) = self.open.take() {
+            open.defer();
         }
     }
 
@@ -133,16 +152,19 @@ impl SessionController {
                 return;
             }
             SessionReport::Approval(request) => {
-                self.approval = Some(request.reply.clone());
+                self.open = Some(Open::Approval(request.reply.clone()));
                 SessionEvent::Asked
             }
-            SessionReport::Question(_) => SessionEvent::Asked,
-            SessionReport::TurnEnded(Ok(TurnEnd::Paused)) => SessionEvent::Parked,
+            SessionReport::Question(request) => {
+                self.open = Some(Open::Questions(request.reply.clone()));
+                SessionEvent::Asked
+            }
+            SessionReport::TurnEnded(Ok(TurnEnd::Paused | TurnEnd::PutOff)) => SessionEvent::Parked,
             SessionReport::TurnEnded(_) => SessionEvent::TurnEnded,
             _ => return,
         };
         if matches!(report, SessionReport::TurnEnded(_)) {
-            self.approval = None;
+            self.open = None;
         }
         self.moved(event);
     }
@@ -261,7 +283,7 @@ mod tests {
     use crate::rebuild::Checkout;
     use crate::running_harness::{Exit, RunningHarness};
     use crate::session::{AssistantEntry, Entry, SessionLog, StopReason, Usage};
-    use crate::session_report::ApprovalRequest;
+    use crate::session_report::{ApprovalRequest, QuestionRequest};
     use crate::tools::project::Project;
     use crate::tools::test_support::{disabled, git_project};
     use crate::tools::{DenyAll, ToolBox};
@@ -526,12 +548,37 @@ mod tests {
         assert_eq!(answer.try_recv(), Ok(Verdict::Defer));
         let parked = harness
             .in_session(&mut session, &mut NoOtherSessions)
-            .report(&ended(TurnEnd::Paused));
+            .report(&ended(TurnEnd::PutOff));
         assert_eq!(parked, None);
         assert_eq!(session.state(), SessionState::Parked);
         let binary = PathBuf::from("/bin/sstack");
         let built = harness.build_finished(Some(binary.clone()), &mut session);
         assert_eq!(built, Some(Outcome::Exit(Exit::Rebuild(binary))));
+    }
+
+    #[tokio::test]
+    async fn a_rebuild_puts_off_the_models_questions_too() {
+        let (dir, _) = git_project();
+        let mut session = controller(&dir, "a");
+        let mut harness = RunningHarness::default();
+        let (reply, mut response) = Reply::new();
+        let asked = SessionReport::Question(QuestionRequest {
+            questions: Vec::new(),
+            reply,
+        });
+        let _ = harness
+            .in_session(&mut session, &mut NoOtherSessions)
+            .submit("go");
+        let _ = harness
+            .in_session(&mut session, &mut NoOtherSessions)
+            .report(&asked);
+        assert_eq!(session.state(), SessionState::AwaitingAnswer);
+
+        let _ = harness
+            .in_session(&mut session, &mut NoOtherSessions)
+            .submit("/rebuild");
+
+        assert_eq!(response.try_recv(), Ok(Response::Deferred));
     }
 
     #[tokio::test]

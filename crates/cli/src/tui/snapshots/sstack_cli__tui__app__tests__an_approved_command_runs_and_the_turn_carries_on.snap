@@ -4,8 +4,8 @@ expression: h.drawn_at(NARROW)
 ---
 "                                                            "
 "> go                                                        "
-"                                                            "
-"[bash] {"com┌ Approve shell command ───────────┐            "
+"[bash] {"command":"touch ran"}                              "
+"            ┌ Approve shell command ───────────┐            "
 "            │The Sandbox is unavailable, so    │            "
 "            │this runs on the host: the Sandbox│            "
 "            │is turned off                     │            "

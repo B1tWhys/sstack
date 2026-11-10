@@ -908,7 +908,7 @@ fn progress(phase: &Phase) -> Option<&'static str> {
         ),
         Phase::DrainingToRebuild { binary: None } => Some(
             "Building sstack-gui for a Rebuild, which relaunches into this Session once built \
-             and once no Turn is running. Commands waiting for approval are asked about again \
+             and once no Turn is running. Anything waiting for your answer comes back as it was \
              after the relaunch. Interrupt to back out, or close the window to quit instead.",
         ),
         Phase::DrainingToRebuild { binary: Some(_) } => Some(

@@ -133,14 +133,16 @@ fn is_tool_result(entry: &Entry) -> bool {
 
 /// Returns whether `entry` only marks how a Turn stopped, which the model never sees.
 fn is_marker(entry: &Entry) -> bool {
-    matches!(entry, Entry::TurnCancelled | Entry::TurnParked)
+    matches!(
+        entry,
+        Entry::TurnCancelled | Entry::TurnParked | Entry::TurnPutOff { .. }
+    )
 }
 
 /// Translates a Session into messages.
 ///
 /// Results of one response share a message, which keeps the model making parallel calls. They
-/// share it even when the Turn parked between them, as it does when a Rebuild puts off a
-/// question.
+/// share it even when the Turn stopped between them because a Rebuild put off a question.
 fn to_messages(entries: &[Entry]) -> Vec<ChatMessage> {
     let seen: Vec<&Entry> = entries.iter().filter(|entry| !is_marker(entry)).collect();
     seen.chunk_by(|a, b| is_tool_result(a) && is_tool_result(b))
@@ -154,7 +156,7 @@ fn to_message(chunk: &[&Entry]) -> Option<ChatMessage> {
         Entry::User { text } => Some(ChatMessage::user(text.as_str())),
         Entry::Assistant(assistant) => assistant_message(assistant),
         Entry::ToolResult { .. } => Some(tool_message(chunk)),
-        Entry::TurnCancelled | Entry::TurnParked => None,
+        Entry::TurnCancelled | Entry::TurnParked | Entry::TurnPutOff { .. } => None,
     }
 }
 
@@ -398,12 +400,15 @@ mod tests {
     }
 
     #[test]
-    fn results_either_side_of_a_parked_turn_still_share_one_message() {
+    fn results_either_side_of_a_put_off_turn_still_share_one_message() {
         let entries = [
             Entry::User { text: "hi".into() },
             Entry::Assistant(assistant("", vec![call()], None)),
             tool_result("c1", "ok", false),
-            Entry::TurnParked,
+            Entry::TurnPutOff {
+                waiting_since: std::time::SystemTime::UNIX_EPOCH,
+                queued: None,
+            },
             tool_result("c2", "later", false),
         ];
         let messages = to_messages(&entries);

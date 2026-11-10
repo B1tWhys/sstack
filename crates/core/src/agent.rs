@@ -3,6 +3,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::SystemTime;
 
 use tokio_util::sync::CancellationToken;
 
@@ -65,9 +66,12 @@ pub enum TurnEnd {
     Refused,
     /// The person cancelled the Turn.
     Cancelled,
-    /// The Turn stopped, and [`Agent::continue_turn`] picks it up. It stops between Steps when
-    /// asked to, or partway through one when a Rebuild puts off a question it asked.
+    /// The Turn stopped between Steps when asked to, and [`Agent::continue_turn`] picks it up.
     Paused,
+    /// The Turn stopped partway through a Step because a Rebuild put off what it asked the person,
+    /// and [`Agent::continue_turn`] picks it up by asking the same thing again. Nothing about it
+    /// needs telling the person, since the question comes back as it was.
+    PutOff,
 }
 
 /// A failure that stops a Turn.
@@ -105,6 +109,9 @@ pub struct Agent {
     log: SessionLog,
     /// The Session so far, which every request carries.
     entries: Vec<Entry>,
+    /// When the person was first asked what the next call to run asks, if that call is the one a
+    /// Rebuild put off. The person has seen that call already, so it is not shown again.
+    resumed_since: Option<SystemTime>,
 }
 
 /// A callback that receives [`AgentEvent`]s as a Turn progresses.
@@ -142,8 +149,9 @@ impl Agent {
             specs,
             log,
             entries,
+            resumed_since: None,
         };
-        if agent.entries.last() != Some(&Entry::TurnParked) {
+        if !agent.entries.last().is_some_and(Entry::is_parked) {
             agent.settle_unanswered_calls(INTERRUPTED)?;
         }
         Ok(agent)
@@ -172,9 +180,9 @@ impl Agent {
         self.run_steps(context).await
     }
 
-    /// Carries on a Turn that stopped with [`TurnEnd::Paused`], in this run or an earlier one.
-    /// Any call it stopped before running runs first, so a question that was put off is asked
-    /// again.
+    /// Carries on a Turn that stopped with [`TurnEnd::Paused`] or [`TurnEnd::PutOff`], in this
+    /// run or an earlier one. Any call it stopped before running runs first, so a question that
+    /// was put off is asked again, without the call being shown a second time.
     ///
     /// # Errors
     /// Returns an error if the [`Provider`] fails or the Session cannot be recorded.
@@ -197,6 +205,16 @@ impl Agent {
         let unfinished = unanswered_calls(&self.entries);
         if unfinished.is_empty() {
             return Ok(None);
+        }
+        if let Some(Entry::TurnPutOff {
+            waiting_since,
+            queued,
+        }) = self.entries.last()
+        {
+            self.resumed_since = Some(*waiting_since);
+            if let Some(queued) = queued {
+                context.queued.put_back(queued.clone());
+            }
         }
         if let Some(end) = self.run_tools(&unfinished, context).await? {
             return Ok(Some(end));
@@ -243,10 +261,35 @@ impl Agent {
         self.parked().map(Some)
     }
 
-    /// Records that the Turn stopped to carry on later.
+    /// Records that the Turn stopped between Steps to carry on later.
     fn parked(&mut self) -> Result<TurnEnd, SessionError> {
         self.record(Entry::TurnParked)?;
         Ok(TurnEnd::Paused)
+    }
+
+    /// Records that the Turn stopped to carry on later because a Rebuild put off what it asked
+    /// the person, who was first asked at `waiting_since`. The prompts queued for the Turn go
+    /// with it, so that a relaunch does not lose them.
+    fn put_off(
+        &mut self,
+        waiting_since: SystemTime,
+        queued: &QueuedPrompts,
+    ) -> Result<TurnEnd, SessionError> {
+        let queued = queued.take();
+        self.record(Entry::TurnPutOff {
+            waiting_since,
+            queued,
+        })?;
+        Ok(TurnEnd::PutOff)
+    }
+
+    /// Shows `call` as about to run, unless it is the put-off call the person saw already, and
+    /// returns from when the person is asked about it, if it asks.
+    fn start_call(&mut self, call: &ToolCall, on_event: EventSink<'_>) -> SystemTime {
+        self.resumed_since.take().unwrap_or_else(|| {
+            on_event(AgentEvent::ToolStarted(ToolCallSummary::from(call)));
+            SystemTime::now()
+        })
     }
 
     /// Runs one Step, returning how the Turn ended if this Step ended it.
@@ -287,14 +330,14 @@ impl Agent {
         context: &mut TurnContext<'_>,
     ) -> Result<Option<TurnEnd>, AgentError> {
         for call in calls {
-            (context.on_event)(AgentEvent::ToolStarted(ToolCallSummary::from(call)));
+            let asked_since = self.start_call(call, context.on_event);
             let output = tokio::select! {
                 biased;
                 () = context.cancel.cancelled() => return self.cancelled().map(Some),
                 output = self.config.tools.run(call) => output,
             };
             let Ok(output) = output else {
-                return Ok(Some(self.parked()?));
+                return Ok(Some(self.put_off(asked_since, context.queued)?));
             };
             (context.on_event)(AgentEvent::ToolFinished {
                 name: call.name.clone(),
@@ -372,6 +415,18 @@ impl From<&ToolCall> for ToolCallSummary {
             input: call.input.to_string(),
         }
     }
+}
+
+/// Returns the ids of the tool calls in `entries` that were never shown as starting, for an
+/// interface to leave out when it shows a resumed Session. They are the calls after the one whose
+/// question a Rebuild put off, which the agent shows as they start once the Turn carries on.
+#[must_use]
+pub fn calls_not_started(entries: &[Entry]) -> HashSet<String> {
+    if !matches!(entries.last(), Some(Entry::TurnPutOff { .. })) {
+        return HashSet::new();
+    }
+    let unanswered = unanswered_calls(entries).into_iter();
+    unanswered.skip(1).map(|call| call.id).collect()
 }
 
 /// Returns the tool calls that have no result in `entries`, oldest first.
@@ -728,86 +783,158 @@ mod tests {
         }
     }
 
-    /// Carries on the parked Turn of `agent`, with nothing asking it to pause.
-    async fn carry_on(agent: &mut Agent) -> TurnEnd {
+    /// Carries on the parked Turn of `agent`, with nothing asking it to pause, returning how it
+    /// ended and what it reported.
+    async fn carry_on(agent: &mut Agent) -> (TurnEnd, Vec<AgentEvent>) {
         let cancel = CancellationToken::new();
         let pause = AtomicBool::new(false);
-        let mut ignore = |_| {};
+        let mut events = Vec::new();
+        let mut record = |event| events.push(event);
         let mut context = TurnContext {
             cancel: &cancel,
             pause: &pause,
             queued: &QueuedPrompts::default(),
-            on_event: &mut ignore,
+            on_event: &mut record,
         };
-        agent.continue_turn(&mut context).await.unwrap()
+        let end = agent.continue_turn(&mut context).await.unwrap();
+        (end, events)
     }
 
-    /// Returns a response that reads a file that is not there, then runs `touch ran` in the
-    /// shell, which asks the person.
-    fn read_then_touch() -> AssistantEntry {
+    /// Returns a call of `name` with `input` and id `id`.
+    fn tool_call(id: &str, name: &str, input: serde_json::Value) -> ToolCall {
+        ToolCall {
+            id: id.into(),
+            name: name.into(),
+            input,
+        }
+    }
+
+    /// Returns a response that reads a file that is not there, runs `touch ran` in the shell,
+    /// which asks the person, then reads another file that is not there.
+    fn read_touch_read() -> AssistantEntry {
         AssistantEntry {
             tool_calls: vec![
-                ToolCall {
-                    id: "1".into(),
-                    name: "read".into(),
-                    input: json!({"path": "missing"}),
-                },
-                ToolCall {
-                    id: "2".into(),
-                    name: "bash".into(),
-                    input: json!({"command": "touch ran"}),
-                },
+                tool_call("1", "read", json!({"path": "missing"})),
+                tool_call("2", "bash", json!({"command": "touch ran"})),
+                tool_call("3", "read", json!({"path": "absent"})),
             ],
             ..calling("", "", json!({}))
         }
     }
 
+    /// Returns the names of the tools `events` show as starting, in order.
+    fn started(events: &[AgentEvent]) -> Vec<&str> {
+        events
+            .iter()
+            .filter_map(|event| match event {
+                AgentEvent::ToolStarted(call) => Some(call.name.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Returns when the person was first asked what the parked Turn of `agent` waits on.
+    fn put_off_since(agent: &Agent) -> SystemTime {
+        match agent.entries().last() {
+            Some(Entry::TurnPutOff { waiting_since, .. }) => *waiting_since,
+            last => panic!("the Turn should be put off, not end with {last:?}"),
+        }
+    }
+
     #[tokio::test]
     async fn a_put_off_question_parks_the_turn_and_is_asked_again_after_a_relaunch() {
-        let script = vec![Ok(read_then_touch()), Ok(reply("done"))];
+        let script = vec![Ok(read_touch_read()), Ok(reply("done"))];
         let mut h = harness(script, Arc::new(DeferAll));
+        let before = SystemTime::now();
 
-        let (end, _) = run(&mut h.agent).await;
+        let (end, events) = run(&mut h.agent).await;
 
-        assert_eq!(end.unwrap(), TurnEnd::Paused);
-        assert_eq!(h.agent.entries().last(), Some(&Entry::TurnParked));
+        assert_eq!(end.unwrap(), TurnEnd::PutOff);
+        assert_eq!(started(&events), ["read", "bash"]);
+        assert!(put_off_since(&h.agent) >= before);
         assert_eq!(tool_results(h.agent.entries()).len(), 1);
         assert!(crate::session::is_parked(&h.session).unwrap());
 
         let mut h = relaunched(h, Arc::new(AllowAll));
         assert_eq!(tool_results(h.agent.entries()).len(), 1);
-        assert_eq!(carry_on(&mut h.agent).await, TurnEnd::Finished);
+        let (end, events) = carry_on(&mut h.agent).await;
 
+        assert_eq!(end, TurnEnd::Finished);
+        assert_eq!(started(&events), ["read"]);
         assert!(h.dir.path().join("ran").exists());
         let results = tool_results(h.agent.entries());
         let ids: Vec<&str> = results.iter().map(|result| result.0).collect();
-        assert_eq!(ids, ["1", "2"]);
+        assert_eq!(ids, ["1", "2", "3"]);
         let last_request = h.provider.requests().pop().unwrap();
-        assert_eq!(last_request.last(), h.agent.entries().get(4));
+        assert!(matches!(
+            last_request.last(),
+            Some(Entry::ToolResult { .. })
+        ));
     }
 
     #[tokio::test]
-    async fn a_question_put_off_again_parks_the_turn_again() {
-        let mut h = harness(vec![Ok(read_then_touch())], Arc::new(DeferAll));
+    async fn only_the_calls_after_a_put_off_question_were_never_started() {
+        let mut h = harness(vec![Ok(read_touch_read())], Arc::new(DeferAll));
+        assert_eq!(calls_not_started(h.agent.entries()), HashSet::new());
+
         let _ = run(&mut h.agent).await;
+
+        let not_started = calls_not_started(h.agent.entries());
+        assert_eq!(not_started, HashSet::from(["3".to_owned()]));
+    }
+
+    #[tokio::test]
+    async fn a_prompt_queued_before_a_question_is_put_off_reaches_the_model_after_its_call() {
+        let script = vec![Ok(read_touch_read()), Ok(reply("done"))];
+        let mut h = harness(script, Arc::new(DeferAll));
+        let (end, _) = run_with_queued(&mut h, "also this", false).await;
+        assert_eq!(end, TurnEnd::PutOff);
+        assert!(matches!(
+            h.agent.entries().last(),
+            Some(Entry::TurnPutOff { queued: Some(text), .. }) if text == "also this"
+        ));
+
+        let mut h = relaunched(h, Arc::new(AllowAll));
+        let (end, events) = carry_on(&mut h.agent).await;
+
+        assert_eq!(end, TurnEnd::Finished);
+        assert!(events.contains(&AgentEvent::Admitted("also this".into())));
+        let queued = Entry::User {
+            text: "also this".into(),
+        };
+        assert_eq!(h.provider.requests()[1].last(), Some(&queued));
+    }
+
+    #[tokio::test]
+    async fn a_question_put_off_again_keeps_when_it_was_first_asked() {
+        let mut h = harness(vec![Ok(read_touch_read())], Arc::new(DeferAll));
+        let _ = run(&mut h.agent).await;
+        let first_asked = put_off_since(&h.agent);
 
         let mut h = relaunched(h, Arc::new(DeferAll));
 
-        assert_eq!(carry_on(&mut h.agent).await, TurnEnd::Paused);
+        let (end, events) = carry_on(&mut h.agent).await;
+        assert_eq!(end, TurnEnd::PutOff);
+        assert_eq!(started(&events), Vec::<&str>::new());
+        assert_eq!(put_off_since(&h.agent), first_asked);
         assert_eq!(tool_results(h.agent.entries()).len(), 1);
         assert_eq!(h.provider.requests().len(), 1);
     }
 
     #[tokio::test]
-    async fn a_new_turn_in_place_of_a_put_off_question_says_its_call_was_not_run() {
-        let script = vec![Ok(read_then_touch()), Ok(reply("fine"))];
+    async fn a_new_turn_in_place_of_a_put_off_question_says_its_calls_were_not_run() {
+        let script = vec![Ok(read_touch_read()), Ok(reply("fine"))];
         let mut h = harness(script, Arc::new(DeferAll));
         let _ = run(&mut h.agent).await;
 
         let (end, _) = run(&mut h.agent).await;
 
         assert_eq!(end.unwrap(), TurnEnd::Finished);
-        assert_eq!(tool_results(h.agent.entries())[1], ("2", INTERRUPTED, true));
+        let results = tool_results(h.agent.entries());
+        assert_eq!(
+            results[1..],
+            [("2", INTERRUPTED, true), ("3", INTERRUPTED, true)]
+        );
         assert!(!h.dir.path().join("ran").exists());
     }
 

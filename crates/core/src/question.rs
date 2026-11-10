@@ -94,13 +94,24 @@ pub fn describe_all(questions: &[Question], answers: &[Answer]) -> String {
     lines.join("\n")
 }
 
+/// What became of the model's [`Question`]s once they were put to the person.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Response {
+    /// The person gave one [`Answer`] for each Question, in order.
+    Answered(Vec<Answer>),
+    /// The person would rather answer in the conversation, or nobody answered before the Turn
+    /// ended.
+    Declined,
+    /// Nobody decided, because a Rebuild put the Questions off. The call that asked them runs
+    /// again, asking them again, when its Turn carries on.
+    Deferred,
+}
+
 /// Someone who answers the model's [`Question`]s.
 #[async_trait]
 pub trait Asker: Send + Sync {
-    /// Puts `questions` to the person and waits, returning one [`Answer`] for each, in order.
-    /// Returns `None` if the person declined to answer here, or nobody answered before the Turn
-    /// ended.
-    async fn ask(&self, questions: Vec<Question>) -> Option<Vec<Answer>>;
+    /// Puts `questions` to the person and waits for what becomes of them.
+    async fn ask(&self, questions: Vec<Question>) -> Response;
 }
 
 #[cfg(test)]
