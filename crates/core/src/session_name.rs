@@ -235,10 +235,7 @@ mod tests {
             .name("typed")
             .await;
         assert_eq!(named, Some("Add names".into()));
-        assert_eq!(
-            std::fs::read_to_string(dir.path().join("1.name")).unwrap(),
-            "Add names"
-        );
+        assert!(workspace::is_named(&dir.path().join("1.jsonl")));
 
         let again = naming(&dir, vec![Ok(reply("Other"))]).name("typed").await;
         assert_eq!(again, None);
@@ -262,7 +259,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let named = naming(&dir, vec![Err("down".into())]).name("typed").await;
         assert_eq!(named, None);
-        assert!(!dir.path().join("1.name").exists());
+        assert!(!workspace::is_named(&dir.path().join("1.jsonl")));
     }
 
     #[tokio::test]

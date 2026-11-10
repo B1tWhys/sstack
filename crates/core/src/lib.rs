@@ -16,6 +16,7 @@ pub mod running_harness;
 pub mod sandbox;
 pub mod session;
 pub mod session_controller;
+pub mod session_metadata;
 pub mod session_name;
 pub mod session_report;
 pub mod session_setup;

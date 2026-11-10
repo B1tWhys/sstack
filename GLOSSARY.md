@@ -14,6 +14,10 @@ _Avoid_: Chat, thread, conversation
 What a person knows a Session by: the name they gave it with `/rename`, or else a short summary of the first thing they said in it.
 _Avoid_: Title, label
 
+**Session Metadata**:
+What is kept about a Session beside its log because it is not part of the conversation the model sees, such as its Session Name.
+_Avoid_: Session info, sidecar
+
 **Turn**:
 One drain of admitted input in a Session, ending when the model and its tools have stopped. A Turn contains zero or more Steps.
 _Avoid_: Round, exchange

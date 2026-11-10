@@ -1,11 +1,12 @@
 //! Where a project's Sessions live, and the instructions a Session starts with.
 
 use std::fs;
-use std::io::{self, Write};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::session;
+use crate::session_metadata::{self, SessionMetadata};
 use crate::skills::Skill;
 
 /// The instructions every Session starts with.
@@ -18,9 +19,6 @@ const INSTRUCTIONS_FILE: &str = "AGENTS.md";
 const USER_INSTRUCTIONS_FILE: &str = "CLAUDE.md";
 /// The file extension of Session logs.
 const SESSION_EXTENSION: &str = "jsonl";
-/// The file extension of the file beside a Session log that holds the name the person gave the
-/// Session, if they gave it one.
-const NAME_EXTENSION: &str = "name";
 /// The directory, among a project's Sessions, of the ones the person has put away.
 const ARCHIVE_DIR: &str = "archived";
 /// The model's instructions for working in a Session that has its own worktree.
@@ -105,7 +103,9 @@ fn summarize(path: PathBuf) -> Option<SessionSummary> {
     let first_prompt = session::first_prompt(&path).ok()?;
     let modified = fs::metadata(&path).and_then(|file| file.modified()).ok()?;
     let parked = session::is_parked(&path).ok()?;
-    let name = read_name(&name_path(&path));
+    let name = SessionMetadata::read(&path)
+        .ok()
+        .and_then(|metadata| metadata.name);
     Some(SessionSummary {
         path,
         first_prompt,
@@ -115,28 +115,15 @@ fn summarize(path: PathBuf) -> Option<SessionSummary> {
     })
 }
 
-/// Returns where the name the person gave the Session logged at `log` is kept.
-fn name_path(log: &Path) -> PathBuf {
-    log.with_extension(NAME_EXTENSION)
-}
-
-/// Returns the name the person gave a Session, kept at `path`. Returns nothing if they gave none
-/// or it cannot be read, which leaves the first prompt as the Session Name.
-fn read_name(path: &Path) -> Option<String> {
-    fs::read_to_string(path).ok()
-}
-
 /// Makes `name` the Session Name of the Session with id `id`. With `None`, takes the name away, so
 /// that the Session goes back to being known by what the person said first.
 ///
 /// # Errors
 /// Returns an error if the name cannot be stored or removed.
 pub fn name_session(sessions_dir: &Path, id: &str, name: Option<&str>) -> io::Result<()> {
-    let path = name_path(&session_path(sessions_dir, id));
-    match name {
-        Some(name) => fs::write(path, name),
-        None => remove_if_present(&path),
-    }
+    SessionMetadata::update(&session_path(sessions_dir, id), |metadata| {
+        metadata.name = name.map(ToOwned::to_owned);
+    })
 }
 
 /// Makes `name` the Session Name of the Session stored at `log`, unless it already has one,
@@ -146,40 +133,28 @@ pub fn name_session(sessions_dir: &Path, id: &str, name: Option<&str>) -> io::Re
 /// # Errors
 /// Returns an error if the name cannot be stored.
 pub fn name_unnamed_session(log: &Path, name: &str) -> io::Result<bool> {
-    let created = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(name_path(log));
-    match created {
-        Ok(mut file) => file.write_all(name.as_bytes()).map(|()| true),
-        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(false),
-        Err(error) => Err(error),
-    }
+    SessionMetadata::update(log, |metadata| {
+        let unnamed = metadata.name.is_none();
+        if unnamed {
+            metadata.name = Some(name.to_owned());
+        }
+        unnamed
+    })
 }
 
 /// Returns whether the Session stored at `log` has a Session Name of its own, rather than being
-/// known by its first prompt.
+/// known by its first prompt. A Session whose metadata cannot be read counts as named, since no
+/// name could be stored for it anyway.
 #[must_use]
 pub fn is_named(log: &Path) -> bool {
-    name_path(log).exists()
+    !SessionMetadata::read(log).is_ok_and(|metadata| metadata.name.is_none())
 }
 
-/// Deletes the file at `path`, which need not exist.
-fn remove_if_present(path: &Path) -> io::Result<()> {
-    match fs::remove_file(path) {
-        Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
-        _ => Ok(()),
-    }
-}
-
-/// Moves the Session logged at `from` to `to`, along with any name the person gave it. The
-/// log moves last, so that a failure partway at worst leaves the Session where it was, without its
-/// name.
+/// Moves the Session logged at `from` to `to`, along with its Session Metadata. The log moves
+/// last, so that a failure partway at worst leaves the Session where it was, without its
+/// metadata.
 fn move_session(from: &Path, to: &Path) -> io::Result<()> {
-    let name = name_path(from);
-    if name.exists() {
-        fs::rename(name, name_path(to))?;
-    }
+    session_metadata::relocate(from, to)?;
     fs::rename(from, to)
 }
 
@@ -406,7 +381,8 @@ mod tests {
     fn a_name_that_cannot_be_read_is_no_name_and_cannot_be_replaced() {
         let dir = tempfile::tempdir().unwrap();
         fs::write(session_path(dir.path(), "1"), "").unwrap();
-        fs::create_dir(name_path(&session_path(dir.path(), "1"))).unwrap();
+        let metadata = session_path(dir.path(), "1").with_extension("json");
+        fs::create_dir(metadata).unwrap();
         assert_eq!(list_sessions(dir.path()).unwrap()[0].name, None);
         assert!(name_session(dir.path(), "1", None).is_err());
         assert!(name_session(dir.path(), "1", Some("x")).is_err());

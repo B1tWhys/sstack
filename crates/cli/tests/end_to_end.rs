@@ -8,6 +8,7 @@ use std::process::{Command, Output, Stdio};
 use std::sync::{Arc, Mutex};
 
 use serde_json::json;
+use sstack::session_metadata::SessionMetadata;
 
 const SECRET_NAME: &str = "SSTACK_E2E_KEY";
 const SECRET: &str = "e2e-secret-value";
@@ -231,8 +232,8 @@ impl Sandbox {
         let files = projects.flat_map(|project| fs::read_dir(project.unwrap().path()).unwrap());
         files
             .map(|file| file.unwrap().path())
-            .filter(|path| path.extension().is_some_and(|ext| ext == "name"))
-            .map(|path| fs::read_to_string(path).unwrap())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "jsonl"))
+            .filter_map(|log| SessionMetadata::read(&log).unwrap().name)
             .collect()
     }
 
