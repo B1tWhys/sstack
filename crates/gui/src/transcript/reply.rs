@@ -10,15 +10,17 @@ use super::{ASIDE_SIZE, TEXT_SIZE};
 use crate::theme;
 
 /// The model's reply in one Step, as much of it as has arrived, drawn with its Markdown
-/// formatting rather than as the marks that ask for it. Images show as their alternative text.
+/// formatting rather than as the marks that ask for it. Code blocks are colored for the language
+/// they name, if it is one iced knows. Images show as their alternative text.
 ///
 /// Two replies are equal when their text is, however it arrived.
 pub struct Reply {
     /// The text as the model sent it.
     source: String,
     /// The text read as Markdown, kept up to date as pieces arrive so that a long reply is not
-    /// read again from the start each time.
-    markdown: markdown::Content,
+    /// read again from the start each time. Boxed because it is large, and a transcript block
+    /// holding it inline would make every other kind of block as large.
+    markdown: Box<markdown::Content>,
 }
 
 impl Reply {
@@ -53,8 +55,7 @@ impl Reply {
         size: Pixels,
         open: fn(String) -> Message,
     ) -> Element<'a, Message> {
-        let settings = markdown::Settings::with_text_size(size, style());
-        markdown::view(self.markdown.items(), settings).map(open)
+        markdown::view(self.markdown.items(), settings(size)).map(open)
     }
 }
 
@@ -62,7 +63,7 @@ impl From<&str> for Reply {
     fn from(text: &str) -> Self {
         Self {
             source: text.to_owned(),
-            markdown: markdown::Content::parse(text),
+            markdown: Box::new(markdown::Content::parse(text)),
         }
     }
 }
@@ -78,6 +79,16 @@ impl Eq for Reply {}
 impl fmt::Debug for Reply {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.debug_tuple("Reply").field(&self.source).finish()
+    }
+}
+
+/// Returns the sizes and style replies are drawn in, with body text `size` big. Code blocks are
+/// drawn as large as the words around them, where iced would draw them at three quarters of that
+/// size.
+fn settings(size: Pixels) -> markdown::Settings {
+    markdown::Settings {
+        code_size: size,
+        ..markdown::Settings::with_text_size(size, style())
     }
 }
 
@@ -156,6 +167,32 @@ mod tests {
             span.font.is_some_and(|font| font.weight == Weight::Bold)
         });
         assert_eq!(bold, ["bold"]);
+    }
+
+    #[test]
+    fn a_code_block_is_drawn_in_the_colors_of_its_language() {
+        let reply = Reply::from("```rust\nfn main() { let x = \"one\"; }\n```\n");
+
+        let [Item::CodeBlock { lines, .. }] = reply.markdown.items() else {
+            panic!("the reply should be one code block");
+        };
+        let mut colors: Vec<_> = lines
+            .iter()
+            .flat_map(|line| line.spans(style()).to_vec())
+            .filter_map(|span| span.color)
+            .map(|color| format!("{color:?}"))
+            .collect();
+        colors.dedup();
+        assert!(colors.len() > 1, "only drawn in {colors:?}");
+    }
+
+    #[test]
+    fn code_in_a_block_is_as_large_as_the_words_around_it() {
+        for size in [TEXT_SIZE, ASIDE_SIZE] {
+            let settings = settings(Pixels(size));
+
+            assert_eq!(settings.code_size, settings.text_size);
+        }
     }
 
     #[test]
