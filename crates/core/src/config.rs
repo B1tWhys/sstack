@@ -8,17 +8,24 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
-use crate::provider::anthropic::AnthropicProvider;
-use crate::provider::{Effort, Provider, ProviderError};
+use crate::provider::{Effort, Provider, ProviderError, anthropic, openai};
 
-/// The name of the built-in [`Connection`].
+/// The name of the built-in [`Connection`] to Claude, used unless settings choose another.
 const DEFAULT_CONNECTION: &str = "anthropic";
 /// The model used unless settings or arguments choose another.
 const DEFAULT_MODEL: &str = "claude-opus-5-5";
 /// The model that names Sessions unless settings choose another.
 const DEFAULT_NAME_MODEL: &str = "claude-haiku-5-5";
-/// The secret the built-in [`Connection`] authenticates with.
+/// The secret the built-in [`Connection`] to Claude authenticates with.
 const DEFAULT_SECRET: &str = "ANTHROPIC_API_KEY";
+/// The name of the built-in [`Connection`] to OpenAI.
+const OPENAI_CONNECTION: &str = "openai";
+/// The secret the built-in [`Connection`] to OpenAI authenticates with.
+const OPENAI_SECRET: &str = "OPENAI_API_KEY";
+/// The model the built-in [`Connection`] to OpenAI requests.
+const OPENAI_MODEL: &str = "gpt-6.1-sol";
+/// The model that writes Session Names on the built-in [`Connection`] to OpenAI.
+const OPENAI_NAME_MODEL: &str = "gpt-6-luna";
 /// The context window assumed for a [`Connection`] that does not set one, in tokens.
 const DEFAULT_CONTEXT_LIMIT: u64 = 1_000_000;
 
@@ -28,6 +35,9 @@ const DEFAULT_CONTEXT_LIMIT: u64 = 1_000_000;
 pub enum ProviderKind {
     /// The Claude API.
     Anthropic,
+    /// OpenAI's Responses API.
+    #[serde(rename = "openai")]
+    OpenAi,
 }
 
 /// Supplies the context limit for settings that leave it out.
@@ -65,13 +75,11 @@ impl Connection {
     /// # Errors
     /// Returns an error if the [`Provider`] cannot be set up.
     pub fn provider(&self, secret: String) -> Result<Arc<dyn Provider>, ProviderError> {
-        match self.provider {
-            ProviderKind::Anthropic => Ok(Arc::new(AnthropicProvider::new(
-                secret,
-                self.base_url.clone(),
-                self.effort,
-            )?)),
-        }
+        let base_url = self.base_url.clone();
+        Ok(match self.provider {
+            ProviderKind::Anthropic => Arc::new(anthropic::connect(secret, base_url, self.effort)?),
+            ProviderKind::OpenAi => Arc::new(openai::connect(secret, base_url, self.effort)?),
+        })
     }
 }
 
@@ -116,10 +124,22 @@ impl Default for Config {
             model: None,
             name_model: None,
         };
+        let openai = Connection {
+            provider: ProviderKind::OpenAi,
+            secret: OPENAI_SECRET.to_owned(),
+            base_url: None,
+            effort: Effort::High,
+            context_limit: DEFAULT_CONTEXT_LIMIT,
+            model: Some(OPENAI_MODEL.to_owned()),
+            name_model: Some(OPENAI_NAME_MODEL.to_owned()),
+        };
         Self {
             default_connection: DEFAULT_CONNECTION.to_owned(),
             default_model: DEFAULT_MODEL.to_owned(),
-            connections: BTreeMap::from([(DEFAULT_CONNECTION.to_owned(), anthropic)]),
+            connections: BTreeMap::from([
+                (DEFAULT_CONNECTION.to_owned(), anthropic),
+                (OPENAI_CONNECTION.to_owned(), openai),
+            ]),
             vim: vim_by_default(),
             name_model: name_model_by_default(),
         }
@@ -186,7 +206,15 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let config = Config::load(&dir.path().join("config.toml")).unwrap();
         assert_eq!(config, Config::default());
-        assert_eq!(config.connection(None).unwrap().secret, DEFAULT_SECRET);
+        let claude = config.connection(None).unwrap();
+        assert_eq!(claude.secret, DEFAULT_SECRET);
+        assert_eq!(config.model(claude), DEFAULT_MODEL);
+        let openai = config.connection(Some("openai")).unwrap();
+        assert_eq!(openai.provider, ProviderKind::OpenAi);
+        assert_eq!(openai.secret, "OPENAI_API_KEY");
+        assert_eq!(config.model(openai), "gpt-6.1-sol");
+        assert_eq!(config.name_model(openai), "gpt-6-luna");
+        assert!(openai.provider("key".into()).is_ok());
     }
 
     #[test]
@@ -215,7 +243,7 @@ mod tests {
             effort = "low"
 
             [connections.home]
-            provider = "anthropic"
+            provider = "openai"
             secret = "HOME_KEY"
             base_url = "http://localhost:1/"
             model = "home-model"

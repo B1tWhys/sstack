@@ -1,6 +1,8 @@
 //! The boundary between the harness and the services that run models.
 
 pub mod anthropic;
+pub mod genai_chat;
+pub mod openai;
 pub mod scripted;
 
 use async_trait::async_trait;
