@@ -197,7 +197,8 @@ pub fn prepare(
     directory: &Path,
     /// The name of the Connection to use. Missing means the default in settings.
     connection: Option<&str>,
-    /// The identifier of the model to request. Missing means the default in settings.
+    /// The identifier of the model to request. Missing means the Connection's model, or else the
+    /// default in settings.
     model: Option<&str>,
     /// Makes, from the Session's id, whoever decides whether each shell command the model asks to
     /// run on the host may run.
@@ -213,10 +214,10 @@ pub fn prepare(
     let main = main_checkout(directory)?;
     let backend = Backend {
         connection,
-        model: model.map_or_else(|| config.default_model.clone(), str::to_owned),
+        model: model.unwrap_or_else(|| config.model(connection)).to_owned(),
         main: &main,
     };
-    let name_model = config.name_model.clone();
+    let name_model = config.name_model(connection).to_owned();
     let session = open_session(&project_sessions(&main)?, start)?;
     let id = workspace::session_id(&session.path);
     let place = workplace(&main, &id, session.wants_worktree);

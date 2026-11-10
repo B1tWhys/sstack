@@ -25,7 +25,7 @@ struct Args {
     /// Connection to use, instead of the default in settings.
     #[arg(long)]
     connection: Option<String>,
-    /// Model to use, instead of the default in settings.
+    /// Model to use, instead of the one the Connection names in settings.
     #[arg(long)]
     model: Option<String>,
     /// Resume a Session by id, or the newest one if no id is given.

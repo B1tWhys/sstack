@@ -51,6 +51,12 @@ pub struct Connection {
     /// The model's context window, in tokens.
     #[serde(default = "default_context_limit")]
     pub context_limit: u64,
+    /// The model to request, which this Connection's Provider must serve. Missing means
+    /// [`Config::default_model`].
+    pub model: Option<String>,
+    /// The model that writes Session Names on this Connection. Missing means
+    /// [`Config::name_model`].
+    pub name_model: Option<String>,
 }
 
 impl Connection {
@@ -75,7 +81,7 @@ impl Connection {
 pub struct Config {
     /// The [`Connection`] used unless a run chooses another.
     pub default_connection: String,
-    /// The model used unless a run chooses another.
+    /// The model requested on a [`Connection`] that names none, unless a run chooses another.
     pub default_model: String,
     /// The [`Connection`]s available, by name.
     pub connections: BTreeMap<String, Connection>,
@@ -83,7 +89,8 @@ pub struct Config {
     #[serde(default = "vim_by_default")]
     pub vim: bool,
     /// The model that sums up the first thing the person says in a Session as its Session Name,
-    /// served by the Session's own [`Connection`]. A small, fast model is enough.
+    /// on a [`Connection`] that names none. It is served by the Session's own Connection. A
+    /// small, fast model is enough.
     #[serde(default = "name_model_by_default")]
     pub name_model: String,
 }
@@ -106,6 +113,8 @@ impl Default for Config {
             base_url: None,
             effort: Effort::High,
             context_limit: DEFAULT_CONTEXT_LIMIT,
+            model: None,
+            name_model: None,
         };
         Self {
             default_connection: DEFAULT_CONNECTION.to_owned(),
@@ -154,6 +163,18 @@ impl Config {
             .get(name)
             .ok_or_else(|| ConfigError::UnknownConnection(name.to_owned()))
     }
+
+    /// Returns the model to request on `connection`, unless a run chooses another.
+    #[must_use]
+    pub fn model<'a>(&'a self, connection: &'a Connection) -> &'a str {
+        connection.model.as_deref().unwrap_or(&self.default_model)
+    }
+
+    /// Returns the model that writes Session Names on `connection`.
+    #[must_use]
+    pub fn name_model<'a>(&'a self, connection: &'a Connection) -> &'a str {
+        connection.name_model.as_deref().unwrap_or(&self.name_model)
+    }
 }
 
 #[cfg(test)]
@@ -197,17 +218,23 @@ mod tests {
             provider = "anthropic"
             secret = "HOME_KEY"
             base_url = "http://localhost:1/"
+            model = "home-model"
+            name_model = "home-namer"
         "#;
         fs::write(&path, settings).unwrap();
 
         let config = Config::load(&path).unwrap();
 
-        assert_eq!(config.connection(None).unwrap().effort, Effort::Low);
-        assert_eq!(config.name_model, DEFAULT_NAME_MODEL);
+        let work = config.connection(None).unwrap();
+        assert_eq!(work.effort, Effort::Low);
+        assert_eq!(config.model(work), "claude-sonnet-5-5");
+        assert_eq!(config.name_model(work), DEFAULT_NAME_MODEL);
         let home = config.connection(Some("home")).unwrap();
         assert_eq!(home.secret, "HOME_KEY");
         assert_eq!(home.effort, Effort::High);
         assert_eq!(home.context_limit, DEFAULT_CONTEXT_LIMIT);
+        assert_eq!(config.model(home), "home-model");
+        assert_eq!(config.name_model(home), "home-namer");
         assert!(home.provider("key".into()).is_ok());
     }
 

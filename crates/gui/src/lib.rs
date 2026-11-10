@@ -44,7 +44,7 @@ struct Args {
     /// Connection to use, instead of the default in settings.
     #[arg(long)]
     connection: Option<String>,
-    /// Model to use, instead of the default in settings.
+    /// Model to use, instead of the one the Connection names in settings.
     #[arg(long)]
     model: Option<String>,
     /// Resume a Session by id, or the newest one if no id is given.
@@ -144,7 +144,7 @@ fn ready(args: &Args) -> Result<Ready> {
 struct LiveSessions {
     /// The Connection every Session uses, instead of the default in settings.
     connection: Option<String>,
-    /// The model every Session uses, instead of the default in settings.
+    /// The model every Session uses, instead of the one its Connection names in settings.
     model: Option<String>,
     /// The main checkout of the project.
     main: PathBuf,
