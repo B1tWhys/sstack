@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tokio_util::sync::CancellationToken;
 
 use crate::provider::{ModelRequest, Provider, ProviderError, StreamEvent, ToolSpec};
+use crate::queued_prompts::QueuedPrompts;
 use crate::session::{AssistantEntry, Entry, SessionError, SessionLog, StopReason, ToolCall};
 use crate::tools::ToolBox;
 
@@ -32,6 +33,9 @@ pub enum AgentEvent {
         /// Whether the call failed.
         is_error: bool,
     },
+    /// The person's Queued Prompts joined into this text, which the Turn has just taken and the
+    /// model reads in its next Step.
+    Admitted(String),
     /// The latest request used most of the context window, and requests fail once it is full.
     ContextNearLimit {
         /// Tokens in the most recent request.
@@ -114,6 +118,9 @@ pub struct TurnContext<'a> {
     /// abandons the Step. A Turn that ends by itself in that Step simply ends. Can be
     /// cleared again.
     pub pause: &'a AtomicBool,
+    /// The prompts the person sent while the Turn runs, which the Turn takes at the end of each
+    /// Step that does not end it.
+    pub queued: &'a QueuedPrompts,
     /// Where each event goes as the Turn progresses.
     pub on_event: EventSink<'a>,
 }
@@ -194,19 +201,34 @@ impl Agent {
         if let Some(end) = self.run_tools(&unfinished, context).await? {
             return Ok(Some(end));
         }
+        self.admit_queued(context)?;
         Ok(self.park_if_asked(context)?)
     }
 
     /// Runs Steps until one ends the Turn, or until the Turn is asked to pause between them.
+    /// Prompts queued during a Step go to the model in the next one, and are recorded before the
+    /// Turn parks so that they are not lost to a relaunch.
     async fn run_steps(&mut self, context: &mut TurnContext<'_>) -> Result<TurnEnd, AgentError> {
         loop {
             if let Some(end) = self.step(context).await? {
                 return Ok(end);
             }
+            self.admit_queued(context)?;
             if let Some(end) = self.park_if_asked(context)? {
                 return Ok(end);
             }
         }
+    }
+
+    /// Adds the prompts the person queued during the Step to the Session, if there are any, so
+    /// that the model reads them in the next Step. Called between Steps.
+    fn admit_queued(&mut self, context: &mut TurnContext<'_>) -> Result<(), SessionError> {
+        let Some(text) = context.queued.take() else {
+            return Ok(());
+        };
+        self.record(Entry::User { text: text.clone() })?;
+        (context.on_event)(AgentEvent::Admitted(text));
+        Ok(())
     }
 
     /// Parks the Turn if `context` asks it to pause, returning how it ended if it did. Called
@@ -442,6 +464,7 @@ mod tests {
         let mut context = TurnContext {
             cancel,
             pause: &pause,
+            queued: &QueuedPrompts::default(),
             on_event,
         };
         agent.run_turn("go", &mut context).await
@@ -652,6 +675,7 @@ mod tests {
         let mut context = TurnContext {
             cancel: &cancel,
             pause: &pause,
+            queued: &QueuedPrompts::default(),
             on_event: &mut ignore,
         };
 
@@ -673,6 +697,7 @@ mod tests {
         let mut context = TurnContext {
             cancel: &cancel,
             pause: &pause,
+            queued: &QueuedPrompts::default(),
             on_event: &mut ignore,
         };
 
@@ -711,6 +736,7 @@ mod tests {
         let mut context = TurnContext {
             cancel: &cancel,
             pause: &pause,
+            queued: &QueuedPrompts::default(),
             on_event: &mut ignore,
         };
         agent.continue_turn(&mut context).await.unwrap()
@@ -794,9 +820,64 @@ mod tests {
         let mut context = TurnContext {
             cancel: &cancel,
             pause: &pause,
+            queued: &QueuedPrompts::default(),
             on_event: &mut ignore,
         };
         let end = h.agent.run_turn("go", &mut context).await.unwrap();
         assert_eq!(end, TurnEnd::Finished);
+    }
+    /// Runs a Turn on `h` in which the person queued `text` before its first Step ended, asking
+    /// it to pause between Steps if `paused`, and returns how it ended with what it reported.
+    async fn run_with_queued(
+        h: &mut Harness,
+        text: &str,
+        paused: bool,
+    ) -> (TurnEnd, Vec<AgentEvent>) {
+        let cancel = CancellationToken::new();
+        let pause = AtomicBool::new(paused);
+        let queued = QueuedPrompts::default();
+        queued.push(text.into());
+        let mut events = Vec::new();
+        let mut context = TurnContext {
+            cancel: &cancel,
+            pause: &pause,
+            queued: &queued,
+            on_event: &mut |event| events.push(event),
+        };
+        let end = h.agent.run_turn("go", &mut context).await.unwrap();
+        (end, events)
+    }
+
+    #[tokio::test]
+    async fn a_prompt_queued_during_a_step_reaches_the_model_in_the_next_one() {
+        let script = vec![
+            Ok(calling("1", "read", json!({"path": "missing"}))),
+            Ok(reply("done")),
+        ];
+        let mut h = harness(script, Arc::new(AllowAll));
+
+        let (end, events) = run_with_queued(&mut h, "also this", false).await;
+
+        assert_eq!(end, TurnEnd::Finished);
+        let queued = Entry::User {
+            text: "also this".into(),
+        };
+        assert_eq!(h.provider.requests()[1].last(), Some(&queued));
+        assert!(events.contains(&AgentEvent::Admitted("also this".into())));
+    }
+
+    #[tokio::test]
+    async fn a_prompt_queued_before_the_turn_parks_is_recorded_first() {
+        let script = vec![Ok(calling("1", "read", json!({"path": "missing"})))];
+        let mut h = harness(script, Arc::new(AllowAll));
+
+        let (end, _) = run_with_queued(&mut h, "also this", true).await;
+
+        assert_eq!(end, TurnEnd::Paused);
+        let entries = h.agent.entries();
+        let queued = Entry::User {
+            text: "also this".into(),
+        };
+        assert_eq!(entries[entries.len() - 2], queued);
     }
 }

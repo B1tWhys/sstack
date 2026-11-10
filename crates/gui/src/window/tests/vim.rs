@@ -66,14 +66,13 @@ async fn a_line_submitted_through_nvim_starts_a_turn() {
 }
 
 #[tokio::test]
-async fn a_line_submitted_through_nvim_during_a_turn_is_refused() {
+async fn a_line_submitted_through_nvim_during_a_turn_is_queued() {
     let (_dir, mut window) = vim_window(vec![Ok(reply("one"))]);
     let _ = vim_reports(&mut window, VimEvent::Submitted("first".into()));
 
     let _ = vim_reports(&mut window, VimEvent::Submitted("second".into()));
 
-    let refused = notice("a Turn is already running in this Session");
-    assert_eq!(blocks(&window).last(), Some(&refused));
+    assert_eq!(blocks(&window).last(), Some(&notice(QUEUED)));
 }
 
 #[tokio::test]

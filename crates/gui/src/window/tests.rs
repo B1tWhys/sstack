@@ -97,15 +97,36 @@ async fn a_prompt_runs_a_turn_and_shows_the_reply() {
 }
 
 #[tokio::test]
-async fn a_prompt_sent_during_a_turn_is_refused_and_kept() {
-    let (_dir, mut window) = window(vec![Ok(reply("one"))]);
+async fn a_prompt_sent_during_a_turn_is_queued_and_sent_once_it_ends() {
+    let (_dir, mut window) = window(vec![Ok(reply("one")), Ok(reply("two"))]);
+    let mut reports = reports(&window);
     let _ = send(&mut window, "first");
 
     let _ = send(&mut window, "second");
+    assert_eq!(window.view_ref().prompt.draft().text, "");
+    let _ = until_turn_ends_on(&mut window, &mut reports).await;
+    let _ = until_turn_ends_on(&mut window, &mut reports).await;
+
+    let said = [
+        Block::Prompt("first".into()),
+        notice(QUEUED),
+        Block::Reply("one".into()),
+        Block::Prompt("second".into()),
+        Block::Reply("two".into()),
+    ];
+    assert_eq!(blocks(&window), said);
+}
+
+#[tokio::test]
+async fn interrupting_a_turn_puts_what_was_queued_back_in_the_prompt() {
+    let (_dir, mut window) = window(vec![Ok(reply("one"))]);
+    let _ = send(&mut window, "first");
+    let _ = send(&mut window, "second");
+
+    let _ = window.update(Message::Interrupt);
 
     assert_eq!(window.view_ref().prompt.draft().text, "second");
-    let refused = notice("a Turn is already running in this Session");
-    assert_eq!(blocks(&window).last(), Some(&refused));
+    assert_eq!(blocks(&window).last(), Some(&notice(WITHDRAWN)));
 }
 
 #[tokio::test]

@@ -370,6 +370,11 @@ impl SessionView {
         self.prompt.restore(typed);
     }
 
+    /// Puts `text`, Queued Prompts that were never sent, back into the prompt at its cursor.
+    pub fn give_back(&mut self, text: &str) {
+        self.prompt.give_back(text);
+    }
+
     /// Switches between typing into a real nvim and the plain prompt, keeping what is typed.
     pub fn toggle_vim(&mut self) {
         self.prompt.toggle();

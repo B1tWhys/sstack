@@ -84,6 +84,7 @@ impl Transcript {
                 is_error: true,
             } => self.push(Kind::Note, describe::tool_failed(name)),
             AgentEvent::ToolFinished { .. } => {}
+            AgentEvent::Admitted(text) => self.push(Kind::Prompt, text.clone()),
             AgentEvent::ContextNearLimit { used, limit } => {
                 self.push(Kind::Note, describe::context_warning(*used, *limit));
             }

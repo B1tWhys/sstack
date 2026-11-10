@@ -8,6 +8,7 @@ use std::sync::atomic::AtomicBool;
 
 use anyhow::Result;
 use sstack::agent::{AgentEvent, TurnContext, TurnEnd};
+use sstack::queued_prompts::QueuedPrompts;
 use sstack::sandbox::Containers;
 use sstack::session_setup::{Place, Run, Start, prepare};
 use sstack::tools::DenyAll;
@@ -48,6 +49,7 @@ pub async fn run(args: &Args, prompt: &str) -> Result<ExitCode> {
     let mut context = TurnContext {
         cancel: &cancel,
         pause: &never_paused,
+        queued: &QueuedPrompts::default(),
         on_event: &mut |event| view.show(&event),
     };
     let named = async {
@@ -141,6 +143,8 @@ fn event_text(event: &AgentEvent, styled: bool) -> String {
         AgentEvent::Reasoning(text) => reasoning_text(text, styled),
         AgentEvent::ToolStarted(call) => format!("\n{}\n", describe::tool_started(call)),
         AgentEvent::ToolFinished { name, is_error } => tool_finished(name, *is_error),
+        // Nobody can queue a prompt in Headless Mode, but the text would be shown on its own.
+        AgentEvent::Admitted(text) => format!("\n{text}\n"),
         AgentEvent::ContextNearLimit { used, limit } => {
             format!("\n{}\n", describe::context_warning(*used, *limit))
         }

@@ -305,6 +305,17 @@ impl Pane {
         self.first_prompt.get_or_insert_with(|| text.to_owned());
     }
 
+    /// Puts `text`, Queued Prompts that were never sent, back into the Draft at the cursor, so
+    /// that the person can change and send it again.
+    pub fn give_back(&mut self, text: String) {
+        self.input.update(&Event::Paste(text));
+    }
+
+    /// Tells the person `text` in the transcript.
+    pub fn notice(&mut self, text: &str) {
+        self.update(&Event::Report(SessionReport::Notice(text.to_owned())));
+    }
+
     /// Carries on the Turn that parked, if the Session has one and an agent to run it.
     pub fn continue_turn(&mut self) {
         self.control(SessionController::continue_parked);

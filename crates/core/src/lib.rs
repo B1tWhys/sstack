@@ -10,6 +10,7 @@ pub mod human_command;
 pub mod provider;
 pub mod question;
 pub mod queue;
+pub mod queued_prompts;
 pub mod rebuild;
 pub mod running_harness;
 pub mod sandbox;

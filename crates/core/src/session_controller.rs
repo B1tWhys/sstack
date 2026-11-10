@@ -147,17 +147,34 @@ impl SessionController {
         self.moved(event);
     }
 
-    /// Starts a Turn on `text`, unless one is already running. `typed` is the line the person
-    /// typed for it, which differs from `text` when it runs a Skill, and which names the Session
-    /// if this is its first Turn.
+    /// Starts a Turn on `text`, or queues it for the running Turn if there is one. `typed` is the
+    /// line the person typed for it, which differs from `text` when it runs a Skill, and which
+    /// names the Session if this is its first Turn.
     pub(crate) fn start_turn(&mut self, text: String, typed: &str) -> Outcome<'static> {
         if self.state.in_turn() {
-            return Outcome::Refused(Refusal::Busy);
+            self.agent.queue_prompt(text);
+            return Outcome::Queued;
         }
         self.agent.prompt(text.clone());
         self.moved(SessionEvent::TurnStarted);
         self.start_naming(typed);
         Outcome::TurnStarted(text)
+    }
+
+    /// Starts a Turn on the prompts queued for a Turn that ended before it could take them, if
+    /// there are any and no Turn is running.
+    pub(crate) fn start_queued(&mut self) -> Option<Outcome<'static>> {
+        if self.state.in_turn() {
+            return None;
+        }
+        let text = self.agent.take_queued()?;
+        Some(self.start_turn(text.clone(), &text))
+    }
+
+    /// Takes back the prompts queued for the running Turn that it has not taken yet, joined into
+    /// one message, so that they are never sent. Returns `None` if there are none.
+    pub(crate) fn take_queued(&self) -> Option<String> {
+        self.agent.take_queued()
     }
 
     /// Starts making the Session's Session Name from `typed`, if it wants one.
@@ -306,8 +323,77 @@ mod tests {
 
         let started = submit("hello");
         assert_eq!(started, Some(Outcome::TurnStarted("hello".into())));
-        assert_eq!(submit("again"), Some(Outcome::Refused(Refusal::Busy)));
+        assert_eq!(submit("again"), Some(Outcome::Queued));
         assert_eq!(session.state(), SessionState::Working);
+    }
+
+    #[tokio::test]
+    async fn prompts_queued_for_a_turn_that_ends_first_start_the_next_one_together() {
+        let (dir, _) = git_project();
+        let mut session = controller(&dir, "a");
+        let mut harness = RunningHarness::default();
+        for line in ["go", "one", "two"] {
+            let _ = harness
+                .in_session(&mut session, &mut NoOtherSessions)
+                .submit(line);
+        }
+
+        let next = harness
+            .in_session(&mut session, &mut NoOtherSessions)
+            .report(&ended(TurnEnd::Finished));
+
+        assert_eq!(next, Some(Outcome::TurnStarted("one\n\ntwo".into())));
+        assert_eq!(session.state(), SessionState::Working);
+        let after = harness
+            .in_session(&mut session, &mut NoOtherSessions)
+            .report(&ended(TurnEnd::Finished));
+        assert_eq!(after, None);
+        assert_eq!(session.state(), SessionState::Idle);
+    }
+
+    #[tokio::test]
+    async fn interrupting_a_turn_gives_back_what_was_queued_for_it() {
+        let (dir, _) = git_project();
+        let mut session = controller(&dir, "a");
+        let mut harness = RunningHarness::default();
+        for line in ["go", "more"] {
+            let _ = harness
+                .in_session(&mut session, &mut NoOtherSessions)
+                .submit(line);
+        }
+
+        let interrupted = harness
+            .in_session(&mut session, &mut NoOtherSessions)
+            .interrupt();
+        assert_eq!(interrupted, Some(Outcome::Withdrawn("more".into())));
+
+        let cancelled = harness
+            .in_session(&mut session, &mut NoOtherSessions)
+            .report(&ended(TurnEnd::Cancelled));
+        assert_eq!(cancelled, None);
+        assert_eq!(session.state(), SessionState::Idle);
+    }
+
+    #[tokio::test]
+    async fn a_turn_that_ends_during_a_drain_gives_back_what_was_queued_for_it() {
+        let (dir, _) = git_project();
+        let (mut working, mut idle) = (controller(&dir, "a"), controller(&dir, "b"));
+        let mut harness = RunningHarness::default();
+        for line in ["go", "more"] {
+            let _ = harness
+                .in_session(&mut working, &mut NoOtherSessions)
+                .submit(line);
+        }
+        let _ = harness
+            .in_session(&mut idle, &mut working)
+            .submit("/rebuild");
+
+        let ended = harness
+            .in_session(&mut working, &mut idle)
+            .report(&ended(TurnEnd::Finished));
+
+        assert_eq!(ended, Some(Outcome::Withdrawn("more".into())));
+        assert_eq!(working.state(), SessionState::Idle);
     }
 
     #[tokio::test]

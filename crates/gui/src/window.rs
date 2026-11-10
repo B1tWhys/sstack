@@ -61,6 +61,13 @@ const PILL_TEXT: f32 = 14.0;
 /// How round the pill's corners are, in logical pixels: enough to round its ends fully.
 const PILL_RADIUS: f32 = 999.0;
 
+/// What the person is told when what they sent waits for the running Turn.
+const QUEUED: &str =
+    "queued: the agent reads it after its current Step, and Interrupt gives it back";
+
+/// What the person is told when Queued Prompts come back to the prompt unsent.
+const WITHDRAWN: &str = "not sent: what you queued is back in the prompt";
+
 /// How often the sidebar redraws how long each Session has waited.
 const TICK: Duration = Duration::from_secs(1);
 
@@ -566,6 +573,15 @@ impl Window {
         match outcome {
             Some(Outcome::TurnStarted(text)) => {
                 self.views[index].turn_started(&text);
+                self.follow(index == self.shown)
+            }
+            Some(Outcome::Queued) => {
+                self.views[index].notice(QUEUED.to_owned());
+                self.follow(index == self.shown)
+            }
+            Some(Outcome::Withdrawn(text)) => {
+                self.views[index].give_back(&text);
+                self.views[index].notice(WITHDRAWN.to_owned());
                 self.follow(index == self.shown)
             }
             Some(Outcome::Refused(refusal)) => self.notice(refusal_text(&refusal)),

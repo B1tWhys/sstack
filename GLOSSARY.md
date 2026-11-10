@@ -92,6 +92,10 @@ _Avoid_: Jail, container (when the Sandbox is meant)
 Text a person has typed but not submitted, along with where its cursor is.
 _Avoid_: Buffer, pending input
 
+**Queued Prompt**:
+A prompt the person sent while a Turn was running, which waits for the agent to take it at the end of the current Step, or to start the next Turn on it if that Turn ends first.
+_Avoid_: Pending message, interjection, steering
+
 **Vim Input**:
 Typing into a real nvim that runs behind the Harness, as opposed to the plain prompt. The nvim does all the editing, and the Harness only passes keys in and draws what comes back.
 _Avoid_: Vim mode, vim emulation

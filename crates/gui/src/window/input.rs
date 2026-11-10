@@ -1,5 +1,7 @@
 //! The one place in a Session where the person types, however they have chosen to.
 
+use std::sync::Arc;
+
 use iced::Size;
 use iced::widget::text_editor::{self, Cursor, Position};
 use sstack::vim::{Draft, VimEvent};
@@ -87,6 +89,17 @@ impl Input {
         match self {
             Self::Plain(_) => *self = Self::Plain(typed),
             Self::Vim(vim) => vim.paste(&typed.text()),
+        }
+    }
+
+    /// Puts `text`, Queued Prompts that were never sent, back at the cursor, so that the person
+    /// can change and send it again.
+    pub fn give_back(&mut self, text: &str) {
+        match self {
+            Self::Plain(content) => content.perform(text_editor::Action::Edit(
+                text_editor::Edit::Paste(Arc::new(text.to_owned())),
+            )),
+            Self::Vim(vim) => vim.paste(text),
         }
     }
 

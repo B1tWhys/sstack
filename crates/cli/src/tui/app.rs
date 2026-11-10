@@ -33,8 +33,12 @@ use super::pane::{Opened, Pane};
 use super::theme::ColorDepth;
 use sstack::session_setup::{Place, Start};
 
-/// The reason given to the person when their input is not acted on.
+/// The reason given to the person when a Session cannot be put away during a Turn.
 const BUSY: &str = "a Turn is running: wait for it to end, or press Alt-C to cancel it";
+/// What the person is told when what they sent waits for the running Turn.
+const QUEUED: &str = "queued: the agent reads it after its current Step, and Alt-C gives it back";
+/// What the person is told when Queued Prompts come back to the Draft unsent.
+const WITHDRAWN: &str = "not sent: what you queued is back in the prompt";
 /// The reason given to the person when nothing new starts.
 const DRAINING: &str = "the harness is stopping: press Alt-C to stay";
 /// The reason given to the person when Alt-C does not quit.
@@ -260,6 +264,11 @@ impl App<'_> {
     fn carry_out(&mut self, index: usize, outcome: Outcome<'_>) -> Option<Exit> {
         match outcome {
             Outcome::TurnStarted(text) => self.panes[index].turn_started(&text),
+            Outcome::Queued => self.panes[index].notice(QUEUED),
+            Outcome::Withdrawn(text) => {
+                self.panes[index].give_back(text);
+                self.panes[index].notice(WITHDRAWN);
+            }
             Outcome::Refused(refusal) => self.notice(refusal_text(&refusal)),
             Outcome::Command(command) => self.command(&command),
             Outcome::StartBuild(checkout) => {
@@ -1163,7 +1172,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn while_a_turn_runs_ctrl_c_cancels_it_and_new_turns_wait() {
+    async fn while_a_turn_runs_ctrl_c_cancels_it_and_gives_back_what_was_queued() {
         let mut h = harness(Arc::new(NeverResponds));
         h.enter("go");
         h.until(|event| matches!(event, Event::Report(SessionReport::TurnStarted(_))))
@@ -1171,14 +1180,36 @@ mod tests {
         assert!(h.screen().contains("working"));
 
         assert_eq!(h.enter("again"), None);
-        assert!(h.screen().contains("a Turn is running"));
+        assert!(h.screen().contains("queued"));
 
         assert_eq!(h.app.handle(Event::Key(alt('c'))), None);
         h.until_turn_ends().await;
-        assert!(h.screen().contains("[cancelled]"));
+        let screen = h.screen_of(WIDE);
+        assert!(screen.contains("[cancelled]"), "{screen}");
+        assert!(screen.contains("> again"), "{screen}");
         assert_eq!(h.session().last(), Some(&Entry::TurnCancelled));
 
         assert_eq!(h.app.handle(Event::Key(alt('c'))), Some(Exit::Quit));
+    }
+
+    #[tokio::test]
+    async fn a_prompt_sent_during_a_step_reaches_the_model_after_it() {
+        let (mut h, gate) = gated(vec![Ok(read_call()), Ok(reply("all done"))]);
+        h.enter("go");
+        h.until(|event| matches!(event, Event::Report(SessionReport::TurnStarted(_))))
+            .await;
+
+        assert_eq!(h.enter("also this"), None);
+        gate.add_permits(2);
+        h.until_turn_ends().await;
+
+        let queued = Entry::User {
+            text: "also this".into(),
+        };
+        assert_eq!(h.session()[3], queued);
+        let screen = h.screen_of(WIDE);
+        assert!(screen.contains("also this"), "{screen}");
+        assert!(screen.contains("all done"), "{screen}");
     }
 
     #[tokio::test]

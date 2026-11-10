@@ -186,6 +186,7 @@ impl Transcript {
             AgentEvent::ToolFinished { is_error, .. } => {
                 return *is_error && self.last_tool_failed();
             }
+            AgentEvent::Admitted(text) => self.prompt(text.clone()),
             AgentEvent::ContextNearLimit { used, limit } => {
                 self.notice(format!(
                     "the context window is {used} of {limit} tokens full, so start a new \

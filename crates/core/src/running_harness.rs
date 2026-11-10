@@ -315,6 +315,14 @@ pub enum Outcome<'a> {
     /// A Turn started in the focused Session on this text. The interface can use it at once, for
     /// instance to name the Session, before the Turn itself reports.
     TurnStarted(String),
+    /// The prompt became a Queued Prompt, because a Turn is running in the focused Session. The
+    /// Turn takes it at the end of its current Step, or the next Turn starts on it if this one
+    /// ends first, which then comes back as [`Outcome::TurnStarted`].
+    Queued,
+    /// Queued Prompts that will not be sent, joined into this text, which the interface puts
+    /// back into the focused Session's Draft so that nothing typed is lost. They come back when
+    /// the person interrupts the Turn they were queued for, or when it ends during a drain.
+    Withdrawn(String),
     /// Nothing happened, for this reason, which the interface tells the person in its own words.
     Refused(Refusal),
     /// A Human Command that only the interface can carry out, because it is about how the
@@ -334,7 +342,7 @@ pub enum Outcome<'a> {
 /// Why the [`RunningHarness`] did not do what the person asked.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Refusal {
-    /// A Turn is running in the Session, and it runs one Turn at a time.
+    /// A Turn is running in the Session, which has to end first.
     Busy,
     /// The Running Harness is on its way out, so nothing new starts.
     Draining,
@@ -478,10 +486,24 @@ impl InSession<'_> {
         if self.harness.phase.is_rebuilding() {
             self.sessions.focus.defer_approval();
         }
-        if matches!(report, SessionReport::TurnEnded(_)) && !self.harness.phase.is_draining() {
-            self.sessions.focus.continue_parked();
+        let next = if matches!(report, SessionReport::TurnEnded(_)) {
+            self.turn_ended()
+        } else {
+            None
+        };
+        self.harness.settle(&mut self.sessions).or(next)
+    }
+
+    /// Carries on after the Session's Turn ended: a parked Turn carries on, or else the next Turn
+    /// starts on any prompts the ended one never took. During a drain nothing new starts, so
+    /// those prompts come back as [`Outcome::Withdrawn`] instead.
+    fn turn_ended(&mut self) -> Option<Outcome<'static>> {
+        let focus = &mut *self.sessions.focus;
+        if self.harness.phase.is_draining() {
+            return focus.take_queued().map(Outcome::Withdrawn);
         }
-        self.harness.settle(&mut self.sessions)
+        focus.continue_parked();
+        focus.start_queued()
     }
 
     /// Acts on the person's request to interrupt while looking at the Session. During a drain
@@ -495,7 +517,7 @@ impl InSession<'_> {
         match interrupt(focus.state(), any_in_turn(others)) {
             Interrupt::CancelTurn => {
                 focus.cancel();
-                None
+                focus.take_queued().map(Outcome::Withdrawn)
             }
             Interrupt::Quit => Some(Outcome::Exit(Exit::Quit)),
             Interrupt::RefuseToQuit => Some(Outcome::Refused(Refusal::OthersWorking)),

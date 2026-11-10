@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::agent::{Agent, TurnContext, TurnEnd};
+use crate::queued_prompts::QueuedPrompts;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -22,6 +23,9 @@ pub struct AgentHandle {
     cancel: CancellationToken,
     /// Whether every Turn should stop at the end of its Step.
     pause: Arc<AtomicBool>,
+    /// The prompts the person sent while a Turn was running, which that Turn takes at the end of
+    /// its Step.
+    queued: QueuedPrompts,
 }
 
 /// What a queued Turn does.
@@ -40,6 +44,8 @@ struct Prompt {
     cancel: CancellationToken,
     /// Whether this Turn should stop at the end of its Step.
     pause: Arc<AtomicBool>,
+    /// The prompts this Turn takes at the end of each Step.
+    queued: QueuedPrompts,
 }
 
 impl AgentHandle {
@@ -55,12 +61,26 @@ impl AgentHandle {
             prompts,
             cancel: CancellationToken::new(),
             pause: Arc::default(),
+            queued: QueuedPrompts::default(),
         }
     }
 
     /// Starts a Turn on `text`, after any Turn that is already running.
     pub fn prompt(&mut self, text: String) {
         self.queue(Work::Start(text));
+    }
+
+    /// Queues `text` for the running Turn, which takes it at the end of its current Step. If the
+    /// Turn ends first, [`Self::take_queued`] gets it back to start the next one.
+    pub fn queue_prompt(&self, text: String) {
+        self.queued.push(text);
+    }
+
+    /// Takes every prompt [`Self::queue_prompt`] queued that no Turn has taken yet, joined into
+    /// one message, or returns `None` if there are none.
+    #[must_use]
+    pub fn take_queued(&self) -> Option<String> {
+        self.queued.take()
     }
 
     /// Carries on the Turn that paused, after any Turn that is already running.
@@ -75,6 +95,7 @@ impl AgentHandle {
             work,
             cancel: self.cancel.clone(),
             pause: self.pause.clone(),
+            queued: self.queued.clone(),
         });
     }
 
@@ -117,6 +138,7 @@ async fn run_turn(
     let mut context = TurnContext {
         cancel: &prompt.cancel,
         pause: &prompt.pause,
+        queued: &prompt.queued,
         on_event: &mut forward,
     };
     let ended = match &prompt.work {
