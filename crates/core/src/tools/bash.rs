@@ -132,8 +132,9 @@ impl Tool for Bash {
             description: "Run a bash command in the project root. It runs in a sandbox: a \
                 container that sees only the project, has no network and cannot see .git or \
                 .env files, so git does not work on the project there. It has coreutils, grep, \
-                sed, awk, find, rg, fd, jq, python3, patch, file, tree, xxd, bc, less, git, gcc \
-                and cargo, with stable and nightly Rust. Cargo is offline and uses the crates \
+                sed, awk, find, rg, fd, jq, python3, patch, file, tree, xxd, bc, less, git, \
+                nvim, gcc and cargo, with stable and nightly Rust and cargo's nextest, llvm-cov, \
+                insta and crap4rust subcommands. Cargo is offline and uses the crates \
                 the host has downloaded; if one is missing, run `cargo fetch` unsandboxed. \
                 Cargo builds into /target inside the sandbox, not the project's target \
                 directory, and that build is lost when the sandbox restarts. Shell pipelines \

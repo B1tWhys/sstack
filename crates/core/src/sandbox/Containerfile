@@ -1,8 +1,8 @@
 FROM ubuntu:latest
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        bc build-essential ca-certificates curl file fd-find git jq less patch pkg-config \
-        python3 ripgrep tree xxd \
+        bc build-essential ca-certificates curl file fd-find git jq less neovim patch \
+        pkg-config python3 ripgrep tree xxd \
     && rm -rf /var/lib/apt/lists/* \
     && ln -s /usr/bin/fdfind /usr/local/bin/fd
 
@@ -15,6 +15,15 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
     && CARGO_HOME=/usr/local/cargo rustup toolchain install nightly --profile minimal \
         --component clippy,rustfmt,llvm-tools \
     && chmod -R a+rX /usr/local/rustup /usr/local/cargo
+
+# The cargo subcommands the project's checks run, as prebuilt binaries where they have them.
+RUN curl -L --proto '=https' --tlsv1.2 -sSf \
+        https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh \
+        | CARGO_HOME=/usr/local/cargo bash \
+    && CARGO_HOME=/usr/local/cargo cargo binstall -y --locked \
+        cargo-nextest cargo-llvm-cov cargo-insta cargo-crap4rust \
+    && rm -rf /usr/local/cargo/registry /usr/local/cargo/git \
+    && chmod -R a+rX /usr/local/cargo
 
 # The Harness mounts the host's crate downloads read-only at /cargo/registry and /cargo/git,
 # so cargo never needs the network. Builds go to /target, not the Workspace's own target

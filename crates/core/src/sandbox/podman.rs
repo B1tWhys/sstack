@@ -76,7 +76,10 @@ async fn protected_paths_and_the_network_are_out_of_reach() {
 async fn the_image_has_the_tools_the_model_is_told_about() {
     let (_dir, root) = workspace();
     let sandbox = sandbox(&root);
-    let tools = "rg fd jq python3 patch file tree xxd bc less git cc cargo rustc";
+    let tools = concat!(
+        "rg fd jq python3 patch file tree xxd bc less git nvim cc cargo rustc ",
+        "cargo-nextest cargo-llvm-cov cargo-insta cargo-crap4rust"
+    );
     let missing = run(
         &sandbox,
         &format!("for t in {tools}; do command -v $t >/dev/null || echo $t; done"),
