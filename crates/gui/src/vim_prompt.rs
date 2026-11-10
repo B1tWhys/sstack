@@ -8,11 +8,12 @@ use iced::advanced::text::{Paragraph as _, Text};
 use iced::keyboard::{self, Key, Modifiers, key::Named};
 use iced::widget::text::{Alignment, LineHeight, Shaping, Span, Wrapping};
 use iced::widget::{column, container, pin, rich_text, row, sensor, space, span, stack, text};
-use iced::{Color, Element, Fill, Font, Pixels, Point, Size, Subscription, Theme, alignment};
+use iced::{Element, Fill, Font, Pixels, Point, Size, Subscription, Theme, alignment};
 use sstack::vim::layout::{Wrapped, wrap_to};
 use sstack::vim::{Draft, Vim, VimEvent, VimMode, VimState};
 
 use crate::inbox::Inbox;
+use crate::theme::{self, HIGHLIGHT};
 use crate::window::Message;
 
 /// The size of the prompt's text, in logical pixels.
@@ -31,14 +32,8 @@ const GUTTER: usize = MARKER.len();
 /// Space between the edge of the prompt's box and the text, in logical pixels.
 const PADDING: f32 = 6.0;
 
-/// How round the corners of the prompt's box are, in logical pixels.
-const CORNER_RADIUS: f32 = 4.0;
-
 /// How thick the Insert mode bar and the Replace mode underline are, in logical pixels.
 const CURSOR_LINE: f32 = 2.0;
-
-/// The color of the cursor and of selected text, which reads on light and dark backgrounds alike.
-const HIGHLIGHT: Color = Color::from_rgb(0.3, 0.5, 1.0);
 
 /// How opaque the block cursor is, so that the character under it stays readable.
 const BLOCK_ALPHA: f32 = 0.5;
@@ -244,7 +239,7 @@ impl VimPrompt {
         container(measured)
             .width(Fill)
             .padding(PADDING)
-            .style(boxed)
+            .style(theme::panel)
             .into()
     }
 
@@ -363,16 +358,6 @@ fn cells(count: usize) -> f32 {
 /// Converts a count to grid units, saturating rather than wrapping when it is too big.
 fn to_u16(count: usize) -> u16 {
     u16::try_from(count).unwrap_or(u16::MAX)
-}
-
-/// Returns the style of the box around the prompt, a shade off the window's background so that
-/// the prompt stands apart from the transcript.
-fn boxed(theme: &Theme) -> container::Style {
-    let shade = theme.extended_palette().background.weaker;
-    container::Style::default()
-        .background(shade.color)
-        .color(shade.text)
-        .border(iced::Border::default().rounded(CORNER_RADIUS))
 }
 
 /// Returns the style of something in the highlight color at `alpha` opacity, such as the cursor.
@@ -676,7 +661,7 @@ mod tests {
     fn draws(prompt: &VimPrompt, text: &str) -> bool {
         let mut ui = iced_test::simulator(prompt.view());
         if let Some(directory) = std::env::var_os("SSTACK_GUI_PICTURES") {
-            let snapshot = ui.snapshot(&Theme::Light).unwrap();
+            let snapshot = ui.snapshot(&theme::theme()).unwrap();
             let name = format!("{text}-{}", prompt.state.text).replace(['\n', ' ', ':'], "_");
             let path = std::path::Path::new(&directory).join(name);
             let _ = snapshot.matches_image(path).unwrap();

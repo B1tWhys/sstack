@@ -9,6 +9,7 @@ mod inbox;
 mod reports;
 #[cfg(test)]
 mod test_support;
+mod theme;
 mod transcript;
 mod vim_prompt;
 mod window;
@@ -109,6 +110,7 @@ fn application(ready: Ready) -> Application<impl Program<State = Window, Message
     let unopened = Cell::new(Some(ready));
     iced::application(move || open(&unopened), Window::update, Window::view)
         .title(Window::title)
+        .theme(theme::theme())
         .subscription(Window::subscription)
         .font(lucide_icons::LUCIDE_FONT_BYTES)
         .exit_on_close_request(false)

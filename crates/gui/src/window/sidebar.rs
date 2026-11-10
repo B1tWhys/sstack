@@ -11,6 +11,7 @@ use lucide_icons::Icon;
 
 use super::{Message, SPACING};
 use crate::hint::hint;
+use crate::theme;
 
 /// How wide the sidebar is, in logical pixels.
 const WIDTH: f32 = 260.0;
@@ -105,7 +106,7 @@ impl Row {
         let style = match (on_screen, self.activity) {
             (true, _) => button::primary,
             (false, Activity::Blocked | Activity::Failed) => button::danger,
-            (false, _) => button::secondary,
+            (false, _) => theme::quiet,
         };
         button(label)
             .style(style)

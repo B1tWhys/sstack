@@ -11,18 +11,27 @@ mod reply;
 
 use std::collections::HashMap;
 
-use iced::widget::{button, column, row, text};
-use iced::{Element, Font};
+use iced::widget::{button, column, container, row, text};
+use iced::{Element, Fill, Font};
 use sstack::agent::{AgentEvent, ToolCallSummary, TurnEnd};
 use sstack::session::{AssistantEntry, Entry};
 use sstack::session_report::{ApprovalRequest, SessionReport};
 
 use crate::asked::{Asked, Asking, Controls};
+use crate::theme;
 
 pub use self::reply::Reply;
 
-/// Space between the parts of the transcript, in logical pixels.
+/// Space between the parts of the transcript, and around what the person said inside its panel,
+/// in logical pixels.
 const SPACING: f32 = 10.0;
+
+/// The size of the model's answers, in logical pixels, which is iced's default text size.
+const TEXT_SIZE: f32 = 16.0;
+
+/// The size of text that matters less than the answers around it, such as what the model thought,
+/// in logical pixels.
+const ASIDE_SIZE: f32 = 14.0;
 
 /// The Session as it unfolds in the window: what the Session held when it opened, what the
 /// person sent, what the model thought and replied, the tools it called and the questions about
@@ -167,14 +176,35 @@ impl Transcript {
     }
 
     /// Draws the transcript, one block under another, with the model's replies formatted as
-    /// Markdown. What the person presses in it sends what `handlers` says.
+    /// Markdown. What the person said stands in a panel, and what the model thought or said on its
+    /// way to an answer is smaller and muted, so that its answers stand out. What the person
+    /// presses in it sends what `handlers` says.
     pub fn view<'a, Message: Clone + 'a>(
         &'a self,
         handlers: &Handlers<Message>,
     ) -> Element<'a, Message> {
-        column(self.blocks.iter().map(|block| block.view(handlers)))
-            .spacing(SPACING)
-            .into()
+        let drawn = self
+            .blocks
+            .iter()
+            .enumerate()
+            .map(|(index, block)| match block {
+                Block::Reply(reply) if self.interim(index) => reply.aside(handlers.open),
+                _ => block.view(handlers),
+            });
+        column(drawn).spacing(SPACING).into()
+    }
+
+    /// Returns whether the reply at `index` was said on the way to an answer rather than being
+    /// one, because the model called a tool after it in the same Step. A reply still arriving
+    /// counts as an answer until a tool call starts.
+    pub fn interim(&self, index: usize) -> bool {
+        let after = self.blocks.get(index + 1..).unwrap_or_default();
+        // Thinking and notices can come between a Step's reply and its tool calls, or between
+        // Steps, so they say nothing either way.
+        let next = after
+            .iter()
+            .find(|block| !matches!(block, Block::Reasoning(_) | Block::Notice(_)));
+        matches!(next, Some(Block::Tool { .. }))
     }
 
     /// Shows something that happened during a Turn, returning whether the transcript changed.
@@ -353,17 +383,22 @@ impl Transcript {
 }
 
 impl Block {
-    /// Draws this part of the transcript: a reply formatted as Markdown, and everything else as
-    /// plain text, with a label for any kind of block that could be mistaken for the reply. What
-    /// the person presses in it sends what `handlers` says.
+    /// Draws this part of the transcript: a reply as an answer formatted as Markdown, what the
+    /// person said in a panel, thinking muted, and everything else as plain text, with a label for
+    /// any kind of block that could be mistaken for a reply. What the person presses in it sends
+    /// what `handlers` says.
     fn view<'a, Message: Clone + 'a>(
         &'a self,
         handlers: &Handlers<Message>,
     ) -> Element<'a, Message> {
         match self {
-            Self::Prompt(prompt) => text(format!("> {prompt}")).into(),
+            Self::Prompt(prompt) => container(text(prompt))
+                .padding(SPACING)
+                .width(Fill)
+                .style(theme::panel)
+                .into(),
             Self::Reply(reply) => reply.view(handlers.open),
-            Self::Reasoning(thought) => text(format!("Thinking: {thought}")).into(),
+            Self::Reasoning(thought) => aside(format!("Thinking: {thought}")),
             Self::Tool {
                 call,
                 failed,
@@ -413,6 +448,11 @@ impl Decision {
     }
 }
 
+/// Draws `words` as an aside, smaller and dimmer than the answers around it.
+fn aside<'a, Message: 'a>(words: impl text::IntoFragment<'a>) -> Element<'a, Message> {
+    text(words).size(ASIDE_SIZE).style(theme::muted).into()
+}
+
 /// Draws a tool call as its summary `line`, wrapped to fit, with the question about it in full
 /// below while it is open. Pressing Allow or Deny sends what `answer` makes of whether the command
 /// may run.
@@ -460,5 +500,74 @@ fn turn_end_text(end: TurnEnd) -> Option<&'static str> {
         TurnEnd::Refused => Some("the model declined this request"),
         TurnEnd::Cancelled => Some("the Turn was cancelled"),
         TurnEnd::Paused => Some("the Turn paused until sstack runs again"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use sstack::agent::AgentEvent;
+    use sstack::session::AssistantEntry;
+
+    use super::*;
+    use crate::test_support::{bash_call, reply};
+
+    /// Returns, for each reply in `transcript` in order, whether it was said on the way to an
+    /// answer.
+    fn interim_replies(transcript: &Transcript) -> Vec<bool> {
+        let blocks = transcript.blocks();
+        (0..blocks.len())
+            .filter(|index| matches!(blocks[*index], Block::Reply(_)))
+            .map(|index| transcript.interim(index))
+            .collect()
+    }
+
+    /// Shows `events` in `transcript` as they happen during a Turn.
+    fn happened(transcript: &mut Transcript, events: impl IntoIterator<Item = AgentEvent>) {
+        for event in events {
+            transcript.report(&SessionReport::Agent(event));
+        }
+    }
+
+    #[test]
+    fn a_reply_followed_by_a_tool_call_is_interim_and_the_last_reply_is_the_answer() {
+        let mut transcript = Transcript::default();
+        transcript.prompt("look".into());
+        let read = ToolCallSummary {
+            name: "read".into(),
+            input: "{}".into(),
+        };
+        happened(
+            &mut transcript,
+            [
+                AgentEvent::Text("Looking.".into()),
+                AgentEvent::ToolStarted(read),
+                AgentEvent::ToolFinished {
+                    name: "read".into(),
+                    is_error: false,
+                },
+                AgentEvent::Reasoning("found".into()),
+                AgentEvent::Text("Found it.".into()),
+            ],
+        );
+        assert_eq!(interim_replies(&transcript), [true, false]);
+    }
+
+    #[test]
+    fn an_answer_stays_one_when_the_next_turn_starts_with_a_tool_call() {
+        let looking = AssistantEntry {
+            text: "Looking again.".into(),
+            ..bash_call("ls")
+        };
+        let held = [
+            Entry::User { text: "one".into() },
+            Entry::Assistant(reply("Done.")),
+            Entry::User { text: "two".into() },
+            Entry::Assistant(bash_call("ls")),
+            Entry::Assistant(looking),
+            Entry::Assistant(reply("Still done.")),
+        ];
+        let mut transcript = Transcript::default();
+        transcript.report(&SessionReport::Resumed(held.to_vec()));
+        assert_eq!(interim_replies(&transcript), [false, true, false]);
     }
 }

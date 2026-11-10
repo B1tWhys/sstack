@@ -478,7 +478,7 @@ async fn the_window_shows_the_transcript_and_the_prompt() {
     let mut ui = simulator(window.view());
 
     // The reply is drawn as Markdown, which tests cannot find, so only the prompt is looked for.
-    for shown in ["> hello", "Send"] {
+    for shown in ["hello", "Send"] {
         assert!(ui.find(shown).is_ok(), "{shown} should be shown");
     }
     assert!(ui.find(iced::widget::Id::new(PROMPT)).is_ok());

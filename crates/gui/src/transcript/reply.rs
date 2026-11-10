@@ -2,9 +2,12 @@
 
 use std::fmt;
 
-use iced::Element;
 use iced::theme::Palette;
-use iced::widget::markdown;
+use iced::widget::{container, markdown};
+use iced::{Element, Pixels};
+
+use super::{ASIDE_SIZE, TEXT_SIZE};
+use crate::theme;
 
 /// The model's reply in one Step, as much of it as has arrived, drawn with its Markdown
 /// formatting rather than as the marks that ask for it. Images show as their alternative text.
@@ -27,7 +30,25 @@ impl Reply {
 
     /// Draws the reply. Clicking a link sends what `open` makes of its address.
     pub fn view<'a, Message: 'a>(&'a self, open: fn(String) -> Message) -> Element<'a, Message> {
-        let settings = markdown::Settings::with_style(style());
+        self.drawn(Pixels(TEXT_SIZE), open)
+    }
+
+    /// Draws the reply as an aside, smaller and dimmer than an answer, for a reply the model gave
+    /// on its way to one. Clicking a link sends what `open` makes of its address.
+    pub fn aside<'a, Message: 'a>(&'a self, open: fn(String) -> Message) -> Element<'a, Message> {
+        container(self.drawn(Pixels(ASIDE_SIZE), open))
+            .style(theme::faded)
+            .into()
+    }
+
+    /// Draws the reply with body text `size` big, and headings in proportion. Clicking a link
+    /// sends what `open` makes of its address.
+    fn drawn<'a, Message: 'a>(
+        &'a self,
+        size: Pixels,
+        open: fn(String) -> Message,
+    ) -> Element<'a, Message> {
+        let settings = markdown::Settings::with_text_size(size, style());
         markdown::view(self.markdown.items(), settings).map(open)
     }
 }
@@ -55,8 +76,9 @@ impl fmt::Debug for Reply {
     }
 }
 
-/// Returns how replies are drawn. The palette only gives the color of links, which is the same
-/// in the light and the dark theme the window may follow.
+/// Returns how replies are drawn. The palette only gives the color of links, which take the blue
+/// of iced's light palette so they stand out from the text around them. The window's own main
+/// color is too dark to read as text on its background.
 fn style() -> markdown::Style {
     markdown::Style::from_palette(Palette::LIGHT)
 }
