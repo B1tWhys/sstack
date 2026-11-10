@@ -20,7 +20,7 @@ use crate::session::{Entry, SessionError, SessionLog};
 use crate::session_name::Naming;
 use crate::skills::{self, Skill};
 use crate::tools::project::Project;
-use crate::tools::{Approver, Land, ToolBox};
+use crate::tools::{Approver, Land, SessionInfo, ToolBox};
 use crate::workspace::{self, SessionSummary, SkillListing};
 use crate::worktree;
 
@@ -388,6 +388,11 @@ fn agent_config(
         .approver(approver.clone())
         .secret_env(secret_env.clone())
         .call()
+        .with_session_info(SessionInfo {
+            session_id: id.to_owned(),
+            model: backend.model.clone(),
+            effort: Some(connection.effort),
+        })
         .with_skills(offered_skills(skills))
         .with_asker(asker);
     let home = dirs::home_dir();

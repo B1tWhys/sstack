@@ -11,6 +11,8 @@ mod land;
 pub mod project;
 /// The tool that finds files and text.
 mod search;
+/// The tool that tells the model about the Session it is in.
+mod session_info;
 /// The tool that hands the model a Skill's instructions.
 mod skill;
 
@@ -28,6 +30,7 @@ use crate::session::ToolCall;
 use crate::skills::Skill;
 pub use land::Land;
 use project::Project;
+pub use session_info::SessionInfo;
 
 /// Someone who decides whether the model may run a command on the host, outside the Sandbox.
 #[async_trait]
@@ -145,6 +148,15 @@ impl ToolBox {
     #[must_use]
     pub fn with_land(mut self, land: Land) -> Self {
         self.tools.push(Box::new(land));
+        self
+    }
+
+    /// Adds the ability to learn `info` about the Session, so that the model can record in its
+    /// commits which Session made them and with which model.
+    #[must_use]
+    pub fn with_session_info(mut self, info: SessionInfo) -> Self {
+        self.tools
+            .push(Box::new(session_info::ShowSessionInfo::new(info)));
         self
     }
 
@@ -318,6 +330,26 @@ mod tests {
             .call();
         let names: Vec<_> = tools.specs().into_iter().map(|spec| spec.name).collect();
         assert_eq!(names, ["read", "write", "edit", "search", "bash"]);
+    }
+
+    #[tokio::test]
+    async fn offers_the_session_info_when_given_some() {
+        let (_dir, project) = git_project();
+        let tools = ToolBox::standard()
+            .project(project)
+            .sandbox(disabled())
+            .approver(Arc::new(DenyAll))
+            .call();
+        assert!(!tools.specs().iter().any(|spec| spec.name == "session_info"));
+
+        let tools = tools.with_session_info(SessionInfo {
+            session_id: "42".into(),
+            model: "m".into(),
+            effort: None,
+        });
+        let output = tools.run(&call("session_info", json!({}))).await.unwrap();
+
+        assert_eq!(output.text, r#"{"session_id":"42","model":"m"}"#);
     }
 
     #[test]

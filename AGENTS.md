@@ -22,6 +22,7 @@ TUI tests check what is drawn with insta snapshots, kept in a `snapshots` direct
 
 - All tech choices must support macOS and Linux. Only macOS is tested for now.
 - Commit after each working change, using conventional commits. In a Session with its own worktree, then call the `land` tool; otherwise commit to `main`.
+- End each commit message with trailers from the `session_info` tool: `session-id: <session_id>`, `model: <model>`, and `effort: <effort>` when the tool reports an effort. They tell a later reader which Session made the commit, so its log can be found, and with which model. Where the Running Harness offers no `session_info` tool, leave the trailers out. That is why no hook checks for them.
 - Never push without asking.
 - Write doc comments on every item, private ones and fields included. They will be parsed later, so this overrides any general advice to keep comments minimal. Lints enforce it. Before writing or changing one, read `.agents/skills/writing-docs/SKILL.md`.
 - Never bypass the hooks. Every function must have a CRAP score of 6 or less.

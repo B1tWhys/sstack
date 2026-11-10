@@ -4,13 +4,13 @@ pub mod anthropic;
 pub mod scripted;
 
 use async_trait::async_trait;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::session::{AssistantEntry, Entry};
 
 /// How much effort a model should spend on a response.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Effort {
     /// The least effort, for simple work.
