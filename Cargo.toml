@@ -13,3 +13,9 @@ missing_docs = "deny"
 all = { level = "deny", priority = -1 }
 pedantic = { level = "deny", priority = -1 }
 missing_docs_in_private_items = "deny"
+
+# Unoptimized, cosmic-text and swash take seconds to shape a long transcript, which stalls the GUI
+# on each Session switch. A Rebuild makes a dev build, so dev builds optimize every dependency.
+# The workspace's own crates stay at opt-level 0 and still build fast.
+[profile.dev.package."*"]
+opt-level = 3
