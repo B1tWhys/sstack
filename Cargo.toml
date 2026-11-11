@@ -14,8 +14,40 @@ all = { level = "deny", priority = -1 }
 pedantic = { level = "deny", priority = -1 }
 missing_docs_in_private_items = "deny"
 
-# Unoptimized, cosmic-text and swash take seconds to shape a long transcript, which stalls the GUI
-# on each Session switch. A Rebuild makes a dev build, so dev builds optimize every dependency.
-# The workspace's own crates stay at opt-level 0 and still build fast.
-[profile.dev.package."*"]
-opt-level = 3
+# Unoptimized, cosmic-text and swash take seconds to shape a long transcript, and syntect takes
+# about as long to color its code blocks, which stalls the GUI on each Session switch. A Rebuild
+# makes a dev build, so dev builds optimize the crates that do that work. Every other dependency
+# stays at opt-level 0. Optimizing them all made a cold build in the Sandbox take 7 minutes rather
+# than 1.5, as it also optimized wgpu, the HTTP and D-Bus clients, and every proc macro, which
+# `build-override` cannot exempt. The GUI's transcript lays out as fast with this list as with all
+# of them.
+[profile.dev.package]
+# Shaping, rasterizing and laying out text.
+cosmic-text = { opt-level = 3 }
+font-types = { opt-level = 3 }
+fontdb = { opt-level = 3 }
+harfrust = { opt-level = 3 }
+read-fonts = { opt-level = 3 }
+skrifa = { opt-level = 3 }
+swash = { opt-level = 3 }
+ttf-parser = { opt-level = 3 }
+unicode-bidi = { opt-level = 3 }
+unicode-linebreak = { opt-level = 3 }
+unicode-script = { opt-level = 3 }
+unicode-segmentation = { opt-level = 3 }
+yazi = { opt-level = 3 }
+zeno = { opt-level = 3 }
+# Reading Markdown and coloring code blocks, including loading syntect's compressed syntaxes.
+adler2 = { opt-level = 3 }
+aho-corasick = { opt-level = 3 }
+bincode = { opt-level = 3 }
+crc32fast = { opt-level = 3 }
+fancy-regex = { opt-level = 3 }
+flate2 = { opt-level = 3 }
+memchr = { opt-level = 3 }
+miniz_oxide = { opt-level = 3 }
+pulldown-cmark = { opt-level = 3 }
+regex-automata = { opt-level = 3 }
+regex-syntax = { opt-level = 3 }
+syntect = { opt-level = 3 }
+two-face = { opt-level = 3 }
