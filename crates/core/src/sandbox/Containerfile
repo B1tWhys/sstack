@@ -21,7 +21,7 @@ RUN curl -L --proto '=https' --tlsv1.2 -sSf \
         https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh \
         | CARGO_HOME=/usr/local/cargo bash \
     && CARGO_HOME=/usr/local/cargo cargo binstall -y --locked \
-        cargo-nextest cargo-llvm-cov cargo-insta cargo-crap4rust \
+        cargo-nextest cargo-llvm-cov cargo-insta cargo-crap4rust sccache \
     && rm -rf /usr/local/cargo/registry /usr/local/cargo/git \
     && chmod -R a+rX /usr/local/cargo
 
@@ -32,3 +32,10 @@ RUN curl -L --proto '=https' --tlsv1.2 -sSf \
 RUN mkdir -m 1777 /cargo /target
 ENV CARGO_HOME=/cargo CARGO_TARGET_DIR=/target CARGO_NET_OFFLINE=true \
     CARGO_CACHE_AUTO_CLEAN_FREQUENCY=never
+
+# sccache stores compiled crates in the cache volume the Harness mounts at /sccache, so that a
+# new Sandbox reuses what the project's earlier ones built. The cache is shared only across this
+# project, and only within the runtime; the host's builds never read it.
+RUN mkdir -m 1777 /sccache
+ENV RUSTC_WRAPPER=sccache SCCACHE_DIR=/sccache \
+    SCCACHE_CACHE_SIZE=8G

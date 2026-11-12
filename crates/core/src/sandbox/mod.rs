@@ -27,11 +27,12 @@ use nix::unistd::{Pid, getgid, getuid};
 use sha2::{Digest, Sha256};
 use tokio::sync::{Mutex, OnceCell};
 
-use crate::worktree::DATA_DIR;
+use crate::worktree::{DATA_DIR, main_of};
 #[cfg(test)]
 pub(crate) use runtime::MockContainerRuntime;
 pub use runtime::{
-    ContainerRuntime, ContainerSpec, DockerCli, Inspected, Mask, ReadOnly, RuntimeError,
+    CacheVolume, ContainerRuntime, ContainerSpec, DockerCli, Inspected, Mask, ReadOnly,
+    RuntimeError,
 };
 use runtime::{HARNESS_LABEL, IMAGE_LABEL, SESSION_LABEL};
 
@@ -250,6 +251,19 @@ fn crate_downloads(cargo_home: &Path) -> Vec<ReadOnly> {
         .collect()
 }
 
+/// Returns the name of the volume that holds the build cache for the project `workspace` belongs
+/// to. A Session worktree and the main checkout it came from name the same volume, so the cache
+/// is shared only within one project.
+fn cache_volume(workspace: &Path) -> String {
+    let project = main_of(workspace).unwrap_or(workspace);
+    let digest = Sha256::digest(project.as_os_str().as_encoded_bytes());
+    let mut hex = String::new();
+    for byte in &digest[..6] {
+        let _ = write!(hex, "{byte:02x}");
+    }
+    format!("sstack-cargo-{hex}")
+}
+
 /// Returns the command that runs `script` in the container, stopped after `limit`.
 ///
 /// `timeout` stops the whole process group, so nothing a pipeline started outlives it.
@@ -414,6 +428,10 @@ impl Sandbox {
             workspace: self.workspace.clone(),
             masks: masks(&self.workspace),
             read_only: home::cargo_home().map_or_else(|_| Vec::new(), |h| crate_downloads(&h)),
+            cache_volume: Some(CacheVolume {
+                name: cache_volume(&self.workspace),
+                mount: "/sccache".into(),
+            }),
             labels: labels.map(|(k, v)| (k.to_owned(), v)).to_vec(),
             user: (getuid().as_raw(), getgid().as_raw()),
         }
@@ -487,6 +505,17 @@ mod tests {
     use std::process::ExitStatus;
 
     const LIMIT: Duration = Duration::from_secs(60);
+
+    #[test]
+    fn a_worktree_and_its_main_checkout_share_one_build_cache() {
+        let main = Path::new("/projects/sstack");
+        let worktree = main.join(".sstack/worktrees/7");
+        assert_eq!(cache_volume(main), cache_volume(&worktree));
+        assert_ne!(
+            cache_volume(main),
+            cache_volume(Path::new("/projects/other"))
+        );
+    }
 
     fn finished(code: i32, stdout: &str) -> Output {
         Output {

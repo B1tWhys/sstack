@@ -36,7 +36,7 @@ pub fn path(main: &Path, id: &str) -> PathBuf {
 /// `worktree` is not where a Session's worktree goes. It reads only the path, so it still answers
 /// once the worktree has been deleted.
 #[must_use]
-pub fn main_of(worktree: &Path) -> Option<&Path> {
+pub(crate) fn main_of(worktree: &Path) -> Option<&Path> {
     let worktrees = worktree.parent()?;
     let data = worktrees.parent()?;
     let named = |dir: &Path, name: &str| dir.file_name().is_some_and(|found| found == name);

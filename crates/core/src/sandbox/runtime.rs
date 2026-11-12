@@ -94,6 +94,9 @@ pub struct ContainerSpec {
     pub masks: Vec<Mask>,
     /// Directories of the host's that the container may read but never change.
     pub read_only: Vec<ReadOnly>,
+    /// The named volume that holds the project's shared build cache, mounted where the image
+    /// looks for it, so the cache survives the container.
+    pub cache_volume: Option<CacheVolume>,
     /// Labels identifying the container, as name and value.
     pub labels: Vec<(String, String)>,
     /// The user and group id commands run as, so that files they write belong to the person.
@@ -117,6 +120,16 @@ pub struct ReadOnly {
     pub host: PathBuf,
     /// Where the container sees it.
     pub container: PathBuf,
+}
+
+/// A volume the runtime keeps that a container may read and write, mounted at a path the image
+/// expects, so its contents survive the container.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CacheVolume {
+    /// The volume's name in the runtime, such as `sstack-cargo-abc123`.
+    pub name: String,
+    /// Where the container sees it.
+    pub mount: PathBuf,
 }
 
 /// The program a container waits in, doing nothing but collecting the processes that commands
@@ -213,6 +226,12 @@ fn start_args(program: &str, spec: &ContainerSpec) -> Vec<String> {
     for shared in &spec.read_only {
         let (host, container) = (shared.host.display(), shared.container.display());
         args.extend(["--volume".to_owned(), format!("{host}:{container}:ro")]);
+    }
+    if let Some(cache) = &spec.cache_volume {
+        args.extend([
+            "--volume".to_owned(),
+            format!("{}:{}", cache.name, cache.mount.display()),
+        ]);
     }
     for (name, value) in &spec.labels {
         args.extend(["--label".to_owned(), format!("{name}={value}")]);
@@ -347,6 +366,10 @@ mod tests {
                 host: "/h/.cargo/registry".into(),
                 container: "/cargo/registry".into(),
             }],
+            cache_volume: Some(CacheVolume {
+                name: "sstack-cargo-abc123".into(),
+                mount: "/sccache".into(),
+            }),
             labels: vec![("sstack.session".into(), "7".into())],
             user: (501, 20),
         }
@@ -374,6 +397,12 @@ mod tests {
     fn shared_host_directories_are_mounted_read_only() {
         let args = start_args("docker", &spec()).join(" ");
         assert!(args.contains("--volume /h/.cargo/registry:/cargo/registry:ro"));
+    }
+
+    #[test]
+    fn the_projects_build_cache_volume_is_mounted_read_write() {
+        let args = start_args("docker", &spec()).join(" ");
+        assert!(args.contains("--volume sstack-cargo-abc123:/sccache"));
     }
 
     #[test]
