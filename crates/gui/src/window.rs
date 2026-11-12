@@ -1043,6 +1043,7 @@ fn command_shortcut(key: &keyboard::Key, modifiers: keyboard::Modifiers) -> Opti
         Character("]") => Some(Message::NextSession),
         Character("[") => Some(Message::PreviousSession),
         Character("g") => Some(Message::LongestWaiting),
+        Character("w") => Some(Message::Archive),
         _ => None,
     }
 }

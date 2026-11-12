@@ -480,6 +480,7 @@ fn shortcuts_are_pressed_with_the_command_key() {
         (character("]"), "NextSession"),
         (character("["), "PreviousSession"),
         (character("g"), "LongestWaiting"),
+        (character("w"), "Archive"),
     ];
     for (key, message) in shortcuts {
         let found = command_shortcut(&key, command).map(|m| format!("{m:?}"));
