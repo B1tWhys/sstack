@@ -189,7 +189,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let log = dir.path().join("1.jsonl");
         let mut connections = built_in(log.clone());
-        assert_eq!(connections.names(), ["anthropic", "openai"]);
+        assert_eq!(connections.names(), ["anthropic", "deepseek", "openai"]);
 
         let switch = connections.switch("openai").unwrap().unwrap();
 

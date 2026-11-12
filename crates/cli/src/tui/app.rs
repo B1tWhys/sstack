@@ -1699,7 +1699,8 @@ mod tests {
 
         h.enter("/connection");
         let screen = h.screen_of(WIDE);
-        assert!(screen.contains("> 2. openai (now)"), "{screen}");
+        assert!(screen.contains("> 3. openai (now)"), "{screen}");
+        h.app.handle(Event::Key(key(KeyCode::Up)));
         h.app.handle(Event::Key(key(KeyCode::Up)));
         h.app.handle(Event::Key(key(KeyCode::Enter)));
         let screen = h.screen_of(WIDE);

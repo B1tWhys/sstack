@@ -193,8 +193,8 @@ fn assistant_message(assistant: &AssistantEntry, provider: &str) -> Option<ChatM
 
 /// Returns the original response to send back, if the Provider called `provider` produced it.
 ///
-/// Claude needs its thinking blocks back unchanged, and OpenAI its encrypted reasoning. Each
-/// ignores what another Provider's model wrote.
+/// Claude needs its thinking blocks back unchanged, OpenAI its encrypted reasoning, and DeepSeek
+/// its reasoning text. Each ignores what another Provider's model wrote.
 fn replayed_content(assistant: &AssistantEntry, provider: &str) -> Option<MessageContent> {
     let payload = assistant.payload.as_ref()?;
     if payload.provider != provider {
@@ -268,9 +268,24 @@ struct Origin<'a> {
     model: &'a str,
 }
 
+/// Takes everything a finished stream said, its reasoning included.
+///
+/// A Chat Completions API such as DeepSeek's reports the reasoning beside the content rather than
+/// in it. The reasoning joins the content here, so that it is kept in the Provider Payload and
+/// sent back with the next request.
+fn take_content(end: &mut StreamEnd) -> MessageContent {
+    let mut content = end.captured_content.take().unwrap_or_default();
+    if let Some(reasoning) = end.captured_reasoning_content.take()
+        && !content.contains_reasoning_content()
+    {
+        content.prepend(ContentPart::ReasoningContent(reasoning));
+    }
+    content
+}
+
 /// Converts a finished stream into an assistant entry with its Provider Payload.
-fn to_entry(end: StreamEnd, origin: &Origin<'_>) -> Result<AssistantEntry, ProviderError> {
-    let content = end.captured_content.unwrap_or_default();
+fn to_entry(mut end: StreamEnd, origin: &Origin<'_>) -> Result<AssistantEntry, ProviderError> {
+    let content = take_content(&mut end);
     let tool_calls: Vec<ToolCall> = content
         .tool_calls()
         .into_iter()
@@ -561,6 +576,25 @@ mod tests {
                 format!("{expected:?}")
             );
         }
+    }
+
+    #[test]
+    fn reasoning_reported_beside_the_content_joins_it_once() {
+        let mut beside = StreamEnd {
+            captured_content: Some(MessageContent::from_text("hi")),
+            captured_reasoning_content: Some("hmm".into()),
+            ..StreamEnd::default()
+        };
+        let content = take_content(&mut beside);
+        assert_eq!(content.reasoning_contents(), ["hmm"]);
+        assert_eq!(content.texts(), ["hi"]);
+
+        let mut within = StreamEnd {
+            captured_content: Some(signed_content()),
+            captured_reasoning_content: Some("hmm".into()),
+            ..StreamEnd::default()
+        };
+        assert_eq!(take_content(&mut within).reasoning_contents(), ["hmm"]);
     }
 
     #[test]

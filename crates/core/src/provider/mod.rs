@@ -1,6 +1,7 @@
 //! The boundary between the harness and the services that run models.
 
 pub mod anthropic;
+pub mod deepseek;
 pub mod genai_chat;
 pub mod openai;
 pub mod scripted;

@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
-use crate::provider::{Effort, Provider, ProviderError, anthropic, openai};
+use crate::provider::{Effort, Provider, ProviderError, anthropic, deepseek, openai};
 
 /// The name of the built-in [`Connection`] to Claude, used unless settings choose another.
 const DEFAULT_CONNECTION: &str = "anthropic";
@@ -26,6 +26,14 @@ const OPENAI_SECRET: &str = "OPENAI_API_KEY";
 const OPENAI_MODEL: &str = "gpt-6.1-sol";
 /// The model that writes Session Names on the built-in [`Connection`] to OpenAI.
 const OPENAI_NAME_MODEL: &str = "gpt-6-luna";
+/// The name of the built-in [`Connection`] to DeepSeek.
+const DEEPSEEK_CONNECTION: &str = "deepseek";
+/// The secret the built-in [`Connection`] to DeepSeek authenticates with.
+const DEEPSEEK_SECRET: &str = "DEEPSEEK_API_KEY";
+/// The model the built-in [`Connection`] to DeepSeek requests.
+const DEEPSEEK_MODEL: &str = "deepseek-v4-pro";
+/// The model that writes Session Names on the built-in [`Connection`] to DeepSeek.
+const DEEPSEEK_NAME_MODEL: &str = "deepseek-flash";
 /// The context window assumed for a [`Connection`] that does not set one, in tokens.
 const DEFAULT_CONTEXT_LIMIT: u64 = 1_000_000;
 
@@ -38,6 +46,8 @@ pub enum ProviderKind {
     /// OpenAI's Responses API.
     #[serde(rename = "openai")]
     OpenAi,
+    /// DeepSeek's OpenAI-compatible Chat Completions API.
+    DeepSeek,
 }
 
 /// Supplies the context limit for settings that leave it out.
@@ -79,6 +89,7 @@ impl Connection {
         Ok(match self.provider {
             ProviderKind::Anthropic => Arc::new(anthropic::connect(secret, base_url, self.effort)?),
             ProviderKind::OpenAi => Arc::new(openai::connect(secret, base_url, self.effort)?),
+            ProviderKind::DeepSeek => Arc::new(deepseek::connect(secret, base_url, self.effort)?),
         })
     }
 }
@@ -133,12 +144,22 @@ impl Default for Config {
             model: Some(OPENAI_MODEL.to_owned()),
             name_model: Some(OPENAI_NAME_MODEL.to_owned()),
         };
+        let deepseek = Connection {
+            provider: ProviderKind::DeepSeek,
+            secret: DEEPSEEK_SECRET.to_owned(),
+            base_url: None,
+            effort: Effort::High,
+            context_limit: DEFAULT_CONTEXT_LIMIT,
+            model: Some(DEEPSEEK_MODEL.to_owned()),
+            name_model: Some(DEEPSEEK_NAME_MODEL.to_owned()),
+        };
         Self {
             default_connection: DEFAULT_CONNECTION.to_owned(),
             default_model: DEFAULT_MODEL.to_owned(),
             connections: BTreeMap::from([
                 (DEFAULT_CONNECTION.to_owned(), anthropic),
                 (OPENAI_CONNECTION.to_owned(), openai),
+                (DEEPSEEK_CONNECTION.to_owned(), deepseek),
             ]),
             vim: vim_by_default(),
             name_model: name_model_by_default(),
@@ -215,6 +236,12 @@ mod tests {
         assert_eq!(config.model(openai), "gpt-6.1-sol");
         assert_eq!(config.name_model(openai), "gpt-6-luna");
         assert!(openai.provider("key".into()).is_ok());
+        let deepseek = config.connection(Some("deepseek")).unwrap();
+        assert_eq!(deepseek.provider, ProviderKind::DeepSeek);
+        assert_eq!(deepseek.secret, "DEEPSEEK_API_KEY");
+        assert_eq!(config.model(deepseek), "deepseek-v4-pro");
+        assert_eq!(config.name_model(deepseek), "deepseek-flash");
+        assert!(deepseek.provider("key".into()).is_ok());
     }
 
     #[test]
