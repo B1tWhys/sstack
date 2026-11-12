@@ -219,7 +219,7 @@ pub enum Message {
     Decline,
     /// The person asked to interrupt.
     Interrupt,
-    /// The person asked for a Rebuild, as `/rebuild` does.
+    /// The person asked for a Rebuild, as `/rebuild --worktree` does.
     Rebuild,
     /// The person asked to close the window, which quits as `/quit` does, and quits instead of
     /// relaunching during a Rebuild.
@@ -335,7 +335,7 @@ impl Window {
             Message::JumpToEnd => self.jump_to_end(),
             Message::Interrupt => self.interrupt(),
             Message::Built(built) => self.built(built),
-            Message::Rebuild => self.command("/rebuild"),
+            Message::Rebuild => self.command("/rebuild --worktree"),
             Message::CloseRequested => self.close(),
             Message::Menu(event) => self.menu(event),
             Message::Renamed => self.renamed(),

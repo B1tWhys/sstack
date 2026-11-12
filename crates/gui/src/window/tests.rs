@@ -393,13 +393,23 @@ async fn the_window_says_how_a_rebuild_is_going_until_it_is_backed_out_of() {
 }
 
 #[tokio::test]
-async fn pressing_rebuild_starts_a_rebuild_and_pressing_it_again_does_nothing() {
-    let (_dir, mut window) = window(vec![]);
+async fn pressing_rebuild_starts_a_worktree_rebuild_and_pressing_it_again_does_nothing() {
+    let (dir, mut window) = building_with(built_in_source, vec![]);
+    let worktree = worktree_of(dir.path(), "1");
+    std::fs::create_dir_all(&worktree).unwrap();
 
-    interact(&mut window, |ui| {
-        let _ = ui.click("Rebuild").unwrap();
-    });
+    let mut ui = simulator(window.view());
+    let _ = ui.click("Rebuild").unwrap();
+    let messages: Vec<_> = ui.into_messages().collect();
+    let task = messages
+        .into_iter()
+        .fold(Task::none(), |_, message| window.update(message));
+    let built = produced(task).await;
 
+    let [Message::Built(Ok(binary))] = built.as_slice() else {
+        panic!("the build should finish: {built:?}");
+    };
+    assert_eq!(binary, &worktree.join("sstack-gui"));
     assert!(window.harness.phase().is_rebuilding());
     let mut ui = simulator(window.view());
     let _ = ui.click("Rebuild").unwrap();
@@ -1696,7 +1706,8 @@ async fn opening_and_closing_the_menu_keeps_the_transcript_where_it_was_scrolled
 
 #[tokio::test]
 async fn the_prompt_keeps_the_keyboard_when_the_rebuild_line_appears() {
-    let (_dir, mut window) = building_with(|_| future::pending().boxed(), vec![]);
+    let (dir, mut window) = building_with(|_| future::pending().boxed(), vec![]);
+    std::fs::create_dir_all(worktree_of(dir.path(), "1")).unwrap();
     let mut frames = Frames::new(iced::Point::ORIGIN);
     frames.focus_prompt(&window);
     assert!(frames.prompt_focused(&window));
