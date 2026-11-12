@@ -13,6 +13,16 @@ repos:
 
   - repo: local
     hooks:
+      # Two branches can each add the next ADR, and both merge with the same number.
+      - id: unique-adr-numbers
+        name: unique ADR numbers
+        entry: >-
+          sh -c 'dups=$(ls docs/adr | grep -oE "^[0-9]+" | sort | uniq -d);
+          [ -z "$dups" ] || { echo "ADR numbers used more than once: $dups"; exit 1; }'
+        language: system
+        pass_filenames: false
+        files: ^docs/adr/
+
       - id: rustfmt
         name: rustfmt
         entry: cargo fmt --all --check
