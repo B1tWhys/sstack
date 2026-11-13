@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 
 use super::project::{Project, is_protected};
 use super::{Tool, ToolError, parse_input};
-use crate::provider::ToolSpec;
+use crate::connection::ToolSpec;
 
 /// The most results returned from one search.
 const MAX_RESULTS: usize = 500;

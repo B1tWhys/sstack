@@ -1,4 +1,8 @@
 //! User settings, chiefly the [`Connection`]s a run can use.
+//!
+//! Settings live here because Connections are nearly all there is to them so far. Once they
+//! cover more than Connections, this module is meant to move out into a settings module of its
+//! own.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -8,7 +12,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
-use crate::provider::{Effort, Provider, ProviderError, anthropic, deepseek, openai};
+use super::provider::{Effort, Provider, ProviderError, anthropic, deepseek, openai};
 
 /// The name of the built-in [`Connection`] to Claude, used unless settings choose another.
 const DEFAULT_CONNECTION: &str = "anthropic";

@@ -7,7 +7,7 @@ use std::time::SystemTime;
 use iced::Subscription;
 use iced::widget::text_editor;
 use sstack::agent::{AgentHandle, TurnEnd};
-use sstack::connections::Connections;
+use sstack::connection::Connections;
 use sstack::question::{Answer, Response};
 use sstack::queue::Waits;
 use sstack::running_harness::SessionState;

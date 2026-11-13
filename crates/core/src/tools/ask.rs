@@ -5,7 +5,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::{Tool, ToolError, parse_input};
-use crate::provider::ToolSpec;
+use crate::connection::ToolSpec;
 use crate::question::{self, Asker, Question, Response};
 
 /// The most Questions the model may ask at once, so the person is not buried in them.

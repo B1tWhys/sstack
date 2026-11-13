@@ -9,7 +9,7 @@ use tokio::process::Command;
 
 use super::project::Project;
 use super::{Approver, Tool, ToolError, Verdict};
-use crate::provider::ToolSpec;
+use crate::connection::ToolSpec;
 use crate::worktree::REPOSITORY_ENV;
 
 /// How many times to try before giving up on a main branch that keeps moving.

@@ -1,4 +1,4 @@
-//! Where the secret a [`Connection`](crate::config::Connection) names comes from.
+//! Where the secret a [`Connection`](crate::connection::Connection) names comes from.
 
 use std::path::Path;
 use std::sync::Arc;

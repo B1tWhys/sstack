@@ -11,7 +11,7 @@ use tokio::process::Command;
 
 use super::project::Project;
 use super::{Approver, Tool, ToolError, Verdict, parse_input};
-use crate::provider::ToolSpec;
+use crate::connection::ToolSpec;
 use crate::sandbox::{Failure, Sandbox};
 
 /// How long a command may run before it is stopped.

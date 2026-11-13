@@ -343,7 +343,7 @@ pub(super) mod test_support {
 
     use serde_json::json;
 
-    use crate::provider::{ModelRequest, ToolSpec};
+    use crate::connection::{ModelRequest, ToolSpec};
     use crate::session::{Entry, ToolCall};
 
     /// Answers one HTTP request with `status` and `body`, and returns the address to send it to

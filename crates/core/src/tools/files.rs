@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 
 use super::project::Project;
 use super::{Tool, ToolError, parse_input};
-use crate::provider::ToolSpec;
+use crate::connection::ToolSpec;
 
 /// The most lines `read` returns unless asked for fewer or more.
 const DEFAULT_LINE_LIMIT: usize = 2000;

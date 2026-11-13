@@ -6,9 +6,7 @@ use std::sync::Arc;
 use bon::bon;
 
 use crate::agent::ModelService;
-use crate::config::{Config, Connection};
-use crate::credentials::{SecretStore, resolve_secret};
-use crate::provider::{Effort, Provider};
+use crate::connection::{Config, Connection, Effort, Provider, SecretStore, resolve_secret};
 use crate::session::SessionMetadata;
 use crate::session_setup::SetupError;
 
@@ -49,7 +47,7 @@ pub struct Opened {
 ///
 /// # Errors
 /// Returns an error if the Connection's Provider cannot be set up.
-pub fn open(connection: &Connection, secret: String) -> Result<Opened, SetupError> {
+pub fn open_connection(connection: &Connection, secret: String) -> Result<Opened, SetupError> {
     let namer = Connection {
         effort: Effort::Low,
         ..connection.clone()
@@ -115,7 +113,7 @@ impl Connections {
         }
         let connection = self.config.connection(Some(name))?;
         let secret = resolve_secret(&connection.secret, self.keyring.as_ref(), &self.main)?;
-        let opened = open(connection, secret)?;
+        let opened = open_connection(connection, secret)?;
         let switch = Switch {
             service: ModelService {
                 provider: opened.provider,
@@ -126,7 +124,7 @@ impl Connections {
             namer: opened.namer,
             name_model: self.config.name_model(connection).to_owned(),
         };
-        record(&self.log, name)?;
+        record_connection(&self.log, name)?;
         name.clone_into(&mut self.current);
         Ok(Some(switch))
     }
@@ -137,7 +135,7 @@ impl Connections {
 ///
 /// # Errors
 /// Returns an error if the Session Metadata cannot be changed.
-pub fn record(log: &Path, name: &str) -> Result<(), SetupError> {
+pub fn record_connection(log: &Path, name: &str) -> Result<(), SetupError> {
     SessionMetadata::update(log, |metadata| metadata.connection = Some(name.to_owned()))?;
     Ok(())
 }
@@ -182,7 +180,7 @@ pub(crate) mod test_support {
 mod tests {
     use super::test_support::built_in;
     use super::*;
-    use crate::config::ConfigError;
+    use crate::connection::ConfigError;
 
     #[test]
     fn a_switch_opens_the_connection_with_its_own_models_and_is_kept() {

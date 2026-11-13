@@ -8,7 +8,7 @@
 //! Sessions through [`OpenSessions`], which the interface implements over however it keeps them.
 
 use crate::agent::{AgentHandle, TurnEnd};
-use crate::connections::Connections;
+use crate::connection::Connections;
 use crate::question::Response;
 use crate::running_harness::{Outcome, Refusal, SessionEvent, SessionState};
 use crate::session::Naming;
@@ -120,7 +120,7 @@ impl SessionController {
     /// for, or if the choice cannot be kept.
     pub fn switch_connection(&mut self, name: &str) -> Result<(), SetupError> {
         let Some(connections) = &mut self.connections else {
-            return Err(crate::config::ConfigError::UnknownConnection(name.to_owned()).into());
+            return Err(crate::connection::ConfigError::UnknownConnection(name.to_owned()).into());
         };
         let Some(switch) = connections.switch(name)? else {
             return Ok(());
@@ -322,8 +322,8 @@ mod tests {
 
     use super::*;
     use crate::agent::{Agent, AgentConfig};
+    use crate::connection::scripted::ScriptedProvider;
     use crate::human_command::Command;
-    use crate::provider::scripted::ScriptedProvider;
     use crate::rebuild::Checkout;
     use crate::running_harness::{Exit, RunningHarness};
     use crate::session::{AssistantEntry, Entry, SessionLog, StopReason, Usage};
@@ -470,7 +470,7 @@ mod tests {
         assert!(fixed.switch_connection("openai").is_err());
 
         let (naming, _) = naming(&dir, "b", "unused");
-        let connections = crate::connections::test_support::built_in(dir.path().join("b.jsonl"));
+        let connections = crate::connection::test_support::built_in(dir.path().join("b.jsonl"));
         let mut session = controller(&dir, "b")
             .with_connections(connections)
             .with_naming(naming, ReportSender::new(|_| {}));

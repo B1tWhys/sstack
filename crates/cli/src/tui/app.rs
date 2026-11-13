@@ -682,8 +682,10 @@ mod tests {
     use insta::assert_snapshot;
     use ratatui::backend::TestBackend;
     use ratatui::style::Color;
-    use sstack::provider::scripted::{Scripted, ScriptedProvider};
-    use sstack::provider::{ModelRequest, Provider, ProviderError, StreamEvent};
+    use sstack::connection::{
+        ModelRequest, Provider, ProviderError, StreamEvent,
+        scripted::{Scripted, ScriptedProvider},
+    };
     use sstack::session::{self, AssistantEntry, Entry, SessionLog, StopReason, ToolCall};
     use sstack::vim::Draft;
     use std::cell::RefCell;

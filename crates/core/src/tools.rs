@@ -23,7 +23,7 @@ use bon::bon;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-use crate::provider::{Effort, ToolSpec};
+use crate::connection::{Effort, ToolSpec};
 use crate::question::Asker;
 use crate::sandbox::Sandbox;
 use crate::session::ToolCall;

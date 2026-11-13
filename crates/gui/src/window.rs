@@ -25,7 +25,7 @@ use iced::{
 use input::Input;
 use menu::{Menu, MenuEvent};
 use session::SessionView;
-use sstack::connections::Connections;
+use sstack::connection::Connections;
 use sstack::human_command::Command;
 use sstack::rebuild::Checkout;
 use sstack::running_harness::{

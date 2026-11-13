@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::provider::{ModelRequest, Provider};
+use crate::connection::{ModelRequest, Provider};
 use crate::session::Entry;
 use crate::session_report::{ReportSender, SessionReport};
 use crate::{session, worktree};
@@ -181,7 +181,7 @@ pub fn window_title(known: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::provider::scripted::ScriptedProvider;
+    use crate::connection::scripted::ScriptedProvider;
     use crate::session::{AssistantEntry, StopReason, Usage};
 
     /// Returns a model reply that says `text`.

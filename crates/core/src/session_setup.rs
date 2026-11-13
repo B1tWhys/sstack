@@ -11,10 +11,10 @@ use std::sync::Arc;
 use bon::builder;
 
 use crate::agent::{Agent, AgentConfig};
-use crate::config::{Config, ConfigError, Connection};
-use crate::connections::{self, Connections};
-use crate::credentials::{MissingSecret, SystemKeyring, resolve_secret};
-use crate::provider::{Provider, ProviderError};
+use crate::connection::{
+    self, Config, ConfigError, Connection, Connections, MissingSecret, Provider, ProviderError,
+    SystemKeyring, resolve_secret,
+};
 use crate::question::Asker;
 use crate::sandbox::{Containers, Sandbox};
 use crate::session::Naming;
@@ -323,7 +323,7 @@ fn chosen_connection(
     log: &Path,
 ) -> Result<Chosen, SetupError> {
     if let Some(asked) = asked {
-        connections::record(log, asked)?;
+        connection::record_connection(log, asked)?;
         return Ok(Chosen {
             name: asked.to_owned(),
             notice: None,
@@ -513,7 +513,7 @@ fn agent_config(
     } else {
         (tools, system)
     };
-    let opened = connections::open(connection, secret)?;
+    let opened = connection::open_connection(connection, secret)?;
     Ok(Configured {
         namer: opened.namer,
         agent: AgentConfig {

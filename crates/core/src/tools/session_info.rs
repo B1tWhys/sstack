@@ -5,7 +5,7 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 use super::{Tool, ToolError};
-use crate::provider::{Effort, ToolSpec};
+use crate::connection::{Effort, ToolSpec};
 
 /// What the model can learn about the Session it is working in, so that it can record in what it
 /// leaves behind, such as a commit, which Session made it and with which model.

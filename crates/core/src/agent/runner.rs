@@ -169,8 +169,7 @@ async fn run_turn(
 mod tests {
     use super::*;
     use crate::agent::AgentConfig;
-    use crate::provider::Effort;
-    use crate::provider::scripted::ScriptedProvider;
+    use crate::connection::{Effort, scripted::ScriptedProvider};
     use crate::session::{AssistantEntry, SessionLog, StopReason, Usage};
     use crate::tools::project::Project;
     use crate::tools::test_support::{disabled, git_project};

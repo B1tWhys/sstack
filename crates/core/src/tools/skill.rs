@@ -3,7 +3,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::{Tool, ToolError, parse_input};
-use crate::provider::ToolSpec;
+use crate::connection::ToolSpec;
 use crate::skills::{self, Skill};
 
 /// The tool for loading the instructions of an installed [`Skill`], which may live outside the

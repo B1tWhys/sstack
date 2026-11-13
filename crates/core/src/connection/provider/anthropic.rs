@@ -6,7 +6,7 @@ use serde_json::json;
 
 use super::Effort;
 use super::ProviderError;
-use super::genai_chat::{Dialect, GenaiChat, capturing_options};
+use crate::connection::provider::genai_chat::{Dialect, GenaiChat, capturing_options};
 
 /// The name recorded on Provider Payloads from this Provider.
 pub const PROVIDER: &str = "anthropic";
@@ -56,8 +56,10 @@ fn chat_options(effort: Effort) -> ChatOptions {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::provider::genai_chat::test_support::{call, read_tool, request_with, serve_once};
-    use crate::provider::{Provider, StreamEvent};
+    use crate::connection::{
+        Provider, StreamEvent,
+        provider::genai_chat::test_support::{call, read_tool, request_with, serve_once},
+    };
     use crate::session::{Entry, StopReason};
     use serde_json::Value;
     use std::fmt::Write as _;

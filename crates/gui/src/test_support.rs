@@ -10,10 +10,10 @@ use anyhow::{Result, bail};
 use iced::futures::future::{self, BoxFuture, FutureExt};
 use iced::widget::text_editor::{Action, Edit};
 use sstack::agent::{Agent, AgentConfig};
-use sstack::config::Config;
-use sstack::connections::Connections;
-use sstack::credentials::SecretStore;
-use sstack::provider::scripted::{Scripted, ScriptedProvider};
+use sstack::connection::{
+    Config, Connections, SecretStore,
+    scripted::{Scripted, ScriptedProvider},
+};
 use sstack::rebuild::Checkout;
 use sstack::sandbox::Sandbox;
 use sstack::session::{AssistantEntry, Entry, SessionLog, StopReason, ToolCall, Usage};

@@ -8,7 +8,7 @@ use crossterm::event::KeyEvent;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use sstack::agent::{AgentHandle, TurnEnd};
-use sstack::connections::Connections;
+use sstack::connection::Connections;
 use sstack::queue::Waits;
 use sstack::running_harness::SessionState;
 use sstack::session::{self, Entry, Naming, SessionSummary};

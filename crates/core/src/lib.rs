@@ -4,11 +4,8 @@
 //! in [`sstack_gui`](../sstack_gui/index.html).
 
 pub mod agent;
-pub mod config;
-pub mod connections;
-pub mod credentials;
+pub mod connection;
 pub mod human_command;
-pub mod provider;
 pub mod question;
 pub mod queue;
 pub mod rebuild;

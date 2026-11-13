@@ -8,7 +8,7 @@ use std::time::SystemTime;
 use tokio_util::sync::CancellationToken;
 
 use crate::agent::QueuedPrompts;
-use crate::provider::{Effort, ModelRequest, Provider, ProviderError, StreamEvent, ToolSpec};
+use crate::connection::{Effort, ModelRequest, Provider, ProviderError, StreamEvent, ToolSpec};
 use crate::session::{AssistantEntry, Entry, SessionError, SessionLog, StopReason, ToolCall};
 use crate::tools::ToolBox;
 
@@ -476,7 +476,7 @@ fn unanswered_calls(entries: &[Entry]) -> Vec<ToolCall> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::provider::scripted::{Scripted, ScriptedProvider};
+    use crate::connection::scripted::{Scripted, ScriptedProvider};
     use crate::session::Usage;
     use crate::tools::test_support::{AllowAll, DeferAll, git_project};
     use crate::tools::{Approver, DenyAll};
