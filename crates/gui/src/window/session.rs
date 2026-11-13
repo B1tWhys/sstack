@@ -11,8 +11,8 @@ use sstack::connection::Connections;
 use sstack::open_session::SessionController;
 use sstack::question::{Answer, Response};
 use sstack::running_harness::{SessionState, Waits};
-use sstack::session::{self, Entry, SessionSummary};
-use sstack::session_report::{ApprovalRequest, QuestionRequest, SessionReport};
+use sstack::session::{self, SessionSummary};
+use sstack::session_report::{ApprovalRequest, QuestionRequest, Replayed, SessionReport};
 use sstack::tools::Verdict;
 use sstack::vim::VimEvent;
 
@@ -437,10 +437,10 @@ impl SessionView {
     }
 }
 
-/// Returns the first thing the person said among `entries`.
-fn first_prompt(entries: &[Entry]) -> Option<String> {
-    entries.iter().find_map(|entry| match entry {
-        Entry::User { text } => Some(text.clone()),
+/// Returns the first thing the person said in what a resumed Session holds.
+fn first_prompt(shown: &[Replayed]) -> Option<String> {
+    shown.iter().find_map(|replayed| match replayed {
+        Replayed::Prompt(text) => Some(text.clone()),
         _ => None,
     })
 }

@@ -9,15 +9,14 @@
 
 mod reply;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use iced::widget::{Space, Text, button, column, container, hover, row, text};
 use iced::{Element, Fill, Font};
 use lucide_icons::Icon;
-use sstack::agent::{self, AgentEvent, ToolCallSummary, TurnEnd};
+use sstack::agent::{AgentEvent, ToolCallSummary, TurnEnd};
 use sstack::question::Question;
-use sstack::session::{AssistantEntry, Entry};
-use sstack::session_report::{ApprovalRequest, SessionReport};
+use sstack::session_report::{ApprovalRequest, Replayed, SessionReport};
 
 use crate::asked::{Asked, Asking, Controls};
 use crate::hint::hint;
@@ -94,14 +93,6 @@ pub enum Block {
     /// Something the window tells the person, such as how a Turn ended or why it could not do
     /// what they asked.
     Notice(String),
-}
-
-/// What showing a resumed Session needs to know beyond the entry at hand.
-struct Replaying<'a> {
-    /// Where the block of each tool call shown so far is, so that its result can mark it failed.
-    calls: HashMap<&'a str, usize>,
-    /// The ids of calls never shown as starting, which a Turn carrying on shows once they start.
-    not_started: HashSet<String>,
 }
 
 /// A question to the person whether a command may run, and what became of it.
@@ -392,46 +383,34 @@ impl Transcript {
     ///
     /// The Session does not record the model's thinking or errors that stopped a Turn, so those
     /// are missing. Tool calls left unfinished by a cancelled Turn show as failed. A Turn that a
-    /// Rebuild put off shows as it was before, so its calls that never started are left out.
-    fn resume(&mut self, entries: &[Entry]) -> bool {
+    /// Rebuild put off shows as it was before.
+    fn resume(&mut self, shown: &[Replayed]) -> bool {
         let mut earlier = Self::default();
-        let mut replaying = Replaying {
-            calls: HashMap::new(),
-            not_started: agent::calls_not_started(entries),
-        };
-        for entry in entries {
-            earlier.replay(entry, &mut replaying);
+        let mut calls = HashMap::new();
+        for replayed in shown {
+            earlier.replay(replayed, &mut calls);
         }
         self.blocks.splice(0..0, earlier.blocks);
-        !entries.is_empty()
+        !shown.is_empty()
     }
 
-    /// Shows one recorded entry, as `replaying` says to.
-    fn replay<'a>(&mut self, entry: &'a Entry, replaying: &mut Replaying<'a>) {
-        match entry {
-            Entry::User { text } => self.prompt(text.clone()),
-            Entry::Assistant(response) => self.replay_response(response, replaying),
-            Entry::ToolResult {
-                call_id, is_error, ..
-            } => self.replay_result(replaying.calls.get(call_id.as_str()), *is_error),
-            Entry::TurnCancelled => self.replay_end(TurnEnd::Cancelled),
-            Entry::TurnParked => self.replay_end(TurnEnd::Paused),
-            Entry::TurnPutOff { .. } => self.replay_end(TurnEnd::PutOff),
+    /// Shows one thing a resumed Session holds. `calls` holds where the block of each tool call
+    /// shown so far is, so that its result can mark it failed.
+    fn replay<'a>(&mut self, replayed: &'a Replayed, calls: &mut HashMap<&'a str, usize>) {
+        match replayed {
+            Replayed::Prompt(text) => self.prompt(text.clone()),
+            Replayed::Reply(text) => {
+                self.reply(text);
+            }
+            Replayed::ToolStarted { id, call } => {
+                calls.insert(id, self.blocks.len());
+                self.tool(call.clone());
+            }
+            Replayed::ToolFinished { id, is_error } => {
+                self.replay_result(calls.get(id.as_str()), *is_error);
+            }
+            Replayed::TurnEnded(end) => self.replay_end(*end),
         }
-    }
-
-    /// Shows a recorded model response: its reply, the tools it called that started, and how it
-    /// ended the Turn if that needs saying.
-    fn replay_response<'a>(&mut self, response: &'a AssistantEntry, replaying: &mut Replaying<'a>) {
-        if !response.text.is_empty() {
-            self.reply(&response.text);
-        }
-        let calls = response.tool_calls.iter();
-        for call in calls.filter(|call| !replaying.not_started.contains(&call.id)) {
-            replaying.calls.insert(call.id.as_str(), self.blocks.len());
-            self.tool(call.into());
-        }
-        self.replay_end(response.stop.into());
     }
 
     /// Marks the tool call whose block is at `index` as failed, if it is shown and `is_error`.
@@ -606,7 +585,8 @@ fn turn_end_text(end: TurnEnd) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use sstack::agent::AgentEvent;
-    use sstack::session::AssistantEntry;
+    use sstack::agent::replay;
+    use sstack::session::{AssistantEntry, Entry};
 
     use super::*;
     use crate::test_support::{bash_call, reply};
@@ -667,7 +647,7 @@ mod tests {
             Entry::Assistant(reply("Still done.")),
         ];
         let mut transcript = Transcript::default();
-        transcript.report(&SessionReport::Resumed(held.to_vec()));
+        transcript.report(&SessionReport::Resumed(replay(&held)));
         assert_eq!(interim_replies(&transcript), [false, true, false]);
     }
 

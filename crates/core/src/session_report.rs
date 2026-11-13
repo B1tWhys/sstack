@@ -10,17 +10,16 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use tokio::sync::oneshot;
 
-use crate::agent::{AgentEvent, TurnEnd};
+use crate::agent::{AgentEvent, ToolCallSummary, TurnEnd};
 use crate::question::{Asker, Question, Response};
-use crate::session::Entry;
 use crate::tools::{Approver, Verdict};
 
 /// Something that happened in a Session, which the interface showing it should react to.
 #[derive(Debug, Clone)]
 pub enum SessionReport {
-    /// The agent picked up a Session that already has these entries, oldest first, such as after
-    /// a Rebuild. Comes before any Turn, and holds nothing for a new Session.
-    Resumed(Vec<Entry>),
+    /// The agent picked up a Session that already holds this, oldest first, such as after a
+    /// Rebuild. Comes before any Turn, and holds nothing for a new Session.
+    Resumed(Vec<Replayed>),
     /// The agent started a Turn on this input from the person.
     TurnStarted(String),
     /// The agent carried on a Turn that had paused.
@@ -43,6 +42,34 @@ pub enum SessionReport {
     /// the name it gave, or nothing if it gave none, as when the model failed or the person named
     /// the Session first.
     Named(Option<String>),
+}
+
+/// Something a resumed Session already holds, for the interface to show as it showed it live.
+///
+/// It is made from the Session's log, but leaves out what only the model needs, so that the log
+/// can keep its shape for older Sessions while what interfaces read changes freely.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Replayed {
+    /// The person said this.
+    Prompt(String),
+    /// The model replied with this text, which is never empty.
+    Reply(String),
+    /// A tool call started.
+    ToolStarted {
+        /// The id that links the call to how it finished.
+        id: String,
+        /// The call, as the person watching it run saw it.
+        call: ToolCallSummary,
+    },
+    /// A tool call finished.
+    ToolFinished {
+        /// The id of the call that finished.
+        id: String,
+        /// Whether the call failed.
+        is_error: bool,
+    },
+    /// A Turn ended this way, or a response ended this way within one. Most ends need no saying.
+    TurnEnded(TurnEnd),
 }
 
 /// Where one Session's reports go, chosen by the interface showing it.

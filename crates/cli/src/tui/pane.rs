@@ -12,8 +12,8 @@ use sstack::commands::Skill;
 use sstack::connection::Connections;
 use sstack::open_session::SessionController;
 use sstack::running_harness::{SessionState, Waits};
-use sstack::session::{self, Entry, Naming, SessionSummary};
-use sstack::session_report::SessionReport;
+use sstack::session::{self, Naming, SessionSummary};
+use sstack::session_report::{Replayed, SessionReport};
 
 use super::component::{Component, KeyOutcome};
 use super::components::{
@@ -397,10 +397,10 @@ impl Pane {
     }
 }
 
-/// Returns the first thing the person said among `entries`.
-fn first_prompt(entries: &[Entry]) -> Option<String> {
-    entries.iter().find_map(|entry| match entry {
-        Entry::User { text } => Some(text.clone()),
+/// Returns the first thing the person said in what a resumed Session holds.
+fn first_prompt(shown: &[Replayed]) -> Option<String> {
+    shown.iter().find_map(|replayed| match replayed {
+        Replayed::Prompt(text) => Some(text.clone()),
         _ => None,
     })
 }

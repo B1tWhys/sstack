@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::agent::{Agent, ModelService, QueuedPrompts, TurnContext, TurnEnd};
+use crate::agent::{Agent, ModelService, QueuedPrompts, TurnContext, TurnEnd, replay};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -61,7 +61,7 @@ impl AgentHandle {
     /// The task ends once this handle is dropped and any queued Turns have finished.
     #[must_use]
     pub fn spawn(agent: Agent, reports: ReportSender) -> Self {
-        reports.send(SessionReport::Resumed(agent.entries().to_vec()));
+        reports.send(SessionReport::Resumed(replay(agent.entries())));
         let (jobs, queued) = mpsc::unbounded_channel();
         tokio::spawn(serve(agent, queued, reports));
         Self {

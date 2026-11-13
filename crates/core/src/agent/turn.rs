@@ -440,11 +440,12 @@ impl From<&ToolCall> for ToolCallSummary {
     }
 }
 
-/// Returns the ids of the tool calls in `entries` that were never shown as starting, for an
-/// interface to leave out when it shows a resumed Session. They are the calls after the one whose
-/// question a Rebuild put off, which the agent shows as they start once the Turn carries on.
+/// Returns the ids of the tool calls in `entries` that were never shown as starting, for
+/// [`replay`](fn@super::replay) to leave out when a resumed Session is shown. They are the calls
+/// after the one whose question a Rebuild put off, which the agent shows as they start once the
+/// Turn carries on.
 #[must_use]
-pub fn calls_not_started(entries: &[Entry]) -> HashSet<String> {
+pub(super) fn calls_not_started(entries: &[Entry]) -> HashSet<String> {
     if !matches!(entries.last(), Some(Entry::TurnPutOff { .. })) {
         return HashSet::new();
     }
