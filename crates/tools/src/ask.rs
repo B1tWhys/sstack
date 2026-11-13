@@ -5,9 +5,9 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::parse_input;
-use crate::connection::ToolSpec;
-use crate::protocol::{self, Question, Response};
-use crate::tools::{Asker, Tool, ToolError};
+use sstack::connection::ToolSpec;
+use sstack::protocol::{self, Question, Response};
+use sstack::tools::{Asker, Tool, ToolError};
 
 /// The most Questions the model may ask at once, so the person is not buried in them.
 const MAX_QUESTIONS: usize = 4;
@@ -152,7 +152,7 @@ impl Tool for Ask {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::Answer;
+    use sstack::protocol::Answer;
     use std::sync::Mutex;
 
     /// An Asker that gives `answers`, or declines if there are none, and remembers what it was

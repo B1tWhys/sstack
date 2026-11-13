@@ -424,7 +424,7 @@ mod tests {
     use super::*;
     use crate::connection::scripted::{Scripted, ScriptedProvider};
     use crate::session::Usage;
-    use crate::standard_tools::test_support::{AllowAll, DeferAll, git_project};
+    use crate::tools::test_support::{AllowAll, DeferAll, fake_tools};
     use crate::tools::{Approver, DenyAll};
     use async_trait::async_trait;
     use serde_json::json;
@@ -462,10 +462,10 @@ mod tests {
     }
 
     fn harness(script: Vec<Scripted>, approver: Arc<dyn Approver>) -> Harness {
-        let (dir, project) = git_project();
+        let dir = tempfile::tempdir().unwrap();
         let session = dir.path().join("ignored/session.jsonl");
         let provider = Arc::new(ScriptedProvider::new(script));
-        let agent = agent_on(&session, config(provider.clone(), &project, approver));
+        let agent = agent_on(&session, config(provider.clone(), dir.path(), approver));
         Harness {
             dir,
             agent,
@@ -496,14 +496,14 @@ mod tests {
 
     fn config(
         provider: Arc<dyn Provider>,
-        project: &crate::standard_tools::project::Project,
+        root: &Path,
         approver: Arc<dyn Approver>,
     ) -> AgentConfig {
         AgentConfig {
             provider,
             model: "scripted".into(),
             system: "system".into(),
-            tools: crate::standard_tools::test_support::toolbox(project.root(), approver),
+            tools: fake_tools(root, approver),
             context_limit: LIMIT,
         }
     }
@@ -679,9 +679,9 @@ mod tests {
 
     #[tokio::test]
     async fn cancelling_a_model_request_ends_the_turn() {
-        let (dir, project) = git_project();
+        let dir = tempfile::tempdir().unwrap();
         let session = dir.path().join("ignored/session.jsonl");
-        let config = config(Arc::new(NeverResponds), &project, Arc::new(DenyAll));
+        let config = config(Arc::new(NeverResponds), dir.path(), Arc::new(DenyAll));
         let mut agent = agent_on(&session, config);
         let cancel = CancellationToken::new();
         cancel.cancel();
@@ -693,7 +693,7 @@ mod tests {
 
     #[test]
     fn resuming_after_a_crash_answers_dangling_tool_calls() {
-        let (dir, project) = git_project();
+        let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("ignored/session.jsonl");
         let mut log = SessionLog::create(&path).unwrap();
         let dangling = Entry::Assistant(calling("1", "read", json!({"path": "a"})));
@@ -702,7 +702,7 @@ mod tests {
 
         let (log, entries) = SessionLog::open(&path).unwrap();
         let provider = Arc::new(ScriptedProvider::default());
-        let config = config(provider, &project, Arc::new(DenyAll));
+        let config = config(provider, dir.path(), Arc::new(DenyAll));
         let agent = Agent::new(config, log, entries).unwrap();
 
         assert_eq!(tool_results(agent.entries()), [("1", INTERRUPTED, true)]);
@@ -740,8 +740,8 @@ mod tests {
         drop(h.agent);
         pause.store(false, Ordering::SeqCst);
         let (log, entries) = SessionLog::open(&h.session).unwrap();
-        let (dir, project) = git_project();
-        let config = config(h.provider.clone(), &project, Arc::new(AllowAll));
+        let dir = tempfile::tempdir().unwrap();
+        let config = config(h.provider.clone(), dir.path(), Arc::new(AllowAll));
         let mut resumed = Agent::new(config, log, entries).unwrap();
         let mut context = TurnContext {
             cancel: &cancel,
@@ -767,8 +767,7 @@ mod tests {
         } = h;
         drop(agent);
         let (log, entries) = SessionLog::open(&session).unwrap();
-        let project = Arc::new(crate::standard_tools::project::Project::new(dir.path()).unwrap());
-        let config = config(provider.clone(), &project, approver);
+        let config = config(provider.clone(), dir.path(), approver);
         Harness {
             agent: Agent::new(config, log, entries).unwrap(),
             dir,

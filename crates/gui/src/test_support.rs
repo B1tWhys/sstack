@@ -16,9 +16,9 @@ use sstack::connection::{
 };
 use sstack::open_session::{ReportingApprover, ReportingAsker, Run, Start};
 use sstack::session::{AssistantEntry, Entry, SessionLog, StopReason, ToolCall, Usage};
-use sstack::standard_tools::standard;
 use sstack::tools::{SessionInfo, ToolBox, ToolContext};
 use sstack::workspace::{Checkout, Sandbox};
+use sstack_tools::standard;
 
 use crate::reports::Reports;
 use crate::window::{Message, Opened, Ready, Sessions};

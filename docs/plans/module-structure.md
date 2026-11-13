@@ -116,9 +116,11 @@ Make `tools.rs` the port, add `ToolContext` and the factory parameter to setup, 
 
 Note: done, except the fake tools, which move to step 6. Core's agent tests rely on what `read`, `write` and `bash` really do, so they keep using the real tools while those are still in core. The adapters live in `standard_tools.rs` beside `standard_tools/`, which becomes the new crate's `lib.rs` and modules. `standard_tools::standard` is the factory, and each interface passes `.tools(&standard)` to `prepare`. `ToolContext` has a `bon` builder. `SessionInfo` and `SharedSessionInfo` are in the port, so `ToolBox::served_by` updates the shared handle without naming the tool, and the `session_info` tool is now always offered. Core's tests outside `standard_tools` use `standard_tools::test_support` (`toolbox`, `git_project`, `git`, `AllowAll`, `DeferAll`), including the worktree tests' `git`. Step 6 must replace each of those in core.
 
-### [ ] 6. Move the tools into `sstack-tools`
+### [x] 6. Move the tools into `sstack-tools`
 
 Create `crates/tools`, move each tool into its own module there along with the shared helpers, and make `cli` and `gui` pass the factory.
+
+Note: done. Core has a `test-support` feature, which `sstack-tools` turns on for its own tests. It exposes `tools::test_support` (`AllowAll`, `DeferAll` and `fake_tools`, which are fake `read`, `write` and `bash` tools), `workspace::test_support` (`git`, `repository`) and `MockContainerRuntime`. Core's own tests use the fakes. `REPOSITORY_ENV` is public, because `land` and path resolution need it at run time.
 
 ### [ ] 7. Write the ADRs and the `AGENTS.md` line
 

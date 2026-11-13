@@ -1,0 +1,22 @@
+[package]
+name = "sstack-tools"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+async-trait = "0.1"
+bon = "3"
+ignore = "0.4"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sstack = { path = "../core", default-features = false }
+tokio = { version = "1", features = ["io-util", "macros", "process", "rt", "sync", "time"] }
+
+[dev-dependencies]
+sstack = { path = "../core", default-features = false, features = ["test-support"] }
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

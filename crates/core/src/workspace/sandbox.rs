@@ -29,8 +29,8 @@ use tokio::sync::{Mutex, OnceCell};
 
 use super::protected::{PROTECTED_DIRECTORIES, PROTECTED_FILES};
 use super::worktree::main_checkout_of;
-#[cfg(test)]
-pub(crate) use runtime::MockContainerRuntime;
+#[cfg(any(test, feature = "test-support"))]
+pub use runtime::MockContainerRuntime;
 pub use runtime::{
     CacheVolume, ContainerRuntime, ContainerSpec, DockerCli, Inspected, Mask, ReadOnly,
     RuntimeError,

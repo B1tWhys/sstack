@@ -326,19 +326,18 @@ mod tests {
     use crate::protocol::{ApprovalRequest, QuestionRequest};
     use crate::running_harness::{Exit, RunningHarness};
     use crate::session::{AssistantEntry, Entry, SessionLog, StopReason, Usage};
-    use crate::standard_tools::{project::Project, test_support::git_project};
     use crate::tools::DenyAll;
+    use crate::tools::test_support::fake_tools;
     use crate::workspace::Checkout;
 
     /// Opens a new Session called `name` in `dir`, whose reports go nowhere, so that what the
     /// controller knows of it comes only from what a test reports by hand.
     fn controller(dir: &TempDir, name: &str) -> SessionController {
-        let project = Arc::new(Project::new(dir.path()).unwrap());
         let config = AgentConfig {
             provider: Arc::new(ScriptedProvider::new(vec![])),
             model: "scripted".into(),
             system: String::new(),
-            tools: crate::standard_tools::test_support::toolbox(project.root(), Arc::new(DenyAll)),
+            tools: fake_tools(dir.path(), Arc::new(DenyAll)),
             context_limit: 1000,
         };
         let log = SessionLog::create(&dir.path().join(name).with_extension("jsonl")).unwrap();
@@ -372,7 +371,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_prompt_starts_a_turn_and_the_next_waits_for_it_to_end() {
-        let (dir, _) = git_project();
+        let dir = tempfile::tempdir().unwrap();
         let mut session = controller(&dir, "a");
         let mut harness = RunningHarness::default();
         let mut submit = |line| {
@@ -389,7 +388,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompts_queued_for_a_turn_that_ends_first_start_the_next_one_together() {
-        let (dir, _) = git_project();
+        let dir = tempfile::tempdir().unwrap();
         let mut session = controller(&dir, "a");
         let mut harness = RunningHarness::default();
         for line in ["go", "one", "two"] {
@@ -413,7 +412,7 @@ mod tests {
 
     #[tokio::test]
     async fn interrupting_a_turn_gives_back_what_was_queued_for_it() {
-        let (dir, _) = git_project();
+        let dir = tempfile::tempdir().unwrap();
         let mut session = controller(&dir, "a");
         let mut harness = RunningHarness::default();
         for line in ["go", "more"] {
@@ -436,7 +435,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_turn_that_ends_during_a_drain_gives_back_what_was_queued_for_it() {
-        let (dir, _) = git_project();
+        let dir = tempfile::tempdir().unwrap();
         let (mut working, mut idle) = (controller(&dir, "a"), controller(&dir, "b"));
         let mut harness = RunningHarness::default();
         for line in ["go", "more"] {
@@ -458,7 +457,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_session_switches_only_between_the_connections_it_was_given() {
-        let (dir, _) = git_project();
+        let dir = tempfile::tempdir().unwrap();
         let mut fixed = controller(&dir, "a");
         assert!(fixed.connections().is_none());
         assert!(fixed.switch_connection("openai").is_err());
@@ -479,7 +478,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_first_turn_names_the_session_after_what_was_typed() {
-        let (dir, _) = git_project();
+        let dir = tempfile::tempdir().unwrap();
         let (sender, mut received) = tokio::sync::mpsc::unbounded_channel();
         let reports = ReportSender::new(move |report| {
             let _ = sender.send(report);
@@ -508,7 +507,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_interface_carries_out_only_the_human_commands_about_its_sessions() {
-        let (dir, _) = git_project();
+        let dir = tempfile::tempdir().unwrap();
         let mut session = controller(&dir, "a");
         let mut harness = RunningHarness::default();
         let mut submit = |line| {
@@ -527,7 +526,7 @@ mod tests {
 
     #[tokio::test]
     async fn quitting_waits_for_every_open_session_to_reach_the_end_of_its_step() {
-        let (dir, _) = git_project();
+        let dir = tempfile::tempdir().unwrap();
         let (mut working, mut idle) = (controller(&dir, "a"), controller(&dir, "b"));
         let mut harness = RunningHarness::default();
         let _ = harness
@@ -547,7 +546,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_rebuild_relaunches_once_built_with_nothing_running() {
-        let (dir, _) = git_project();
+        let dir = tempfile::tempdir().unwrap();
         let mut session = controller(&dir, "a");
         let mut harness = RunningHarness::default();
 
@@ -563,7 +562,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_rebuild_of_the_worktree_asks_for_that_checkout_to_be_built() {
-        let (dir, _) = git_project();
+        let dir = tempfile::tempdir().unwrap();
         let mut session = controller(&dir, "a");
         let mut harness = RunningHarness::default();
 
@@ -589,7 +588,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_rebuild_puts_off_an_open_question_rather_than_wait_for_it() {
-        let (dir, _) = git_project();
+        let dir = tempfile::tempdir().unwrap();
         let mut session = controller(&dir, "a");
         let mut harness = RunningHarness::default();
         let (asked, mut answer) = question();
@@ -617,7 +616,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_rebuild_puts_off_the_models_questions_too() {
-        let (dir, _) = git_project();
+        let dir = tempfile::tempdir().unwrap();
         let mut session = controller(&dir, "a");
         let mut harness = RunningHarness::default();
         let (reply, mut response) = Reply::new();
@@ -642,7 +641,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_question_asked_during_a_rebuild_is_put_off_at_once() {
-        let (dir, _) = git_project();
+        let dir = tempfile::tempdir().unwrap();
         let (mut working, mut idle) = (controller(&dir, "a"), controller(&dir, "b"));
         let mut harness = RunningHarness::default();
         let (asked, mut answer) = question();
@@ -660,7 +659,7 @@ mod tests {
 
     #[tokio::test]
     async fn quitting_still_waits_for_the_person_to_answer() {
-        let (dir, _) = git_project();
+        let dir = tempfile::tempdir().unwrap();
         let mut session = controller(&dir, "a");
         let mut harness = RunningHarness::default();
         let (asked, mut answer) = question();
@@ -682,7 +681,7 @@ mod tests {
 
     #[tokio::test]
     async fn interrupting_a_drain_backs_out_and_carries_on_parked_turns() {
-        let (dir, _) = git_project();
+        let dir = tempfile::tempdir().unwrap();
         let mut session = controller(&dir, "a");
         let mut harness = RunningHarness::default();
         for line in ["go", "/rebuild"] {
@@ -706,7 +705,7 @@ mod tests {
 
     #[tokio::test]
     async fn interrupting_quits_only_once_no_other_session_is_working() {
-        let (dir, _) = git_project();
+        let dir = tempfile::tempdir().unwrap();
         let (mut working, mut idle) = (controller(&dir, "a"), controller(&dir, "b"));
         let mut harness = RunningHarness::default();
         let _ = harness

@@ -4,8 +4,8 @@ use std::io;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
-use crate::tools::ToolError;
-use crate::workspace::{REPOSITORY_ENV, is_protected};
+use sstack::tools::ToolError;
+use sstack::workspace::{REPOSITORY_ENV, is_protected};
 
 /// The directory a Session works in, which limits what the model can touch.
 #[derive(Debug)]
@@ -119,7 +119,7 @@ impl Project {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::standard_tools::test_support::{git, git_project};
+    use crate::test_support::{git, git_project};
     use std::fs;
 
     #[test]

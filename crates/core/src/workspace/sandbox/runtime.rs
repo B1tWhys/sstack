@@ -20,7 +20,7 @@ pub(super) const IMAGE_LABEL: &str = "sstack.image";
 const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Whichever program runs a Sandbox's containers.
-#[cfg_attr(test, mockall::automock)]
+#[cfg_attr(any(test, feature = "test-support"), mockall::automock)]
 #[async_trait]
 pub trait ContainerRuntime: Send + Sync {
     /// Returns the runtime's name, as the person would type it.

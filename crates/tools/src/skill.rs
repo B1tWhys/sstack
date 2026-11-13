@@ -3,9 +3,9 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::parse_input;
-use crate::commands::{self, Skill};
-use crate::connection::ToolSpec;
-use crate::tools::{Tool, ToolError};
+use sstack::commands::{self, Skill};
+use sstack::connection::ToolSpec;
+use sstack::tools::{Tool, ToolError};
 
 /// The tool for loading the instructions of an installed [`Skill`], which may live outside the
 /// project. It also lists the files beside the instructions, without opening anything else out
@@ -67,7 +67,7 @@ impl Tool for UseSkill {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::Scope;
+    use sstack::commands::Scope;
     use std::fs;
     use std::path::Path;
 

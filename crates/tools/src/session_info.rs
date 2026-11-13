@@ -3,8 +3,8 @@ use std::sync::PoisonError;
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
-use crate::connection::ToolSpec;
-use crate::tools::{SharedSessionInfo, Tool, ToolError};
+use sstack::connection::ToolSpec;
+use sstack::tools::{SharedSessionInfo, Tool, ToolError};
 
 /// The tool that tells the model about the Session it is working in.
 pub(super) struct ShowSessionInfo {
@@ -43,8 +43,8 @@ mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
 
-    use crate::connection::Effort;
-    use crate::tools::SessionInfo;
+    use sstack::connection::Effort;
+    use sstack::tools::SessionInfo;
 
     /// Returns what the tool tells the model when it knows `effort`.
     async fn shown(effort: Option<Effort>) -> Value {

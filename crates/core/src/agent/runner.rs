@@ -172,8 +172,8 @@ mod tests {
     use crate::agent::AgentConfig;
     use crate::connection::{Effort, scripted::ScriptedProvider};
     use crate::session::{AssistantEntry, SessionLog, StopReason, Usage};
-    use crate::standard_tools::test_support::git_project;
     use crate::tools::DenyAll;
+    use crate::tools::test_support::fake_tools;
 
     /// Returns a model that says `text` once.
     fn model(text: &str) -> Arc<ScriptedProvider> {
@@ -189,13 +189,13 @@ mod tests {
 
     #[tokio::test]
     async fn a_switch_waits_for_the_turns_queued_before_it() {
-        let (dir, _) = git_project();
+        let dir = tempfile::tempdir().unwrap();
         let (first, second) = (model("one"), model("two"));
         let config = AgentConfig {
             provider: first.clone(),
             model: "first".into(),
             system: String::new(),
-            tools: crate::standard_tools::test_support::toolbox(dir.path(), Arc::new(DenyAll)),
+            tools: fake_tools(dir.path(), Arc::new(DenyAll)),
             context_limit: 1000,
         };
         let log = SessionLog::create(&dir.path().join("1.jsonl")).unwrap();

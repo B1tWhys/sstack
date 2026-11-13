@@ -1,5 +1,5 @@
 //! The tools the model can use to work on a project, each an adapter on the port in
-//! [`tools`](crate::tools). A tool module uses only what this module shares, never another tool.
+//! [`sstack::tools`]. A tool module uses only what this crate's root shares, never another tool.
 
 /// The tool that puts Questions to the person.
 mod ask;
@@ -23,8 +23,8 @@ use std::sync::Arc;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-use crate::tools::{Tool, ToolContext, ToolError};
 use project::Project;
+use sstack::tools::{Tool, ToolContext, ToolError};
 
 /// Parses a tool's JSON input into its input type.
 fn parse_input<T: DeserializeOwned>(input: Value) -> Result<T, ToolError> {
@@ -76,39 +76,18 @@ pub fn standard(context: &ToolContext) -> io::Result<Vec<Box<dyn Tool>>> {
 #[cfg(test)]
 pub(crate) mod test_support {
     use std::path::Path;
-    use std::process::Command;
     use std::sync::{Arc, Mutex};
 
-    use async_trait::async_trait;
+    pub use sstack::tools::test_support::{AllowAll, DeferAll};
+    use sstack::tools::{Approver, SessionInfo, ToolBox, ToolContext};
+    use sstack::workspace::Sandbox;
+    pub use sstack::workspace::test_support::git;
 
     use super::project::Project;
-    use crate::protocol::Verdict;
-    use crate::tools::{Approver, SessionInfo, ToolBox, ToolContext};
-    use crate::workspace::Sandbox;
 
     /// A Sandbox that never runs anything, so every shell command asks.
     pub fn disabled() -> Arc<Sandbox> {
         Arc::new(Sandbox::disabled())
-    }
-
-    /// An [`Approver`] that lets every command run, as a person who always says yes.
-    pub struct AllowAll;
-
-    #[async_trait]
-    impl Approver for AllowAll {
-        async fn approve(&self, _command: &str, _note: Option<&str>) -> Verdict {
-            Verdict::Allow
-        }
-    }
-
-    /// An [`Approver`] that puts off every question, as a Rebuild does.
-    pub struct DeferAll;
-
-    #[async_trait]
-    impl Approver for DeferAll {
-        async fn approve(&self, _command: &str, _note: Option<&str>) -> Verdict {
-            Verdict::Defer
-        }
     }
 
     /// A temporary git repository holding `.gitignore` rules for `ignored/` and `*.log`.
@@ -118,16 +97,6 @@ pub(crate) mod test_support {
         std::fs::write(dir.path().join(".gitignore"), "ignored/\n*.log\n").unwrap();
         let project = Arc::new(Project::new(dir.path()).unwrap());
         (dir, project)
-    }
-
-    /// Runs git in `root` with `args`, which must succeed.
-    pub fn git(root: &Path, args: &[&str]) {
-        let mut command = Command::new("git");
-        command.arg("-C").arg(root).args(args);
-        for name in crate::workspace::REPOSITORY_ENV {
-            command.env_remove(name);
-        }
-        assert!(command.status().unwrap().success());
     }
 
     /// What a Session in the Workspace at `root` gives its tools, with a Sandbox that runs
@@ -166,11 +135,11 @@ mod tests {
 
     use super::test_support::{DeferAll, context, git_project, toolbox};
     use super::*;
-    use crate::commands::{Scope, Skill};
-    use crate::connection::Effort;
-    use crate::protocol::{Question, Response};
-    use crate::session::ToolCall;
-    use crate::tools::{Asker, Deferred, DenyAll, ToolBox};
+    use sstack::commands::{Scope, Skill};
+    use sstack::connection::Effort;
+    use sstack::protocol::{Question, Response};
+    use sstack::session::ToolCall;
+    use sstack::tools::{Asker, Deferred, DenyAll, ToolBox};
 
     /// Returns a call to `name` with `input`.
     fn call(name: &str, input: Value) -> ToolCall {

@@ -44,10 +44,10 @@ use sstack::open_session::{
 use sstack::open_session::{ReportingApprover, ReportingAsker};
 use sstack::protocol::SessionReport;
 use sstack::running_harness::{self, Exit};
-use sstack::standard_tools::standard;
 use sstack::tools::{Approver, Asker};
 use sstack::workspace::{Checkout, Containers};
 use sstack::{session, workspace};
+use sstack_tools::standard;
 use theme::ColorDepth;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;

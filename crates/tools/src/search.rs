@@ -11,9 +11,9 @@ use serde_json::{Value, json};
 
 use super::parse_input;
 use super::project::Project;
-use crate::connection::ToolSpec;
-use crate::tools::{Tool, ToolError};
-use crate::workspace::is_protected;
+use sstack::connection::ToolSpec;
+use sstack::tools::{Tool, ToolError};
+use sstack::workspace::is_protected;
 
 /// The most results returned from one search.
 const MAX_RESULTS: usize = 500;
@@ -140,11 +140,11 @@ impl Tool for Search {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::standard_tools::{
+    use crate::{
         project::Project,
         test_support::{git, git_project},
     };
-    use crate::workspace::{self, test_support::repository};
+    use sstack::workspace::{self, test_support::repository};
 
     fn populated() -> (tempfile::TempDir, Search) {
         let (dir, project) = git_project();

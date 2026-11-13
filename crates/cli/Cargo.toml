@@ -26,6 +26,7 @@ crossterm = { version = "0.29", features = ["event-stream"] }
 futures = "0.3"
 ratatui = { version = "0.30", features = ["unstable-rendered-line-info"] }
 sstack = { path = "../core", default-features = false }
+sstack-tools = { path = "../tools" }
 tokio = { version = "1", features = ["macros", "process", "rt-multi-thread", "sync"] }
 tokio-util = "0.7"
 unicode-width = "0.2"

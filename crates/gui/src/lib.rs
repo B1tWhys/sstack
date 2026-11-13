@@ -30,10 +30,10 @@ use sstack::open_session::{
 };
 use sstack::open_session::{ReportingApprover, ReportingAsker};
 use sstack::running_harness::{self, Binary};
-use sstack::standard_tools::standard;
 use sstack::tools::Asker;
 use sstack::workspace::{Checkout, Containers};
 use sstack::{session, workspace};
+use sstack_tools::standard;
 use window::{Message, Opened, Ready, Sessions, Window};
 
 // The flags match the TUI's, except `--prompt`, but are defined apart from the CLI's, because

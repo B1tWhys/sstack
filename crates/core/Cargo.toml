@@ -9,6 +9,9 @@ default = ["nvim-tests"]
 nvim-tests = []
 # Runs the Sandbox tests that need a real Podman, installed and running.
 podman-tests = []
+# Test helpers other crates' tests use: test Approvers, fake tools, git repositories and a mock
+# container runtime.
+test-support = ["dep:mockall"]
 
 [dependencies]
 async-trait = "0.1"
@@ -21,6 +24,7 @@ globset = "0.4"
 home = "0.5"
 ignore = "0.4"
 keyring-core = "1"
+mockall = { version = "0.15.0", optional = true }
 nix = { version = "0.31.3", features = ["signal", "user"] }
 regex = "1"
 rmpv = { version = "1", features = ["with-serde"] }

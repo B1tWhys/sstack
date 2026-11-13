@@ -19,7 +19,7 @@ const EXCLUDE_LINE: &str = ".sstack/";
 /// Variables with which git points its child processes at one repository. Any git run from inside
 /// a hook inherits them, and they must go, because they are wrong anywhere but that repository,
 /// and always wrong in a worktree.
-pub(crate) const REPOSITORY_ENV: [&str; 3] = ["GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE"];
+pub const REPOSITORY_ENV: [&str; 3] = ["GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE"];
 
 /// A git command that failed, with what it said.
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
@@ -215,13 +215,32 @@ fn git(directory: &Path, args: &[&str]) -> Result<String, GitError> {
     }
 }
 
-#[cfg(test)]
-pub(crate) mod test_support {
-    use std::path::Path;
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support {
+    //! Git repositories for tests.
 
-    use crate::standard_tools::test_support::git;
+    use std::path::Path;
+    use std::process::Command;
+
+    use super::REPOSITORY_ENV;
+
+    /// Runs git in `root` with `args`, which must succeed.
+    ///
+    /// # Panics
+    /// Panics if git cannot run or fails.
+    pub fn git(root: &Path, args: &[&str]) {
+        let mut command = Command::new("git");
+        command.arg("-C").arg(root).args(args);
+        for name in REPOSITORY_ENV {
+            command.env_remove(name);
+        }
+        assert!(command.status().unwrap().success());
+    }
 
     /// Makes `root` a repository with one commit, with identity set so that commits work anywhere.
+    ///
+    /// # Panics
+    /// Panics if git cannot run or fails.
     pub fn repository(root: &Path) {
         git(root, &["init", "-q", "-b", "main"]);
         git(root, &["config", "user.email", "test@example.com"]);
@@ -232,9 +251,9 @@ pub(crate) mod test_support {
 
 #[cfg(test)]
 mod tests {
+    use super::test_support::git as run;
     use super::test_support::repository;
     use super::*;
-    use crate::standard_tools::test_support::git as run;
 
     #[test]
     fn a_worktree_is_a_branch_from_the_main_checkout_that_git_status_ignores() {

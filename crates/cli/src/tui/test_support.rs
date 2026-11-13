@@ -11,9 +11,9 @@ use sstack::commands::{self, Location, Scope};
 use sstack::connection::{Config, Connections, Provider, SecretStore};
 use sstack::open_session::{ReportingApprover, ReportingAsker};
 use sstack::session::{self, AssistantEntry, SessionLog, StopReason, ToolCall, Usage};
-use sstack::standard_tools::standard;
 use sstack::tools::{Approver, Asker, SessionInfo, ToolBox, ToolContext};
 use sstack::workspace::Sandbox;
+use sstack_tools::standard;
 
 use super::component::{Component, KeyOutcome};
 use super::event::{EventSender, SessionSender};

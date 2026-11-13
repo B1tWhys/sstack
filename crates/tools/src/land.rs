@@ -8,10 +8,10 @@ use serde_json::{Value, json};
 use tokio::process::Command;
 
 use super::project::Project;
-use crate::connection::ToolSpec;
-use crate::protocol::Verdict;
-use crate::tools::{Approver, Tool, ToolError};
-use crate::workspace::REPOSITORY_ENV;
+use sstack::connection::ToolSpec;
+use sstack::protocol::Verdict;
+use sstack::tools::{Approver, Tool, ToolError};
+use sstack::workspace::REPOSITORY_ENV;
 
 /// How many times to try before giving up on a main branch that keeps moving.
 const ATTEMPTS: usize = 3;
@@ -208,9 +208,9 @@ impl Tool for Land {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::standard_tools::test_support::{AllowAll, git as run};
-    use crate::tools::DenyAll;
-    use crate::workspace::{self, test_support::repository};
+    use crate::test_support::{AllowAll, git as run};
+    use sstack::tools::DenyAll;
+    use sstack::workspace::{self, test_support::repository};
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
 
