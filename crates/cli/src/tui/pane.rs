@@ -7,7 +7,7 @@ use crossterm::cursor::SetCursorStyle;
 use crossterm::event::KeyEvent;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
-use sstack::agent::TurnEnd;
+use sstack::agent::{AgentHandle, TurnEnd};
 use sstack::connections::Connections;
 use sstack::queue::Waits;
 use sstack::running_harness::SessionState;
@@ -15,7 +15,6 @@ use sstack::session::{self, Entry, Naming, SessionSummary};
 use sstack::session_controller::SessionController;
 use sstack::session_report::SessionReport;
 use sstack::skills::Skill;
-use sstack::turn_runner::AgentHandle;
 
 use super::component::{Component, KeyOutcome};
 use super::components::{

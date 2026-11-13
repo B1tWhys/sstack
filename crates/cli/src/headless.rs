@@ -7,8 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use anyhow::Result;
-use sstack::agent::{AgentEvent, TurnContext, TurnEnd};
-use sstack::queued_prompts::QueuedPrompts;
+use sstack::agent::{AgentEvent, QueuedPrompts, TurnContext, TurnEnd};
 use sstack::sandbox::Containers;
 use sstack::session;
 use sstack::session_setup::{Place, Run, Start, prepare};

@@ -7,7 +7,7 @@
 //! and carries out the [`Outcome`] that comes back. The Running Harness reaches the other open
 //! Sessions through [`OpenSessions`], which the interface implements over however it keeps them.
 
-use crate::agent::TurnEnd;
+use crate::agent::{AgentHandle, TurnEnd};
 use crate::connections::Connections;
 use crate::question::Response;
 use crate::running_harness::{Outcome, Refusal, SessionEvent, SessionState};
@@ -16,7 +16,6 @@ use crate::session_report::{Reply, ReportSender, SessionReport};
 use crate::session_setup::SetupError;
 use crate::skills::{self, Lookup, Skill};
 use crate::tools::Verdict;
-use crate::turn_runner::AgentHandle;
 
 /// Control of one open Session, which starts, pauses and cancels its Turns and keeps track of what
 /// it is doing, by the rules every interface shares.

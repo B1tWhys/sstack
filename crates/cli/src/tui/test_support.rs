@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::backend::TestBackend;
 use ratatui::{Frame, Terminal};
-use sstack::agent::{Agent, AgentConfig};
+use sstack::agent::{Agent, AgentConfig, AgentHandle};
 use sstack::config::Config;
 use sstack::connections::Connections;
 use sstack::credentials::SecretStore;
@@ -18,7 +18,6 @@ use sstack::session_report::{ReportingApprover, ReportingAsker};
 use sstack::skills::{self, Location, Scope};
 use sstack::tools::project::Project;
 use sstack::tools::{Approver, ToolBox};
-use sstack::turn_runner::AgentHandle;
 
 use super::component::{Component, KeyOutcome};
 use super::event::{EventSender, SessionSender};

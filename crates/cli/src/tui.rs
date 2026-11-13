@@ -36,6 +36,7 @@ use crossterm::execute;
 use crossterm::style::Print;
 use event::{Event, EventReceiver, EventSender, SessionSender};
 use pane::Opened;
+use sstack::agent::AgentHandle;
 use sstack::question::Asker;
 use sstack::rebuild::{self, Checkout};
 use sstack::running_harness::Exit;
@@ -46,7 +47,6 @@ use sstack::session_setup::{
     sessions_directory, starting_session,
 };
 use sstack::tools::Approver;
-use sstack::turn_runner::AgentHandle;
 use sstack::{session, worktree};
 use theme::ColorDepth;
 use tokio::sync::mpsc;
