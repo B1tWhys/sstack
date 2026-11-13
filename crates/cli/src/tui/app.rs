@@ -14,24 +14,21 @@ use crossterm::terminal::SetTitle;
 use ratatui::backend::Backend;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::{Frame, Terminal};
-use sstack::human_command::Command;
-use sstack::rebuild::Checkout;
-use sstack::running_harness::{
-    Exit, InSession, Outcome, Phase, Refusal, RunningHarness, SessionState,
-};
-use sstack::session_controller::{OpenSessions, SessionController};
-use sstack::session_name;
+use sstack::commands::Command;
+use sstack::open_session::{Exit, OpenSessions, Outcome, Refusal, SessionController, SessionState};
+use sstack::running_harness::{InSession, Phase, RunningHarness};
+use sstack::session::{self, SessionSummary};
 use sstack::vim::{VimEvent, VimFailure};
-use sstack::workspace::SessionSummary;
+use sstack::workspace::Checkout;
 
 use super::component::{Component, KeyOutcome};
 use super::components::{Activity, Row, SIDEBAR_WIDTH, Sidebar};
-use sstack::session_report::SessionReport;
+use sstack::protocol::SessionReport;
 
 use super::event::{Action, Event, EventReceiver};
 use super::pane::{Opened, Pane};
 use super::theme::ColorDepth;
-use sstack::session_setup::{Place, Start};
+use sstack::open_session::{Place, Start};
 
 /// The reason given to the person when a Session cannot be put away during a Turn.
 const BUSY: &str = "a Turn is running: wait for it to end, or press Alt-C to cancel it";
@@ -200,7 +197,7 @@ impl App<'_> {
     /// Titles the terminal after the Session on screen. Goes straight to the terminal, because the
     /// screen library has no notion of a title.
     fn apply_title(&mut self) {
-        let wanted = session_name::title(self.panes[self.shown].known_name().as_deref());
+        let wanted = session::window_title(self.panes[self.shown].known_name().as_deref());
         if wanted != self.title {
             let _ = execute!(io::stdout(), SetTitle(&wanted));
             self.title = wanted;
@@ -682,11 +679,12 @@ mod tests {
     use insta::assert_snapshot;
     use ratatui::backend::TestBackend;
     use ratatui::style::Color;
-    use sstack::provider::scripted::{Scripted, ScriptedProvider};
-    use sstack::provider::{ModelRequest, Provider, ProviderError, StreamEvent};
+    use sstack::connection::{
+        ModelRequest, Provider, ProviderError, StreamEvent,
+        scripted::{Scripted, ScriptedProvider},
+    };
     use sstack::session::{self, AssistantEntry, Entry, SessionLog, StopReason, ToolCall};
     use sstack::vim::Draft;
-    use sstack::workspace;
     use std::cell::RefCell;
     use std::fs;
     use std::path::PathBuf;
@@ -779,7 +777,7 @@ mod tests {
             if let Some(failure) = self.rename_failure {
                 bail!(failure);
             }
-            Ok(workspace::name_session(&self.root, id, name)?)
+            Ok(session::name_session(&self.root, id, name)?)
         }
 
         fn start_build(&mut self, checkout: Checkout, id: &str) {
@@ -1652,7 +1650,7 @@ mod tests {
 
     /// Returns the name the person gave the Session with id `id`, as stored in `dir`.
     fn stored_name(dir: &TempDir, id: &str) -> Option<String> {
-        let listed = workspace::list_sessions(dir.path()).unwrap();
+        let listed = session::list_sessions(dir.path()).unwrap();
         let found = listed
             .into_iter()
             .find(|summary| summary.path == path_of(dir, id));
@@ -1959,7 +1957,7 @@ mod tests {
         h.until_turn_ends().await;
         h.app.handle(built());
         let provider = Arc::new(ScriptedProvider::new(script));
-        let stored = workspace::list_sessions(h.dir.path()).unwrap();
+        let stored = session::list_sessions(h.dir.path()).unwrap();
         let stored = stored
             .into_iter()
             .filter(|summary| summary.parked)

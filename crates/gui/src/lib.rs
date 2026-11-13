@@ -24,15 +24,16 @@ use clap::Parser;
 use iced::futures::future::{BoxFuture, FutureExt};
 use iced::{Application, Program, Task};
 use reports::Reports;
-use sstack::question::Asker;
-use sstack::rebuild::{self, Binary, Checkout};
-use sstack::sandbox::Containers;
-use sstack::session_report::{ReportingApprover, ReportingAsker};
-use sstack::session_setup::{
+use sstack::open_session::{
     AskedConnection, LATEST, Start, listed_sessions, main_checkout, prepare, sessions_directory,
     starting_session,
 };
-use sstack::{workspace, worktree};
+use sstack::open_session::{ReportingApprover, ReportingAsker};
+use sstack::running_harness::{self, Binary};
+use sstack::tools::Asker;
+use sstack::workspace::{Checkout, Containers};
+use sstack::{session, workspace};
+use sstack_tools::standard;
 use window::{Message, Opened, Ready, Sessions, Window};
 
 // The flags match the TUI's, except `--prompt`, but are defined apart from the CLI's, because
@@ -62,7 +63,7 @@ impl Args {
     /// The CLI's `Args::relaunch` does the same for its flags. The two are kept apart for the
     /// reason the flags are.
     fn relaunch(&self, session: &Path) -> Vec<String> {
-        let mut relaunch = vec!["--resume".to_owned(), workspace::session_id(session)];
+        let mut relaunch = vec!["--resume".to_owned(), session::session_id(session)];
         if let Some(model) = &self.model {
             relaunch.extend(["--model".to_owned(), model.clone()]);
         }
@@ -100,7 +101,7 @@ fn run(args: &Args) -> Result<()> {
 
 /// Replaces this process with `binary`, started with `args`, returning why it could not.
 fn relaunch(binary: &Path, args: &[String]) -> anyhow::Error {
-    let failure = rebuild::relaunch(binary, args);
+    let failure = running_harness::relaunch_into(binary, args);
     anyhow!("could not relaunch into {}: {failure}", binary.display())
 }
 
@@ -172,6 +173,7 @@ impl Sessions for LiveSessions {
             .approver(|_| approver)
             .asker(|_| Some(asker))
             .containers(Arc::clone(&self.containers))
+            .tools(&standard)
             .call()?;
         Ok(Opened {
             run,
@@ -181,31 +183,31 @@ impl Sessions for LiveSessions {
     }
 
     fn check_archive(&self, id: &str) -> Result<()> {
-        match worktree::unfinished_work(&self.main, id)? {
+        match workspace::unfinished_work(&self.main, id)? {
             Some(reason) => bail!("{reason}: land it, or use /archive --force"),
             None => Ok(()),
         }
     }
 
     fn archive(&mut self, id: &str) -> Result<()> {
-        worktree::remove(&self.main, id)?;
-        workspace::archive_session(&self.directory, id)?;
+        workspace::remove_worktree(&self.main, id)?;
+        session::archive_session(&self.directory, id)?;
         Ok(())
     }
 
     fn rename(&mut self, id: &str, name: Option<&str>) -> Result<()> {
-        Ok(workspace::name_session(&self.directory, id, name)?)
+        Ok(session::name_session(&self.directory, id, name)?)
     }
 
     fn harness_source(&self, checkout: Checkout, id: &str) -> Result<PathBuf, String> {
-        rebuild::source(checkout, &worktree::path(&self.main, id))
+        running_harness::source_to_build(checkout, &workspace::worktree_path(&self.main, id))
     }
 }
 
 /// Builds `sstack-gui` from the checkout of the Harness Source at `source` for a Rebuild, ending
 /// in where the new binary is or in why the build failed.
 fn build_harness(source: PathBuf) -> BoxFuture<'static, Result<PathBuf, String>> {
-    rebuild::build(HARNESS, source).boxed()
+    running_harness::build_harness(HARNESS, source).boxed()
 }
 
 /// Opens the window on the readied Sessions, which iced asks for once as it starts, along with

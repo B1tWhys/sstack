@@ -11,9 +11,9 @@ use std::process::ExitCode;
 
 use anyhow::Result;
 use clap::Parser;
-use sstack::rebuild::Binary;
-use sstack::session_setup::LATEST;
-use sstack::workspace;
+use sstack::open_session::LATEST;
+use sstack::running_harness::Binary;
+use sstack::session;
 
 /// A coding agent that improves itself.
 #[derive(Debug, Parser)]
@@ -45,7 +45,7 @@ impl Args {
     /// `session`, with the same model as this run. Each Session keeps its own Connection, so the
     /// Connection this run was asked for is not passed on.
     fn relaunch(&self, session: &Path) -> Vec<String> {
-        let mut relaunch = vec!["--resume".to_owned(), workspace::session_id(session)];
+        let mut relaunch = vec!["--resume".to_owned(), session::session_id(session)];
         if let Some(model) = &self.model {
             relaunch.extend(["--model".to_owned(), model.clone()]);
         }

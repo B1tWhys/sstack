@@ -21,6 +21,7 @@ iced = { version = "0.14", features = ["advanced", "highlighter", "markdown", "t
 lucide-icons = { version = "1", features = ["iced"] }
 opener = "0.8"
 sstack = { path = "../core", default-features = false }
+sstack-tools = { path = "../tools" }
 
 [dev-dependencies]
 iced_test = "0.14"

@@ -1,7 +1,7 @@
 //! The way a Session's reports reach the iced app, which reads them through a [`Subscription`].
 
 use iced::Subscription;
-use sstack::session_report::{ReportSender, SessionReport};
+use sstack::protocol::{ReportSender, SessionReport};
 
 use crate::inbox::Inbox;
 

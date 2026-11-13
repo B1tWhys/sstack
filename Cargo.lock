@@ -5439,6 +5439,7 @@ dependencies = [
  "dotenvy",
  "futures",
  "genai",
+ "globset",
  "home",
  "ignore",
  "keyring-core",
@@ -5476,6 +5477,7 @@ dependencies = [
  "ratatui",
  "serde_json",
  "sstack",
+ "sstack-tools",
  "tempfile",
  "tokio",
  "tokio-util",
@@ -5492,6 +5494,22 @@ dependencies = [
  "iced_test",
  "lucide-icons",
  "opener",
+ "serde_json",
+ "sstack",
+ "sstack-tools",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "sstack-tools"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bon",
+ "ignore",
+ "regex",
+ "serde",
  "serde_json",
  "sstack",
  "tempfile",

@@ -4,23 +4,21 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Result, bail};
 use iced::futures::future::{self, BoxFuture, FutureExt};
 use iced::widget::text_editor::{Action, Edit};
 use sstack::agent::{Agent, AgentConfig};
-use sstack::config::Config;
-use sstack::connections::Connections;
-use sstack::credentials::SecretStore;
-use sstack::provider::scripted::{Scripted, ScriptedProvider};
-use sstack::rebuild::Checkout;
-use sstack::sandbox::Sandbox;
+use sstack::connection::{
+    Config, Connections, SecretStore,
+    scripted::{Scripted, ScriptedProvider},
+};
+use sstack::open_session::{ReportingApprover, ReportingAsker, Run, Start};
 use sstack::session::{AssistantEntry, Entry, SessionLog, StopReason, ToolCall, Usage};
-use sstack::session_report::{ReportingApprover, ReportingAsker};
-use sstack::session_setup::{Run, Start};
-use sstack::tools::ToolBox;
-use sstack::tools::project::Project;
+use sstack::tools::{SessionInfo, ToolBox, ToolContext};
+use sstack::workspace::{Checkout, Sandbox};
+use sstack_tools::standard;
 
 use crate::reports::Reports;
 use crate::window::{Message, Opened, Ready, Sessions};
@@ -92,16 +90,22 @@ pub fn store(dir: &Path, id: &str, entries: &[Entry]) {
 fn open_stored(dir: &Path, path: PathBuf, script: Vec<Scripted>) -> Opened {
     let (log, entries) = SessionLog::open(&path).unwrap();
     let (reports, sender) = Reports::new();
+    let context = ToolContext::builder()
+        .root(dir.to_owned())
+        .sandbox(Arc::new(Sandbox::disabled()))
+        .approver(Arc::new(ReportingApprover::new(sender.clone())))
+        .asker(Arc::new(ReportingAsker::new(sender.clone())))
+        .session_info(Arc::new(Mutex::new(SessionInfo {
+            session_id: "1".into(),
+            model: "scripted".into(),
+            effort: None,
+        })))
+        .build();
     let config = AgentConfig {
         provider: Arc::new(ScriptedProvider::new(script)),
         model: "scripted".into(),
         system: String::new(),
-        tools: ToolBox::standard()
-            .project(Arc::new(Project::new(dir).unwrap()))
-            .sandbox(Arc::new(Sandbox::disabled()))
-            .approver(Arc::new(ReportingApprover::new(sender.clone())))
-            .call()
-            .with_asker(Some(Arc::new(ReportingAsker::new(sender.clone())))),
+        tools: ToolBox::new(standard(&context).unwrap(), context.session_info),
         context_limit: 1000,
     };
     let run = Run {

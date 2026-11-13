@@ -7,17 +7,13 @@ use crossterm::cursor::SetCursorStyle;
 use crossterm::event::KeyEvent;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
-use sstack::agent::TurnEnd;
-use sstack::connections::Connections;
-use sstack::queue::Waits;
-use sstack::running_harness::SessionState;
-use sstack::session::{self, Entry};
-use sstack::session_controller::SessionController;
-use sstack::session_name::{self, Naming};
-use sstack::session_report::SessionReport;
-use sstack::skills::Skill;
-use sstack::turn_runner::AgentHandle;
-use sstack::workspace::{self, SessionSummary};
+use sstack::agent::AgentHandle;
+use sstack::commands::Skill;
+use sstack::connection::Connections;
+use sstack::open_session::{SessionController, SessionState};
+use sstack::protocol::{Replayed, SessionReport, TurnEnd};
+use sstack::running_harness::Waits;
+use sstack::session::{self, Naming, SessionSummary};
 
 use super::component::{Component, KeyOutcome};
 use super::components::{
@@ -115,7 +111,7 @@ impl Pane {
 
     /// Creates a pane for the Session at `path`, waiting for the person since `waiting_since`.
     fn blank(path: PathBuf, waiting_since: SystemTime) -> Self {
-        let id = workspace::session_id(&path);
+        let id = session::session_id(&path);
         Self {
             status: Status::new(id.clone()),
             id,
@@ -212,14 +208,14 @@ impl Pane {
             .controller
             .as_ref()
             .is_some_and(SessionController::is_naming);
-        session_name::known(self.name.as_deref(), self.first_prompt.as_deref(), naming)
+        session::known_name(self.name.as_deref(), self.first_prompt.as_deref(), naming)
     }
 
     /// Returns how the sidebar should show this Session as of `now`.
     pub fn row(&self, now: SystemTime) -> Row {
         Row {
             id: self.id.clone(),
-            name: session_name::listed(self.known_name().as_deref()),
+            name: session::listed_name(self.known_name().as_deref()),
             activity: self.activity(),
             waiting: self.state().is_waiting().then(|| self.waits.waited(now)),
         }
@@ -401,10 +397,10 @@ impl Pane {
     }
 }
 
-/// Returns the first thing the person said among `entries`.
-fn first_prompt(entries: &[Entry]) -> Option<String> {
-    entries.iter().find_map(|entry| match entry {
-        Entry::User { text } => Some(text.clone()),
+/// Returns the first thing the person said in what a resumed Session holds.
+fn first_prompt(shown: &[Replayed]) -> Option<String> {
+    shown.iter().find_map(|replayed| match replayed {
+        Replayed::Prompt(text) => Some(text.clone()),
         _ => None,
     })
 }

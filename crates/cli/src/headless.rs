@@ -7,12 +7,13 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use anyhow::Result;
-use sstack::agent::{AgentEvent, TurnContext, TurnEnd};
-use sstack::queued_prompts::QueuedPrompts;
-use sstack::sandbox::Containers;
-use sstack::session_setup::{Place, Run, Start, prepare};
+use sstack::agent::{QueuedPrompts, TurnContext};
+use sstack::open_session::{Place, Run, Start, prepare};
+use sstack::protocol::{AgentEvent, TurnEnd};
+use sstack::session;
 use sstack::tools::DenyAll;
-use sstack::workspace;
+use sstack::workspace::Containers;
+use sstack_tools::standard;
 use tokio_util::sync::CancellationToken;
 
 use crate::Args;
@@ -41,6 +42,7 @@ pub async fn run(args: &Args, prompt: &str) -> Result<ExitCode> {
         .approver(|_| Arc::new(DenyAll))
         .asker(|_| None)
         .containers(Arc::new(Containers::new(Vec::new())))
+        .tools(&standard)
         .call()?;
     let cancel = CancellationToken::new();
     let out = stdout();
@@ -64,7 +66,7 @@ pub async fn run(args: &Args, prompt: &str) -> Result<ExitCode> {
         "{}",
         outcome.map_or_else(String::new, |text| format!("\n{text}\n"))
     );
-    println!("\n[session {}]", workspace::session_id(&session));
+    println!("\n[session {}]", session::session_id(&session));
     Ok(exit_code(result.ok()))
 }
 
@@ -175,7 +177,7 @@ fn tool_finished(name: &str, is_error: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sstack::agent::ToolCallSummary;
+    use sstack::protocol::ToolCallSummary;
 
     #[test]
     fn events_render_as_readable_text() {

@@ -1,6 +1,6 @@
 # sstack
 
-Use the vocabulary in `GLOSSARY.md`. Design decisions are in `docs/adr/`.
+Use the vocabulary in `GLOSSARY.md`. Design decisions are in `docs/adr/`. Before adding a crate or a top-level module, or moving code between them, read `docs/adr/0016-core-is-the-inside-and-everything-else-depends-on-it.md`.
 
 ## Setup
 

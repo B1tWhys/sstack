@@ -6,7 +6,7 @@ use std::rc::Rc;
 use std::time::{Duration, SystemTime};
 
 use iced::keyboard::Modifiers;
-use sstack::workspace::SessionSummary;
+use sstack::session::SessionSummary;
 
 use super::*;
 use crate::test_support::{Done, TestSessions, path_of, store};

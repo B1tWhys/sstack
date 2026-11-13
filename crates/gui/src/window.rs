@@ -25,18 +25,16 @@ use iced::{
 use input::Input;
 use menu::{Menu, MenuEvent};
 use session::SessionView;
-use sstack::connections::Connections;
-use sstack::human_command::Command;
-use sstack::rebuild::Checkout;
-use sstack::running_harness::{
-    Exit, InSession, Outcome, Phase, Refusal, RunningHarness, SessionState,
+use sstack::commands::Command;
+use sstack::connection::Connections;
+use sstack::open_session::{
+    Exit, OpenSessions, Outcome, Place, Refusal, Run, SessionController, SessionState, Start,
 };
-use sstack::session_controller::{OpenSessions, SessionController};
-use sstack::session_name;
-use sstack::session_report::{ReportSender, SessionReport};
-use sstack::session_setup::{Place, Run, Start};
+use sstack::protocol::{ReportSender, SessionReport};
+use sstack::running_harness::{InSession, Phase, RunningHarness};
+use sstack::session::{SessionSummary, window_title};
 use sstack::vim::VimEvent;
-use sstack::workspace::SessionSummary;
+use sstack::workspace::Checkout;
 
 use crate::asked::Controls;
 use crate::reports::Reports;
@@ -510,7 +508,7 @@ impl Window {
 
     /// Returns the window's title, which gives the Session Name of the Session on screen.
     pub fn title(&self) -> String {
-        session_name::title(self.view_ref().known_name().as_deref())
+        window_title(self.view_ref().known_name().as_deref())
     }
 
     /// Returns where every open Session's reports come from, with the keys, requests to close
