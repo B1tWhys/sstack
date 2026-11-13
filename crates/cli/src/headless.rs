@@ -7,8 +7,9 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use anyhow::Result;
-use sstack::agent::{AgentEvent, QueuedPrompts, TurnContext, TurnEnd};
+use sstack::agent::{QueuedPrompts, TurnContext};
 use sstack::open_session::{Place, Run, Start, prepare};
+use sstack::protocol::{AgentEvent, TurnEnd};
 use sstack::session;
 use sstack::tools::DenyAll;
 use sstack::workspace::Containers;
@@ -174,7 +175,7 @@ fn tool_finished(name: &str, is_error: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sstack::agent::ToolCallSummary;
+    use sstack::protocol::ToolCallSummary;
 
     #[test]
     fn events_render_as_readable_text() {

@@ -1,7 +1,7 @@
 //! The messages that drive the interactive harness.
 
 use crossterm::event::KeyEvent;
-use sstack::session_report::{ReportSender, SessionReport};
+use sstack::protocol::{ReportSender, SessionReport};
 use sstack::vim::VimEvent;
 use tokio::sync::mpsc;
 

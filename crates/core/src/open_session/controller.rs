@@ -7,15 +7,13 @@
 //! and carries out the [`Outcome`] that comes back. The Running Harness reaches the other open
 //! Sessions through [`OpenSessions`], which the interface implements over however it keeps them.
 
-use crate::agent::{AgentHandle, TurnEnd};
+use crate::agent::AgentHandle;
 use crate::commands::{self, Lookup, Skill};
 use crate::connection::Connections;
 use crate::open_session::SetupError;
-use crate::question::Response;
+use crate::protocol::{Reply, ReportSender, Response, SessionReport, TurnEnd, Verdict};
 use crate::running_harness::{Outcome, Refusal, SessionEvent, SessionState};
 use crate::session::Naming;
-use crate::session_report::{Reply, ReportSender, SessionReport};
-use crate::tools::Verdict;
 
 /// Control of one open Session, which starts, pauses and cancels its Turns and keeps track of what
 /// it is doing, by the rules every interface shares.
@@ -325,12 +323,14 @@ mod tests {
     use crate::agent::{Agent, AgentConfig};
     use crate::commands::Command;
     use crate::connection::scripted::ScriptedProvider;
+    use crate::protocol::{ApprovalRequest, QuestionRequest};
     use crate::running_harness::{Exit, RunningHarness};
     use crate::session::{AssistantEntry, Entry, SessionLog, StopReason, Usage};
-    use crate::session_report::{ApprovalRequest, QuestionRequest};
-    use crate::tools::project::Project;
-    use crate::tools::test_support::{disabled, git_project};
-    use crate::tools::{DenyAll, ToolBox};
+    use crate::tools::{
+        DenyAll, ToolBox,
+        project::Project,
+        test_support::{disabled, git_project},
+    };
     use crate::workspace::Checkout;
 
     /// Opens a new Session called `name` in `dir`, whose reports go nowhere, so that what the

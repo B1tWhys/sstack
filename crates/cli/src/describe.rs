@@ -2,8 +2,8 @@
 
 use std::fmt::Display;
 
-use sstack::agent::{ToolCallSummary, TurnEnd};
 use sstack::commands::Skill;
+use sstack::protocol::{ToolCallSummary, TurnEnd};
 
 /// The most characters of a tool call's input to show.
 const MAX_TOOL_INPUT_CHARS: usize = 200;

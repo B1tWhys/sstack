@@ -2,10 +2,10 @@
 
 use std::collections::HashSet;
 
+use crate::protocol::{Replayed, TurnEnd};
 use crate::session::{AssistantEntry, Entry};
-use crate::session_report::Replayed;
 
-use super::turn::{TurnEnd, calls_not_started};
+use super::turn::calls_not_started;
 
 /// Returns what `entries` show, in order, for an interface to draw a resumed Session as it drew
 /// it live.
@@ -60,7 +60,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::agent::ToolCallSummary;
+    use crate::protocol::ToolCallSummary;
     use crate::session::{StopReason, ToolCall};
 
     /// Returns a response that says `text` and calls `read` once for each id in `calls`.

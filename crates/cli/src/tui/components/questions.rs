@@ -7,8 +7,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Rect};
 use ratatui::text::{Line, Text};
 use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
-use sstack::question::{self, Answer, Question, Response};
-use sstack::session_report::{QuestionRequest, SessionReport};
+use sstack::protocol::{self, Answer, Question, QuestionRequest, Response, SessionReport};
 
 use crate::describe;
 use crate::tui::component::{Component, KeyOutcome};
@@ -233,7 +232,7 @@ impl Component for Questions {
         let note = match form.key(key.code) {
             Step::Answering => return KeyOutcome::Handled,
             Step::Done(answers) => {
-                let described = question::describe_all(&form.request.questions, &answers);
+                let described = protocol::describe_all(&form.request.questions, &answers);
                 form.request.reply.send(Response::Answered(answers));
                 describe::answered(&described)
             }
@@ -270,9 +269,7 @@ mod tests {
     use super::*;
     use crate::tui::test_support::{drawn, key, type_into};
     use insta::assert_snapshot;
-    use sstack::agent::TurnEnd;
-    use sstack::question::Choice;
-    use sstack::session_report::Reply;
+    use sstack::protocol::{Choice, Reply, TurnEnd};
     use tokio::sync::oneshot;
 
     /// What the person answered, or `None` if they declined.

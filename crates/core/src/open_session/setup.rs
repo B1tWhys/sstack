@@ -16,13 +16,10 @@ use crate::connection::{
     self, Config, ConfigError, Connection, Connections, MissingSecret, Provider, ProviderError,
     SystemKeyring, resolve_secret,
 };
-use crate::question::Asker;
-use crate::session::Naming;
-use crate::session::SessionMetadata;
-use crate::session::{self, SessionSummary, SkillListing};
-use crate::session::{Entry, SessionError, SessionLog};
-use crate::tools::project::Project;
-use crate::tools::{Approver, Land, SessionInfo, ToolBox};
+use crate::session::{
+    self, Entry, Naming, SessionError, SessionLog, SessionMetadata, SessionSummary, SkillListing,
+};
+use crate::tools::{Approver, Asker, Land, SessionInfo, ToolBox, project::Project};
 use crate::workspace::{self, Containers, Sandbox};
 
 /// The Session id that asks to resume the newest Session, archived or not.

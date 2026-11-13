@@ -98,9 +98,11 @@ Note on `session/`: done. The facade flattens names, so functions that leaned on
 
 Note on the other groups: done, one commit each. More renames for the same reason: `connections::open` and `record` became `open_connection` and `record_connection`; the Skill functions became `discover_skills`, `skill_locations`, `find_skill` and `load_skill`; the worktree functions became `worktree_path`, `worktree_branch`, `rename_worktree_branch`, `create_worktree`, `remove_worktree` and `main_checkout_of`; the Rebuild functions became `source_to_build`, `build_harness` and `relaunch_into`. `agent.rs` is `agent/turn.rs`, `turn_runner.rs` is `agent/runner.rs`, and `running_harness.rs` is `running_harness/rules.rs`. `Checkout` moved to `workspace/worktree`. `.config/nextest.toml` gives the Podman tests a longer timeout by test path, so moving a test module means updating that filter. `question` and `session_report` stay top-level until step 3, and `tools` until step 5.
 
-### [ ] 3. Extract `protocol`
+### [x] 3. Extract `protocol`
 
 Move the boundary types into `protocol.rs`, add the replay type for `Resumed`, and convert both transcripts to read it.
+
+Note: done in two commits, the replay type first so that `protocol` could be a leaf from the start. The replay type is `Replayed`, made by `agent::replay`, which now leaves out the calls a put-off Turn never started, so `calls_not_started` is private to `agent/`. `SessionEvent` stayed in `running_harness/rules`, because no interface uses it. The `Asker` trait moved to `tools.rs` beside `Approver`, as both are ports the tools call. `ReportingApprover` and `ReportingAsker` are in `open_session/reporting.rs`. `describe_all` is used by the `ask` tool and the GUI as well as the TUI.
 
 ### [ ] 4. One Protected Path rule
 

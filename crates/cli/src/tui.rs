@@ -41,10 +41,10 @@ use sstack::open_session::{
     AskedConnection, Start, installed_skills, listed_sessions, main_checkout, prepare,
     sessions_directory, starting_session,
 };
-use sstack::question::Asker;
+use sstack::open_session::{ReportingApprover, ReportingAsker};
+use sstack::protocol::SessionReport;
 use sstack::running_harness::{self, Exit};
-use sstack::session_report::{ReportingApprover, ReportingAsker, SessionReport};
-use sstack::tools::Approver;
+use sstack::tools::{Approver, Asker};
 use sstack::workspace::{Checkout, Containers};
 use sstack::{session, workspace};
 use theme::ColorDepth;

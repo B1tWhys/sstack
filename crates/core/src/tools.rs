@@ -25,7 +25,7 @@ use serde_json::Value;
 
 use crate::commands::Skill;
 use crate::connection::{Effort, ToolSpec};
-use crate::question::Asker;
+use crate::protocol::{Question, Response, Verdict};
 use crate::session::ToolCall;
 use crate::workspace::Sandbox;
 pub use land::Land;
@@ -40,16 +40,11 @@ pub trait Approver: Send + Sync {
     async fn approve(&self, command: &str, note: Option<&str>) -> Verdict;
 }
 
-/// What became of a question whether the model may run a command on the host.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Verdict {
-    /// The command may run.
-    Allow,
-    /// The command may not run, and the model is told so.
-    Deny,
-    /// Nobody decided, because a Rebuild put the question off. The call that asked runs again,
-    /// asking again, when its Turn carries on.
-    Defer,
+/// Someone who answers the model's [`Question`]s.
+#[async_trait]
+pub trait Asker: Send + Sync {
+    /// Puts `questions` to the person and waits for what becomes of them.
+    async fn ask(&self, questions: Vec<Question>) -> Response;
 }
 
 /// An [`Approver`] that refuses everything, for runs with nobody to ask.
@@ -405,9 +400,9 @@ mod tests {
         impl Asker for Silent {
             async fn ask(
                 &self,
-                _questions: Vec<crate::question::Question>,
-            ) -> crate::question::Response {
-                crate::question::Response::Declined
+                _questions: Vec<crate::protocol::Question>,
+            ) -> crate::protocol::Response {
+                crate::protocol::Response::Declined
             }
         }
 

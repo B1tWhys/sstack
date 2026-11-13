@@ -3,11 +3,12 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::agent::{Agent, ModelService, QueuedPrompts, TurnContext, TurnEnd, replay};
+use crate::agent::{Agent, ModelService, QueuedPrompts, TurnContext, replay};
+use crate::protocol::TurnEnd;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::session_report::{ReportSender, SessionReport};
+use crate::protocol::{ReportSender, SessionReport};
 
 /// An interface's handle on an agent that runs on its own task, for starting and cancelling Turns.
 ///
@@ -171,9 +172,11 @@ mod tests {
     use crate::agent::AgentConfig;
     use crate::connection::{Effort, scripted::ScriptedProvider};
     use crate::session::{AssistantEntry, SessionLog, StopReason, Usage};
-    use crate::tools::project::Project;
-    use crate::tools::test_support::{disabled, git_project};
-    use crate::tools::{DenyAll, ToolBox};
+    use crate::tools::{
+        DenyAll, ToolBox,
+        project::Project,
+        test_support::{disabled, git_project},
+    };
 
     /// Returns a model that says `text` once.
     fn model(text: &str) -> Arc<ScriptedProvider> {

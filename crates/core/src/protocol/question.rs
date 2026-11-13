@@ -1,10 +1,9 @@
 //! Questions the model puts to the person, and the answers that come back.
 //!
 //! The model asks through the `ask` tool, and each interface shows the questions its own way
-//! through an [`Asker`]. A Question offers choices, one of which the model may recommend, and
-//! the person can always answer in their own words instead.
+//! through an [`Asker`](crate::tools::Asker). A Question offers choices, one of which the model
+//! may recommend, and the person can always answer in their own words instead.
 
-use async_trait::async_trait;
 use serde::Deserialize;
 
 /// Something the model asks the person and waits for them to decide, holding up its Turn.
@@ -105,13 +104,6 @@ pub enum Response {
     /// Nobody decided, because a Rebuild put the Questions off. The call that asked them runs
     /// again, asking them again, when its Turn carries on.
     Deferred,
-}
-
-/// Someone who answers the model's [`Question`]s.
-#[async_trait]
-pub trait Asker: Send + Sync {
-    /// Puts `questions` to the person and waits for what becomes of them.
-    async fn ask(&self, questions: Vec<Question>) -> Response;
 }
 
 #[cfg(test)]

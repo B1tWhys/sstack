@@ -28,9 +28,9 @@ use sstack::open_session::{
     AskedConnection, LATEST, Start, listed_sessions, main_checkout, prepare, sessions_directory,
     starting_session,
 };
-use sstack::question::Asker;
+use sstack::open_session::{ReportingApprover, ReportingAsker};
 use sstack::running_harness::{self, Binary};
-use sstack::session_report::{ReportingApprover, ReportingAsker};
+use sstack::tools::Asker;
 use sstack::workspace::{Checkout, Containers};
 use sstack::{session, workspace};
 use window::{Message, Opened, Ready, Sessions, Window};

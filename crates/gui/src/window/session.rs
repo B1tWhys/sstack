@@ -6,14 +6,14 @@ use std::time::SystemTime;
 
 use iced::Subscription;
 use iced::widget::text_editor;
-use sstack::agent::{AgentHandle, TurnEnd};
+use sstack::agent::AgentHandle;
 use sstack::connection::Connections;
 use sstack::open_session::SessionController;
-use sstack::question::{Answer, Response};
+use sstack::protocol::{
+    Answer, ApprovalRequest, QuestionRequest, Replayed, Response, SessionReport, TurnEnd, Verdict,
+};
 use sstack::running_harness::{SessionState, Waits};
 use sstack::session::{self, SessionSummary};
-use sstack::session_report::{ApprovalRequest, QuestionRequest, Replayed, SessionReport};
-use sstack::tools::Verdict;
 use sstack::vim::VimEvent;
 
 use super::input::Input;

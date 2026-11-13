@@ -5,7 +5,7 @@ use ratatui::layout::Rect;
 use ratatui::text::Line;
 
 use crate::tui::component::Component;
-use sstack::session_report::SessionReport;
+use sstack::protocol::SessionReport;
 
 use crate::tui::event::Event;
 use crate::tui::theme;
@@ -89,7 +89,7 @@ mod tests {
     use super::*;
     use crate::tui::test_support::drawn;
     use insta::assert_snapshot;
-    use sstack::agent::TurnEnd;
+    use sstack::protocol::TurnEnd;
 
     #[test]
     fn shows_the_session_and_whether_a_turn_is_running() {

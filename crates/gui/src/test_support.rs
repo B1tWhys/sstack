@@ -14,11 +14,9 @@ use sstack::connection::{
     Config, Connections, SecretStore,
     scripted::{Scripted, ScriptedProvider},
 };
-use sstack::open_session::{Run, Start};
+use sstack::open_session::{ReportingApprover, ReportingAsker, Run, Start};
 use sstack::session::{AssistantEntry, Entry, SessionLog, StopReason, ToolCall, Usage};
-use sstack::session_report::{ReportingApprover, ReportingAsker};
-use sstack::tools::ToolBox;
-use sstack::tools::project::Project;
+use sstack::tools::{ToolBox, project::Project};
 use sstack::workspace::{Checkout, Sandbox};
 
 use crate::reports::Reports;

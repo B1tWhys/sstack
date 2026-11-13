@@ -19,14 +19,13 @@ use sstack::open_session::{OpenSessions, SessionController};
 use sstack::running_harness::{
     Exit, InSession, Outcome, Phase, Refusal, RunningHarness, SessionState,
 };
-use sstack::session;
-use sstack::session::SessionSummary;
+use sstack::session::{self, SessionSummary};
 use sstack::vim::{VimEvent, VimFailure};
 use sstack::workspace::Checkout;
 
 use super::component::{Component, KeyOutcome};
 use super::components::{Activity, Row, SIDEBAR_WIDTH, Sidebar};
-use sstack::session_report::SessionReport;
+use sstack::protocol::SessionReport;
 
 use super::event::{Action, Event, EventReceiver};
 use super::pane::{Opened, Pane};

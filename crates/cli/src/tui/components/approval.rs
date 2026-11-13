@@ -8,8 +8,7 @@ use ratatui::layout::{Constraint, Rect};
 use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
 
 use crate::tui::component::{Component, KeyOutcome};
-use sstack::session_report::{ApprovalRequest, SessionReport};
-use sstack::tools::Verdict;
+use sstack::protocol::{ApprovalRequest, SessionReport, Verdict};
 
 use crate::tui::event::{Action, Event};
 use crate::tui::theme;
@@ -92,8 +91,7 @@ mod tests {
     use super::*;
     use crate::tui::test_support::{drawn, key, screen};
     use insta::assert_snapshot;
-    use sstack::agent::TurnEnd;
-    use sstack::session_report::Reply;
+    use sstack::protocol::{Reply, TurnEnd};
     use tokio::sync::oneshot;
 
     fn ask(approval: &mut Approval, command: &str) -> oneshot::Receiver<Verdict> {

@@ -8,11 +8,10 @@ use iced::keyboard::{self, Key, key::Named};
 use iced::mouse::{self, ScrollDelta};
 use iced_test::{Simulator, runtime, simulator};
 use serde_json::json;
-use sstack::agent::{AgentEvent, ToolCallSummary};
 use sstack::connection::scripted::{Scripted, ScriptedProvider};
+use sstack::protocol::{AgentEvent, ToolCallSummary};
 use sstack::running_harness::SessionState;
-use sstack::session::Naming;
-use sstack::session::{Entry, StopReason, ToolCall};
+use sstack::session::{Entry, Naming, StopReason, ToolCall};
 use tempfile::TempDir;
 
 use super::*;

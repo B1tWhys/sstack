@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::connection::{ModelRequest, Provider};
+use crate::protocol::{ReportSender, SessionReport};
 use crate::session::Entry;
-use crate::session_report::{ReportSender, SessionReport};
 use crate::{session, workspace};
 
 /// What a Session is called before anything names it, and while its Session Name is being made.

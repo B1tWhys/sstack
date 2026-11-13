@@ -14,9 +14,9 @@ use std::collections::HashMap;
 use iced::widget::{Space, Text, button, column, container, hover, row, text};
 use iced::{Element, Fill, Font};
 use lucide_icons::Icon;
-use sstack::agent::{AgentEvent, ToolCallSummary, TurnEnd};
-use sstack::question::Question;
-use sstack::session_report::{ApprovalRequest, Replayed, SessionReport};
+use sstack::protocol::{
+    AgentEvent, ApprovalRequest, Question, Replayed, SessionReport, ToolCallSummary, TurnEnd,
+};
 
 use crate::asked::{Asked, Asking, Controls};
 use crate::hint::hint;
@@ -584,8 +584,8 @@ fn turn_end_text(end: TurnEnd) -> Option<&'static str> {
 
 #[cfg(test)]
 mod tests {
-    use sstack::agent::AgentEvent;
     use sstack::agent::replay;
+    use sstack::protocol::AgentEvent;
     use sstack::session::{AssistantEntry, Entry};
 
     use super::*;

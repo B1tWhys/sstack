@@ -8,11 +8,11 @@ use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::{Line, Text};
 use ratatui::widgets::{Paragraph, Wrap};
-use sstack::agent::{AgentEvent, TurnEnd};
+use sstack::protocol::{AgentEvent, TurnEnd};
 
 use crate::describe;
 use crate::tui::component::{Component, KeyOutcome};
-use sstack::session_report::{Replayed, SessionReport};
+use sstack::protocol::{Replayed, SessionReport};
 
 use crate::tui::event::{Event, Scroll};
 use crate::tui::theme;
@@ -216,8 +216,8 @@ mod tests {
     use crate::tui::test_support::{bash_call, reply};
     use crate::tui::test_support::{drawn, key, screen};
     use insta::assert_snapshot;
-    use sstack::agent::ToolCallSummary;
     use sstack::agent::replay;
+    use sstack::protocol::ToolCallSummary;
     use sstack::session::{AssistantEntry, Entry, StopReason};
 
     fn transcript(events: Vec<Event>) -> Transcript {

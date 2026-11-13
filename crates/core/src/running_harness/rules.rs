@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 use crate::commands::{Command, parse_command};
 use crate::open_session::{OpenSessions, SessionController};
-use crate::session_report::SessionReport;
+use crate::protocol::SessionReport;
 use crate::workspace::Checkout;
 
 /// What a Session is doing, which decides how the person can interact with it.

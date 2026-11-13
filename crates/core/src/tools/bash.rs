@@ -171,8 +171,10 @@ impl Tool for Bash {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tools::DenyAll;
-    use crate::tools::test_support::{AllowAll, disabled, git_project};
+    use crate::tools::{
+        DenyAll,
+        test_support::{AllowAll, disabled, git_project},
+    };
     use crate::workspace::{Containers, MockContainerRuntime};
     use std::os::unix::process::ExitStatusExt;
     use std::process::ExitStatus;

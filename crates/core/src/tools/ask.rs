@@ -4,9 +4,9 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use super::{Tool, ToolError, parse_input};
+use super::{Asker, Tool, ToolError, parse_input};
 use crate::connection::ToolSpec;
-use crate::question::{self, Asker, Question, Response};
+use crate::protocol::{self, Question, Response};
 
 /// The most Questions the model may ask at once, so the person is not buried in them.
 const MAX_QUESTIONS: usize = 4;
@@ -141,7 +141,7 @@ impl Tool for Ask {
         let AskInput { questions } = parse_input(input)?;
         check(&questions)?;
         match self.asker.ask(questions.clone()).await {
-            Response::Answered(answers) => Ok(question::describe_all(&questions, &answers)),
+            Response::Answered(answers) => Ok(protocol::describe_all(&questions, &answers)),
             Response::Declined => Err(ToolError::Failed(DECLINED.to_owned())),
             Response::Deferred => Err(ToolError::Deferred),
         }
@@ -151,7 +151,7 @@ impl Tool for Ask {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::question::Answer;
+    use crate::protocol::Answer;
     use std::sync::Mutex;
 
     /// An Asker that gives `answers`, or declines if there are none, and remembers what it was

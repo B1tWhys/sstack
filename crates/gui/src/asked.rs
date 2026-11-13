@@ -3,7 +3,7 @@
 
 use iced::widget::{button, column, mouse_area, radio, row, text, text_input};
 use iced::{Element, Fill};
-use sstack::question::{self, Answer, Question};
+use sstack::protocol::{self, Answer, Question};
 
 /// Space between the parts of a set of Questions, in logical pixels.
 const SPACING: f32 = 10.0;
@@ -113,7 +113,7 @@ impl Asked {
             Asking::Open => self.open_view(controls),
             Asking::Answered(answers) => text(format!(
                 "Answered: {}",
-                question::describe_all(&self.questions, answers)
+                protocol::describe_all(&self.questions, answers)
             ))
             .into(),
             Asking::Declined => text("Note: you chose to answer the questions in the chat").into(),
@@ -213,7 +213,7 @@ fn pickable<'a, Message: Clone + 'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sstack::question::Choice;
+    use sstack::protocol::Choice;
 
     fn question(labels: &[&str], recommended: Option<usize>) -> Question {
         Question {

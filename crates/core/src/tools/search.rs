@@ -132,8 +132,10 @@ impl Tool for Search {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tools::project::Project;
-    use crate::tools::test_support::{git, git_project};
+    use crate::tools::{
+        project::Project,
+        test_support::{git, git_project},
+    };
     use crate::workspace::{self, test_support::repository};
 
     fn populated() -> (tempfile::TempDir, Search) {

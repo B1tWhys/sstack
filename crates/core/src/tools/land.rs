@@ -207,8 +207,10 @@ impl Tool for Land {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tools::test_support::{AllowAll, git as run};
-    use crate::tools::{DenyAll, ToolBox};
+    use crate::tools::{
+        DenyAll, ToolBox,
+        test_support::{AllowAll, git as run},
+    };
     use crate::workspace::{self, test_support::repository};
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
