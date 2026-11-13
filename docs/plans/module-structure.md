@@ -122,11 +122,8 @@ Create `crates/tools`, move each tool into its own module there along with the s
 
 Note: done. Core has a `test-support` feature, which `sstack-tools` turns on for its own tests. It exposes `tools::test_support` (`AllowAll`, `DeferAll` and `fake_tools`, which are fake `read`, `write` and `bash` tools), `workspace::test_support` (`git`, `repository`) and `MockContainerRuntime`. Core's own tests use the fakes. `REPOSITORY_ENV` is public, because `land` and path resolution need it at run time.
 
-### [ ] 7. Write the ADRs and the `AGENTS.md` line
+### [x] 7. Write the ADRs and the `AGENTS.md` line
 
 Write ADRs 0016, 0017 and 0018, the `lib.rs` layering doc, and the `AGENTS.md` pointer. Load `writing-for-agents` before editing `AGENTS.md`.
 
-Note, in progress: drafts of the three ADRs are in `docs/adr/`, not yet committed. A check of the real imports found edges against the agreed direction. `connection` imported `agent` and `open_session`, which is fixed in its own commit: `ModelService` moved to `connection`, which now has its own `ConnectionError`. Two findings remain:
-
-- `open_session/controller` and `running_harness/rules` import each other. The controller uses `SessionState`, `SessionEvent`, `Outcome` and `Refusal` from the rules. This is waiting on the person's decision.
-- `tools.rs` is not a leaf. It imports types from the domain groups (`Skill`, `ToolSpec`, `ToolCall`, `Sandbox`), so it sits above them, and `agent` sits above it. Only `protocol` is a true leaf. `session` and `connection` also import each other, since naming a Session needs a Provider and a Provider reads Session entries. The ADRs should describe this as it is.
+Note: done. A check of the real imports found edges against the agreed direction, now fixed in their own commits. `connection` imported `agent` and `open_session`, so `ModelService` moved to `connection`, which has its own `ConnectionError`. `open_session` and `running_harness` imported each other, so `SessionState`, `SessionEvent`, `Outcome`, `Refusal` and `Exit` moved to `open_session/state.rs`. The person chose to let domain groups import each other (`session` and `connection` do), and `tools` is a port above the domain groups, not a leaf. ADR-0016 and core's `lib.rs` doc describe the layers as they are.
