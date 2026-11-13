@@ -3,7 +3,8 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::agent::{Agent, ModelService, QueuedPrompts, TurnContext, replay};
+use crate::agent::{Agent, QueuedPrompts, TurnContext, replay};
+use crate::connection::ModelService;
 use crate::protocol::TurnEnd;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;

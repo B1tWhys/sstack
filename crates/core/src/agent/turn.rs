@@ -8,7 +8,9 @@ use std::time::SystemTime;
 use tokio_util::sync::CancellationToken;
 
 use crate::agent::QueuedPrompts;
-use crate::connection::{Effort, ModelRequest, Provider, ProviderError, StreamEvent, ToolSpec};
+use crate::connection::{
+    ModelRequest, ModelService, Provider, ProviderError, StreamEvent, ToolSpec,
+};
 use crate::protocol::{AgentEvent, ToolCallSummary, TurnEnd};
 use crate::session::{AssistantEntry, Entry, SessionError, SessionLog, StopReason, ToolCall};
 use crate::tools::ToolBox;
@@ -40,18 +42,6 @@ pub struct AgentConfig {
     pub system: String,
     /// The tools offered to the model.
     pub tools: ToolBox,
-    /// The model's context window, in tokens.
-    pub context_limit: u64,
-}
-
-/// The model a Session moves to when the person switches its Connection, and what serves it.
-pub struct ModelService {
-    /// The service that runs the model.
-    pub provider: Arc<dyn Provider>,
-    /// The identifier of the model to request.
-    pub model: String,
-    /// How much effort the model is asked to spend, which the model can learn about the Session.
-    pub effort: Effort,
     /// The model's context window, in tokens.
     pub context_limit: u64,
 }
@@ -422,6 +412,7 @@ fn unanswered_calls(entries: &[Entry]) -> Vec<ToolCall> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::connection::Effort;
     use crate::connection::scripted::{Scripted, ScriptedProvider};
     use crate::session::Usage;
     use crate::tools::test_support::{AllowAll, DeferAll, fake_tools};

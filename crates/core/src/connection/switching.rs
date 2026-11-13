@@ -1,14 +1,45 @@
 //! The Connections a Session can run on, and moving it from one to another between Turns.
 
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use bon::bon;
 
-use crate::agent::ModelService;
-use crate::connection::{Config, Connection, Effort, Provider, SecretStore, resolve_secret};
-use crate::open_session::SetupError;
+use crate::connection::{
+    Config, ConfigError, Connection, Effort, MissingSecret, Provider, ProviderError, SecretStore,
+    resolve_secret,
+};
 use crate::session::SessionMetadata;
+
+/// Why a Session could not be put on a Connection.
+#[derive(Debug, thiserror::Error)]
+pub enum ConnectionError {
+    /// The Session Metadata recording the Connection could not be written.
+    #[error(transparent)]
+    Io(#[from] io::Error),
+    /// The user's settings name no such Connection.
+    #[error(transparent)]
+    Config(#[from] ConfigError),
+    /// The Connection's secret is in none of the places it is looked for.
+    #[error(transparent)]
+    MissingSecret(#[from] MissingSecret),
+    /// The Connection's Provider could not be set up with its secret.
+    #[error(transparent)]
+    Provider(#[from] ProviderError),
+}
+
+/// The model a Session moves to when the person switches its Connection, and what serves it.
+pub struct ModelService {
+    /// The service that runs the model.
+    pub provider: Arc<dyn Provider>,
+    /// The identifier of the model to request.
+    pub model: String,
+    /// How much effort the model is asked to spend, which the model can learn about the Session.
+    pub effort: Effort,
+    /// The model's context window, in tokens.
+    pub context_limit: u64,
+}
 
 /// The Connections one Session can switch between, with the one it runs on now.
 pub struct Connections {
@@ -47,7 +78,7 @@ pub struct Opened {
 ///
 /// # Errors
 /// Returns an error if the Connection's Provider cannot be set up.
-pub fn open_connection(connection: &Connection, secret: String) -> Result<Opened, SetupError> {
+pub fn open_connection(connection: &Connection, secret: String) -> Result<Opened, ConnectionError> {
     let namer = Connection {
         effort: Effort::Low,
         ..connection.clone()
@@ -107,7 +138,7 @@ impl Connections {
     /// Returns an error, and changes nothing, if settings have no such Connection, its secret is
     /// in none of the places it is looked for, its Provider cannot be set up, or the choice
     /// cannot be recorded.
-    pub fn switch(&mut self, name: &str) -> Result<Option<Switch>, SetupError> {
+    pub fn switch(&mut self, name: &str) -> Result<Option<Switch>, ConnectionError> {
         if name == self.current {
             return Ok(None);
         }
@@ -135,7 +166,7 @@ impl Connections {
 ///
 /// # Errors
 /// Returns an error if the Session Metadata cannot be changed.
-pub fn record_connection(log: &Path, name: &str) -> Result<(), SetupError> {
+pub fn record_connection(log: &Path, name: &str) -> Result<(), ConnectionError> {
     SessionMetadata::update(log, |metadata| metadata.connection = Some(name.to_owned()))?;
     Ok(())
 }
@@ -214,10 +245,13 @@ mod tests {
         let missing = connections.switch("unset").err().unwrap();
         let unknown = connections.switch("nope").err().unwrap();
 
-        assert!(matches!(missing, SetupError::MissingSecret(_)), "{missing}");
+        assert!(
+            matches!(missing, ConnectionError::MissingSecret(_)),
+            "{missing}"
+        );
         assert!(matches!(
             unknown,
-            SetupError::Config(ConfigError::UnknownConnection(_))
+            ConnectionError::Config(ConfigError::UnknownConnection(_))
         ));
         assert_eq!(connections.current(), "anthropic");
         assert_eq!(SessionMetadata::read(&log).unwrap().connection, None);

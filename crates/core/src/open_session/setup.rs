@@ -13,8 +13,8 @@ use bon::builder;
 use crate::agent::{Agent, AgentConfig};
 use crate::commands::{self, Skill};
 use crate::connection::{
-    self, Config, ConfigError, Connection, Connections, MissingSecret, Provider, ProviderError,
-    SystemKeyring, resolve_secret,
+    self, Config, ConfigError, Connection, ConnectionError, Connections, MissingSecret, Provider,
+    ProviderError, SystemKeyring, resolve_secret,
 };
 use crate::session::{
     self, Entry, Naming, SessionError, SessionLog, SessionMetadata, SessionSummary, SkillListing,
@@ -54,6 +54,17 @@ pub enum SetupError {
     /// The Connection's Provider could not be set up with its secret.
     #[error(transparent)]
     Provider(#[from] ProviderError),
+}
+
+impl From<ConnectionError> for SetupError {
+    fn from(error: ConnectionError) -> Self {
+        match error {
+            ConnectionError::Io(error) => Self::Io(error),
+            ConnectionError::Config(error) => Self::Config(error),
+            ConnectionError::MissingSecret(error) => Self::MissingSecret(error),
+            ConnectionError::Provider(error) => Self::Provider(error),
+        }
+    }
 }
 
 /// Returns where the harness keeps its files within `base`, failing if `base` is unknown.

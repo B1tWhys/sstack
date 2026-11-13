@@ -9,4 +9,4 @@ mod turn;
 pub use queued_prompts::QueuedPrompts;
 pub use replay::replay;
 pub use runner::AgentHandle;
-pub use turn::{Agent, AgentConfig, AgentError, EventSink, ModelService, TurnContext};
+pub use turn::{Agent, AgentConfig, AgentError, EventSink, TurnContext};

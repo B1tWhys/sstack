@@ -13,4 +13,6 @@ pub use provider::{
 };
 #[cfg(test)]
 pub(crate) use switching::test_support;
-pub use switching::{Connections, Opened, Switch, open_connection, record_connection};
+pub use switching::{
+    ConnectionError, Connections, ModelService, Opened, Switch, open_connection, record_connection,
+};
