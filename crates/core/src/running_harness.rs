@@ -7,7 +7,4 @@ mod rules;
 
 pub use queue::Waits;
 pub use rebuild::{Binary, build_harness, relaunch_into, source_to_build};
-pub use rules::{
-    Effect, Exit, InSession, Interrupt, Outcome, Phase, Refusal, RunningHarness, SessionEvent,
-    SessionState, Trigger, interrupt,
-};
+pub use rules::{Effect, InSession, Interrupt, Phase, RunningHarness, Trigger, interrupt};

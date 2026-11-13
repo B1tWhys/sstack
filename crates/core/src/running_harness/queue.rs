@@ -7,7 +7,7 @@
 
 use std::time::{Duration, SystemTime};
 
-use crate::running_harness::SessionState;
+use crate::open_session::SessionState;
 
 /// How long one Session has been waiting for the person, or working, which places it in the
 /// queue.
@@ -97,7 +97,7 @@ impl Waits {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::running_harness::SessionState::{AwaitingAnswer, Idle, Parked, Working};
+    use crate::open_session::SessionState::{AwaitingAnswer, Idle, Parked, Working};
 
     /// A moment well before any test runs.
     const LONG_AGO: SystemTime = SystemTime::UNIX_EPOCH;

@@ -10,9 +10,9 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use sstack::agent::AgentHandle;
 use sstack::commands::Skill;
 use sstack::connection::Connections;
-use sstack::open_session::SessionController;
+use sstack::open_session::{SessionController, SessionState};
 use sstack::protocol::{Replayed, SessionReport, TurnEnd};
-use sstack::running_harness::{SessionState, Waits};
+use sstack::running_harness::Waits;
 use sstack::session::{self, Naming, SessionSummary};
 
 use super::component::{Component, KeyOutcome};

@@ -41,9 +41,9 @@ use sstack::open_session::{
     AskedConnection, Start, installed_skills, listed_sessions, main_checkout, prepare,
     sessions_directory, starting_session,
 };
-use sstack::open_session::{ReportingApprover, ReportingAsker};
+use sstack::open_session::{Exit, ReportingApprover, ReportingAsker};
 use sstack::protocol::SessionReport;
-use sstack::running_harness::{self, Exit};
+use sstack::running_harness;
 use sstack::tools::{Approver, Asker};
 use sstack::workspace::{Checkout, Containers};
 use sstack::{session, workspace};

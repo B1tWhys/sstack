@@ -15,10 +15,8 @@ use ratatui::backend::Backend;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::{Frame, Terminal};
 use sstack::commands::Command;
-use sstack::open_session::{OpenSessions, SessionController};
-use sstack::running_harness::{
-    Exit, InSession, Outcome, Phase, Refusal, RunningHarness, SessionState,
-};
+use sstack::open_session::{Exit, OpenSessions, Outcome, Refusal, SessionController, SessionState};
+use sstack::running_harness::{InSession, Phase, RunningHarness};
 use sstack::session::{self, SessionSummary};
 use sstack::vim::{VimEvent, VimFailure};
 use sstack::workspace::Checkout;

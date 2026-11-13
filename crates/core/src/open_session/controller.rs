@@ -10,9 +10,8 @@
 use crate::agent::AgentHandle;
 use crate::commands::{self, Lookup, Skill};
 use crate::connection::Connections;
-use crate::open_session::SetupError;
+use crate::open_session::{Outcome, Refusal, SessionEvent, SessionState, SetupError};
 use crate::protocol::{Reply, ReportSender, Response, SessionReport, TurnEnd, Verdict};
-use crate::running_harness::{Outcome, Refusal, SessionEvent, SessionState};
 use crate::session::Naming;
 
 /// Control of one open Session, which starts, pauses and cancels its Turns and keeps track of what
@@ -323,8 +322,9 @@ mod tests {
     use crate::agent::{Agent, AgentConfig};
     use crate::commands::Command;
     use crate::connection::scripted::ScriptedProvider;
+    use crate::open_session::Exit;
     use crate::protocol::{ApprovalRequest, QuestionRequest};
-    use crate::running_harness::{Exit, RunningHarness};
+    use crate::running_harness::RunningHarness;
     use crate::session::{AssistantEntry, Entry, SessionLog, StopReason, Usage};
     use crate::tools::DenyAll;
     use crate::tools::test_support::fake_tools;

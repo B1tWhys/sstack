@@ -27,11 +27,11 @@ use menu::{Menu, MenuEvent};
 use session::SessionView;
 use sstack::commands::Command;
 use sstack::connection::Connections;
-use sstack::open_session::{OpenSessions, Place, Run, SessionController, Start};
-use sstack::protocol::{ReportSender, SessionReport};
-use sstack::running_harness::{
-    Exit, InSession, Outcome, Phase, Refusal, RunningHarness, SessionState,
+use sstack::open_session::{
+    Exit, OpenSessions, Outcome, Place, Refusal, Run, SessionController, SessionState, Start,
 };
+use sstack::protocol::{ReportSender, SessionReport};
+use sstack::running_harness::{InSession, Phase, RunningHarness};
 use sstack::session::{SessionSummary, window_title};
 use sstack::vim::VimEvent;
 use sstack::workspace::Checkout;
