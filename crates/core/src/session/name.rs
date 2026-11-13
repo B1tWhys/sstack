@@ -7,7 +7,7 @@ use std::sync::Arc;
 use crate::provider::{ModelRequest, Provider};
 use crate::session::Entry;
 use crate::session_report::{ReportSender, SessionReport};
-use crate::{workspace, worktree};
+use crate::{session, worktree};
 
 /// What a Session is called before anything names it, and while its Session Name is being made.
 pub const UNTITLED: &str = "new session";
@@ -74,7 +74,7 @@ impl Naming {
     /// meanwhile. A branch that cannot be renamed keeps its name.
     pub async fn name(self, typed: &str) -> Option<String> {
         let name = self.summarize(typed).await?;
-        match workspace::name_unnamed_session(&self.log, &name) {
+        match session::name_unnamed_session(&self.log, &name) {
             Ok(true) => {
                 self.rename_branch(&name);
                 Some(name)
@@ -90,7 +90,7 @@ impl Naming {
     /// Renames the Session's branch after `name`, if it has a branch.
     fn rename_branch(&self, name: &str) {
         let Some(main) = &self.main else { return };
-        let id = workspace::session_id(&self.log);
+        let id = session::session_id(&self.log);
         if worktree::rename_branch(main, &id, name).is_err() {
             // TODO: log that the Session's branch could not be renamed.
         }
@@ -149,7 +149,7 @@ fn cut(text: &str) -> String {
 /// first line of `first_prompt`, cut short. Returns nothing while `naming` says a Session Name is
 /// still being made, or before the person has said anything, when [`UNTITLED`] stands in.
 #[must_use]
-pub fn known(given: Option<&str>, first_prompt: Option<&str>, naming: bool) -> Option<String> {
+pub fn known_name(given: Option<&str>, first_prompt: Option<&str>, naming: bool) -> Option<String> {
     match (given, first_prompt) {
         (Some(given), _) => Some(given.to_owned()),
         (None, Some(prompt)) if !naming => first_line(prompt).map(cut),
@@ -162,16 +162,16 @@ fn first_line(text: &str) -> Option<&str> {
     text.lines().map(str::trim).find(|line| !line.is_empty())
 }
 
-/// Returns what to list a Session under, given what it is [`known`] by.
+/// Returns what to list a Session under, given what [`known_name`] returns for it.
 #[must_use]
-pub fn listed(known: Option<&str>) -> String {
+pub fn listed_name(known: Option<&str>) -> String {
     known.unwrap_or(UNTITLED).to_owned()
 }
 
-/// Returns the title of a window showing a Session, given what it is [`known`] by: the name and
-/// then the harness, or the harness alone before the Session has a name.
+/// Returns the title of a window showing a Session, given what [`known_name`] returns for it:
+/// the name and then the harness, or the harness alone before the Session has a name.
 #[must_use]
-pub fn title(known: Option<&str>) -> String {
+pub fn window_title(known: Option<&str>) -> String {
     known.map_or_else(
         || HARNESS_NAME.to_owned(),
         |name| format!("{name} - {HARNESS_NAME}"),
@@ -220,23 +220,23 @@ mod tests {
     #[test]
     fn a_session_is_known_by_its_name_then_its_first_line() {
         assert_eq!(
-            known(Some("given"), Some("prompt"), true),
+            known_name(Some("given"), Some("prompt"), true),
             Some("given".into())
         );
         assert_eq!(
-            known(None, Some("\n first \nsecond"), false),
+            known_name(None, Some("\n first \nsecond"), false),
             Some("first".into())
         );
-        assert_eq!(known(None, Some("prompt"), true), None);
-        assert_eq!(known(None, None, false), None);
+        assert_eq!(known_name(None, Some("prompt"), true), None);
+        assert_eq!(known_name(None, None, false), None);
     }
 
     #[test]
     fn an_untitled_session_is_listed_as_new_and_titled_by_the_harness() {
-        assert_eq!(listed(None), UNTITLED);
-        assert_eq!(listed(Some("name")), "name");
-        assert_eq!(title(None), "sstack");
-        assert_eq!(title(Some("name")), "name - sstack");
+        assert_eq!(listed_name(None), UNTITLED);
+        assert_eq!(listed_name(Some("name")), "name");
+        assert_eq!(window_title(None), "sstack");
+        assert_eq!(window_title(Some("name")), "name - sstack");
     }
 
     #[tokio::test]
@@ -246,7 +246,7 @@ mod tests {
             .name("typed")
             .await;
         assert_eq!(named, Some("Add names".into()));
-        assert!(workspace::is_named(&dir.path().join("1.jsonl")));
+        assert!(session::is_named(&dir.path().join("1.jsonl")));
 
         let again = naming(&dir, vec![Ok(reply("Other"))]).name("typed").await;
         assert_eq!(again, None);
@@ -270,7 +270,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let named = naming(&dir, vec![Err("down".into())]).name("typed").await;
         assert_eq!(named, None);
-        assert!(!workspace::is_named(&dir.path().join("1.jsonl")));
+        assert!(!session::is_named(&dir.path().join("1.jsonl")));
     }
 
     #[tokio::test]

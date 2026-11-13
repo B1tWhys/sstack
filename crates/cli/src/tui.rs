@@ -47,7 +47,7 @@ use sstack::session_setup::{
 };
 use sstack::tools::Approver;
 use sstack::turn_runner::AgentHandle;
-use sstack::{workspace, worktree};
+use sstack::{session, worktree};
 use theme::ColorDepth;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -140,7 +140,7 @@ impl Sessions for LiveSessions<'_> {
             .asker(asker)
             .containers(self.containers.clone())
             .call()?;
-        let id = workspace::session_id(&run.session);
+        let id = session::session_id(&run.session);
         Ok(Opened {
             agent: AgentHandle::spawn(run.agent, report_to(&id).reporter()),
             path: run.session,
@@ -174,7 +174,7 @@ impl Sessions for LiveSessions<'_> {
     }
 
     fn rename(&mut self, id: &str, name: Option<&str>) -> Result<()> {
-        Ok(workspace::name_session(&self.directory, id, name)?)
+        Ok(session::name_session(&self.directory, id, name)?)
     }
 
     fn start_build(&mut self, checkout: Checkout, id: &str) {
@@ -204,7 +204,7 @@ impl Sessions for LiveSessions<'_> {
 /// worktree survives, the log stays where it was.
 fn put_away(main: &Path, directory: &Path, id: &str) -> Result<()> {
     worktree::remove(main, id)?;
-    workspace::archive_session(directory, id)?;
+    session::archive_session(directory, id)?;
     Ok(())
 }
 
@@ -291,13 +291,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let directory = dir.path().join("sessions");
         std::fs::create_dir_all(&directory).unwrap();
-        let log = workspace::session_path(&directory, "1");
+        let log = session::session_path(&directory, "1");
         std::fs::write(&log, "").unwrap();
 
         put_away(dir.path(), &directory, "1").unwrap();
 
         assert!(!log.exists());
-        assert!(workspace::restore_session(&directory, "1").unwrap());
+        assert!(session::restore_session(&directory, "1").unwrap());
     }
 
     #[test]

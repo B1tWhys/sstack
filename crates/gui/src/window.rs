@@ -31,12 +31,11 @@ use sstack::rebuild::Checkout;
 use sstack::running_harness::{
     Exit, InSession, Outcome, Phase, Refusal, RunningHarness, SessionState,
 };
+use sstack::session::{SessionSummary, window_title};
 use sstack::session_controller::{OpenSessions, SessionController};
-use sstack::session_name;
 use sstack::session_report::{ReportSender, SessionReport};
 use sstack::session_setup::{Place, Run, Start};
 use sstack::vim::VimEvent;
-use sstack::workspace::SessionSummary;
 
 use crate::asked::Controls;
 use crate::reports::Reports;
@@ -510,7 +509,7 @@ impl Window {
 
     /// Returns the window's title, which gives the Session Name of the Session on screen.
     pub fn title(&self) -> String {
-        session_name::title(self.view_ref().known_name().as_deref())
+        window_title(self.view_ref().known_name().as_deref())
     }
 
     /// Returns where every open Session's reports come from, with the keys, requests to close

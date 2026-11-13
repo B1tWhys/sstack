@@ -94,6 +94,8 @@ Note: six files moved. Only `sandbox.rs` needed a change, its `include_str!` of 
 
 One commit per group, moving files and fixing paths only. Make each group root a facade as it is created. `protocol.rs` and `tools.rs` come later, so the modules they replace stay in place for now.
 
+Note on `session/`: done. The facade flattens names, so functions that leaned on their module's name were renamed: `session_name::known`, `listed` and `title` became `known_name`, `listed_name` and `window_title`, and `session_metadata::relocate` became `relocate_metadata`. Where a crate already has a local module of the same name as a group (the GUI's `window::session`), import the items rather than the group.
+
 ### [ ] 3. Extract `protocol`
 
 Move the boundary types into `protocol.rs`, add the replay type for `Resumed`, and convert both transcripts to read it.

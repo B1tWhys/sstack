@@ -91,7 +91,7 @@ fn stored(file: &mut File) -> io::Result<SessionMetadata> {
 ///
 /// # Errors
 /// Returns an error if the metadata exists but cannot be moved.
-pub fn relocate(from: &Path, to: &Path) -> io::Result<()> {
+pub fn relocate_metadata(from: &Path, to: &Path) -> io::Result<()> {
     match fs::rename(path(from), path(to)) {
         Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
         _ => Ok(()),
@@ -168,10 +168,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let from = log(&dir);
         let to = dir.path().join("2.jsonl");
-        relocate(&from, &to).unwrap();
+        relocate_metadata(&from, &to).unwrap();
         fs::write(path(&from), "{}").unwrap();
 
-        relocate(&from, &to).unwrap();
+        relocate_metadata(&from, &to).unwrap();
 
         assert!(path(&to).exists() && !path(&from).exists());
     }
@@ -184,6 +184,6 @@ mod tests {
         fs::create_dir(path(&to)).unwrap();
         fs::write(path(&to).join("in the way"), "").unwrap();
 
-        assert!(relocate(&from, &to).is_err());
+        assert!(relocate_metadata(&from, &to).is_err());
     }
 }

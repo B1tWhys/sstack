@@ -9,7 +9,7 @@ use crate::agent::ModelService;
 use crate::config::{Config, Connection};
 use crate::credentials::{SecretStore, resolve_secret};
 use crate::provider::{Effort, Provider};
-use crate::session_metadata::SessionMetadata;
+use crate::session::SessionMetadata;
 use crate::session_setup::SetupError;
 
 /// The Connections one Session can switch between, with the one it runs on now.

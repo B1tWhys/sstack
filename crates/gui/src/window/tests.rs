@@ -11,8 +11,8 @@ use serde_json::json;
 use sstack::agent::{AgentEvent, ToolCallSummary};
 use sstack::provider::scripted::{Scripted, ScriptedProvider};
 use sstack::running_harness::SessionState;
+use sstack::session::Naming;
 use sstack::session::{Entry, StopReason, ToolCall};
-use sstack::session_name::Naming;
 use tempfile::TempDir;
 
 use super::*;

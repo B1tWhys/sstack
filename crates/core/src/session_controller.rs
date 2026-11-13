@@ -11,7 +11,7 @@ use crate::agent::TurnEnd;
 use crate::connections::Connections;
 use crate::question::Response;
 use crate::running_harness::{Outcome, Refusal, SessionEvent, SessionState};
-use crate::session_name::Naming;
+use crate::session::Naming;
 use crate::session_report::{Reply, ReportSender, SessionReport};
 use crate::session_setup::SetupError;
 use crate::skills::{self, Lookup, Skill};
@@ -145,7 +145,7 @@ impl SessionController {
     }
 
     /// Returns whether the Session's Session Name is being made, until when an interface shows
-    /// [`UNTITLED`](crate::session_name::UNTITLED) rather than the first prompt.
+    /// [`UNTITLED`](crate::session::UNTITLED) rather than the first prompt.
     #[must_use]
     pub fn is_naming(&self) -> bool {
         matches!(self.naming, NameWork::Running)

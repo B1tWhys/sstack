@@ -19,10 +19,10 @@ use sstack::rebuild::Checkout;
 use sstack::running_harness::{
     Exit, InSession, Outcome, Phase, Refusal, RunningHarness, SessionState,
 };
+use sstack::session;
+use sstack::session::SessionSummary;
 use sstack::session_controller::{OpenSessions, SessionController};
-use sstack::session_name;
 use sstack::vim::{VimEvent, VimFailure};
-use sstack::workspace::SessionSummary;
 
 use super::component::{Component, KeyOutcome};
 use super::components::{Activity, Row, SIDEBAR_WIDTH, Sidebar};
@@ -200,7 +200,7 @@ impl App<'_> {
     /// Titles the terminal after the Session on screen. Goes straight to the terminal, because the
     /// screen library has no notion of a title.
     fn apply_title(&mut self) {
-        let wanted = session_name::title(self.panes[self.shown].known_name().as_deref());
+        let wanted = session::window_title(self.panes[self.shown].known_name().as_deref());
         if wanted != self.title {
             let _ = execute!(io::stdout(), SetTitle(&wanted));
             self.title = wanted;
@@ -686,7 +686,6 @@ mod tests {
     use sstack::provider::{ModelRequest, Provider, ProviderError, StreamEvent};
     use sstack::session::{self, AssistantEntry, Entry, SessionLog, StopReason, ToolCall};
     use sstack::vim::Draft;
-    use sstack::workspace;
     use std::cell::RefCell;
     use std::fs;
     use std::path::PathBuf;
@@ -779,7 +778,7 @@ mod tests {
             if let Some(failure) = self.rename_failure {
                 bail!(failure);
             }
-            Ok(workspace::name_session(&self.root, id, name)?)
+            Ok(session::name_session(&self.root, id, name)?)
         }
 
         fn start_build(&mut self, checkout: Checkout, id: &str) {
@@ -1652,7 +1651,7 @@ mod tests {
 
     /// Returns the name the person gave the Session with id `id`, as stored in `dir`.
     fn stored_name(dir: &TempDir, id: &str) -> Option<String> {
-        let listed = workspace::list_sessions(dir.path()).unwrap();
+        let listed = session::list_sessions(dir.path()).unwrap();
         let found = listed
             .into_iter()
             .find(|summary| summary.path == path_of(dir, id));
@@ -1959,7 +1958,7 @@ mod tests {
         h.until_turn_ends().await;
         h.app.handle(built());
         let provider = Arc::new(ScriptedProvider::new(script));
-        let stored = workspace::list_sessions(h.dir.path()).unwrap();
+        let stored = session::list_sessions(h.dir.path()).unwrap();
         let stored = stored
             .into_iter()
             .filter(|summary| summary.parked)

@@ -11,14 +11,12 @@ use sstack::connections::Connections;
 use sstack::question::{Answer, Response};
 use sstack::queue::Waits;
 use sstack::running_harness::SessionState;
-use sstack::session::{self, Entry};
+use sstack::session::{self, Entry, SessionSummary};
 use sstack::session_controller::SessionController;
-use sstack::session_name;
 use sstack::session_report::{ApprovalRequest, QuestionRequest, SessionReport};
 use sstack::tools::Verdict;
 use sstack::turn_runner::AgentHandle;
 use sstack::vim::VimEvent;
-use sstack::workspace::{self, SessionSummary};
 
 use super::input::Input;
 use super::sidebar::{Activity, Row};
@@ -101,7 +99,7 @@ impl SessionView {
     /// Creates a view of the Session at `path`, waiting for the person since `waiting_since`.
     fn blank(path: PathBuf, waiting_since: SystemTime) -> Self {
         Self {
-            id: workspace::session_id(&path),
+            id: session::session_id(&path),
             path,
             first_prompt: None,
             name: None,
@@ -242,14 +240,14 @@ impl SessionView {
             .controller
             .as_ref()
             .is_some_and(SessionController::is_naming);
-        session_name::known(self.name.as_deref(), self.first_prompt.as_deref(), naming)
+        session::known_name(self.name.as_deref(), self.first_prompt.as_deref(), naming)
     }
 
     /// Returns how the sidebar shows this Session as of `now`.
     pub fn row(&self, now: SystemTime) -> Row {
         Row {
             id: self.id.clone(),
-            name: session_name::listed(self.known_name().as_deref()),
+            name: session::listed_name(self.known_name().as_deref()),
             activity: self.activity(),
             waiting: self.state().is_waiting().then(|| self.waits.waited(now)),
         }

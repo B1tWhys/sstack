@@ -12,13 +12,13 @@ use sstack::connections::Connections;
 use sstack::credentials::SecretStore;
 use sstack::provider::Provider;
 use sstack::sandbox::Sandbox;
+use sstack::session;
 use sstack::session::{AssistantEntry, SessionLog, StopReason, ToolCall, Usage};
 use sstack::session_report::{ReportingApprover, ReportingAsker};
 use sstack::skills::{self, Location, Scope};
 use sstack::tools::project::Project;
 use sstack::tools::{Approver, ToolBox};
 use sstack::turn_runner::AgentHandle;
-use sstack::workspace;
 
 use super::component::{Component, KeyOutcome};
 use super::event::{EventSender, SessionSender};
@@ -123,7 +123,7 @@ pub fn ask_call(question: &str, choices: &[&str]) -> AssistantEntry {
 /// Opens the Session stored at `path`, new or existing, with an agent working in its directory
 /// and reporting to `events`.
 pub fn opened(path: &Path, provider: Arc<dyn Provider>, events: &EventSender) -> Opened {
-    let id = workspace::session_id(path);
+    let id = session::session_id(path);
     let approver = Arc::new(ReportingApprover::new(
         SessionSender::new(&id, events.clone()).reporter(),
     ));

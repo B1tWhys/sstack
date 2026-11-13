@@ -32,7 +32,7 @@ use sstack::session_setup::{
     AskedConnection, LATEST, Start, listed_sessions, main_checkout, prepare, sessions_directory,
     starting_session,
 };
-use sstack::{workspace, worktree};
+use sstack::{session, worktree};
 use window::{Message, Opened, Ready, Sessions, Window};
 
 // The flags match the TUI's, except `--prompt`, but are defined apart from the CLI's, because
@@ -62,7 +62,7 @@ impl Args {
     /// The CLI's `Args::relaunch` does the same for its flags. The two are kept apart for the
     /// reason the flags are.
     fn relaunch(&self, session: &Path) -> Vec<String> {
-        let mut relaunch = vec!["--resume".to_owned(), workspace::session_id(session)];
+        let mut relaunch = vec!["--resume".to_owned(), session::session_id(session)];
         if let Some(model) = &self.model {
             relaunch.extend(["--model".to_owned(), model.clone()]);
         }
@@ -189,12 +189,12 @@ impl Sessions for LiveSessions {
 
     fn archive(&mut self, id: &str) -> Result<()> {
         worktree::remove(&self.main, id)?;
-        workspace::archive_session(&self.directory, id)?;
+        session::archive_session(&self.directory, id)?;
         Ok(())
     }
 
     fn rename(&mut self, id: &str, name: Option<&str>) -> Result<()> {
-        Ok(workspace::name_session(&self.directory, id, name)?)
+        Ok(session::name_session(&self.directory, id, name)?)
     }
 
     fn harness_source(&self, checkout: Checkout, id: &str) -> Result<PathBuf, String> {

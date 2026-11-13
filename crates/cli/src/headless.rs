@@ -10,9 +10,9 @@ use anyhow::Result;
 use sstack::agent::{AgentEvent, TurnContext, TurnEnd};
 use sstack::queued_prompts::QueuedPrompts;
 use sstack::sandbox::Containers;
+use sstack::session;
 use sstack::session_setup::{Place, Run, Start, prepare};
 use sstack::tools::DenyAll;
-use sstack::workspace;
 use tokio_util::sync::CancellationToken;
 
 use crate::Args;
@@ -64,7 +64,7 @@ pub async fn run(args: &Args, prompt: &str) -> Result<ExitCode> {
         "{}",
         outcome.map_or_else(String::new, |text| format!("\n{text}\n"))
     );
-    println!("\n[session {}]", workspace::session_id(&session));
+    println!("\n[session {}]", session::session_id(&session));
     Ok(exit_code(result.ok()))
 }
 

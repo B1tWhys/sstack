@@ -17,13 +17,13 @@ use crate::credentials::{MissingSecret, SystemKeyring, resolve_secret};
 use crate::provider::{Provider, ProviderError};
 use crate::question::Asker;
 use crate::sandbox::{Containers, Sandbox};
+use crate::session::Naming;
+use crate::session::SessionMetadata;
+use crate::session::{self, SessionSummary, SkillListing};
 use crate::session::{Entry, SessionError, SessionLog};
-use crate::session_metadata::SessionMetadata;
-use crate::session_name::Naming;
 use crate::skills::{self, Skill};
 use crate::tools::project::Project;
 use crate::tools::{Approver, Land, SessionInfo, ToolBox};
-use crate::workspace::{self, SessionSummary, SkillListing};
 use crate::worktree;
 
 /// The Session id that asks to resume the newest Session, archived or not.
@@ -130,7 +130,7 @@ struct OpenedLog {
 fn open_session(directory: &Path, start: Start<'_>) -> Result<OpenedLog, SetupError> {
     match start {
         Start::New(place) => {
-            let path = workspace::new_session_path(directory);
+            let path = session::new_session_path(directory);
             let log = SessionLog::create(&path)?;
             Ok(OpenedLog {
                 path,
@@ -145,7 +145,7 @@ fn open_session(directory: &Path, start: Start<'_>) -> Result<OpenedLog, SetupEr
 
 /// Opens the log of an existing Session, bringing it back first if it was archived.
 fn resume_session(directory: &Path, wanted: &str) -> Result<OpenedLog, SetupError> {
-    let wants_worktree = workspace::restore_session(directory, wanted)?;
+    let wants_worktree = session::restore_session(directory, wanted)?;
     let path = resume_path(directory, wanted)?;
     let (log, entries) = SessionLog::open(&path)?;
     Ok(OpenedLog {
@@ -159,10 +159,10 @@ fn resume_session(directory: &Path, wanted: &str) -> Result<OpenedLog, SetupErro
 /// Finds the Session to resume.
 fn resume_path(directory: &Path, wanted: &str) -> Result<PathBuf, SetupError> {
     if wanted == LATEST {
-        let latest = workspace::latest_session(directory)?;
+        let latest = session::latest_session(directory)?;
         latest.ok_or(SetupError::NothingToResume)
     } else {
-        Ok(workspace::session_path(directory, wanted))
+        Ok(session::session_path(directory, wanted))
     }
 }
 
@@ -263,7 +263,7 @@ pub fn prepare(
             .collect(),
     };
     let name_model = config.name_model(connection).to_owned();
-    let id = workspace::session_id(&session.path);
+    let id = session::session_id(&session.path);
     let place = workplace(&main, &id, session.wants_worktree);
     let installed = installed_skills(place.worktree.as_deref().unwrap_or(&main), directory);
     let listing = SkillListing::new(&offered_skills(&installed), connection.context_limit);
@@ -354,7 +354,7 @@ fn chosen_connection(
 /// nor a first prompt to be known by.
 fn wants_name(session: &OpenedLog) -> bool {
     let spoken = (session.entries.iter()).any(|entry| matches!(entry, Entry::User { .. }));
-    !spoken && !workspace::is_named(&session.path)
+    !spoken && !session::is_named(&session.path)
 }
 
 /// Returns the main checkout of the project that `directory` is in, with symlinks resolved.
@@ -380,9 +380,9 @@ pub fn sessions_directory(directory: &Path) -> Result<PathBuf, SetupError> {
 /// # Errors
 /// Fails if `directory` exists but cannot be read.
 pub fn listed_sessions(main: &Path, directory: &Path) -> io::Result<Vec<SessionSummary>> {
-    let mut stored = workspace::list_sessions(directory)?;
+    let mut stored = session::list_sessions(directory)?;
     stored.retain(|summary| {
-        let id = workspace::session_id(&summary.path);
+        let id = session::session_id(&summary.path);
         let named = summary.first_prompt.is_some() || summary.name.is_some();
         named || worktree::path(main, &id).exists()
     });
@@ -405,7 +405,7 @@ pub fn starting_session<'a>(resume: Option<&'a str>, stored: &'a [SessionSummary
 
 /// Returns where the Sessions of the project at `root` are stored.
 fn project_sessions(root: &Path) -> Result<PathBuf, SetupError> {
-    Ok(workspace::sessions_dir(&app_dir(dirs::data_dir())?, root))
+    Ok(session::sessions_dir(&app_dir(dirs::data_dir())?, root))
 }
 
 /// Returns the user's settings.
@@ -500,8 +500,8 @@ fn agent_config(
         .with_asker(asker);
     let home = dirs::home_dir();
     let claude = skills::claude_directory(home.as_deref(), |name| std::env::var_os(name));
-    let system = workspace::system_prompt(root, claude.as_deref());
-    let system = workspace::skills_prompt(&system, listing);
+    let system = session::system_prompt(root, claude.as_deref());
+    let system = session::skills_prompt(&system, listing);
     let (tools, system) = if place.worktree.is_some() {
         let land = Land {
             worktree: project,
@@ -509,7 +509,7 @@ fn agent_config(
             approver,
             secret_env,
         };
-        (tools.with_land(land), workspace::worktree_prompt(&system))
+        (tools.with_land(land), session::worktree_prompt(&system))
     } else {
         (tools, system)
     };
@@ -548,8 +548,8 @@ mod tests {
         new.entries.push(Entry::User { text: "hi".into() });
         assert!(!wants_name(&new));
         new.entries.clear();
-        let id = workspace::session_id(&new.path);
-        workspace::name_session(dir.path(), &id, Some("named")).unwrap();
+        let id = session::session_id(&new.path);
+        session::name_session(dir.path(), &id, Some("named")).unwrap();
         assert!(!wants_name(&new));
     }
 
@@ -563,7 +563,7 @@ mod tests {
         let path = new.path;
         drop(new.log);
 
-        let id = workspace::session_id(&path);
+        let id = session::session_id(&path);
         let by_id = open_session(dir.path(), Start::Resume(&id)).unwrap();
         assert!(open_session(dir.path(), Start::Resume(LATEST)).is_err());
         drop(by_id.log);
@@ -592,9 +592,9 @@ mod tests {
     #[test]
     fn resuming_an_archived_session_restores_it_and_asks_for_a_worktree() {
         let dir = tempfile::tempdir().unwrap();
-        let path = workspace::session_path(dir.path(), "1");
+        let path = session::session_path(dir.path(), "1");
         SessionLog::create(&path).unwrap();
-        workspace::archive_session(dir.path(), "1").unwrap();
+        session::archive_session(dir.path(), "1").unwrap();
 
         let restored = open_session(dir.path(), Start::Resume("1")).unwrap();
 
@@ -651,9 +651,9 @@ mod tests {
         let main = tempfile::tempdir().unwrap();
         let sessions = tempfile::tempdir().unwrap();
         for id in ["1", "2", "3"] {
-            SessionLog::create(&workspace::session_path(sessions.path(), id)).unwrap();
+            SessionLog::create(&session::session_path(sessions.path(), id)).unwrap();
         }
-        let mut spoken = SessionLog::open(&workspace::session_path(sessions.path(), "1"))
+        let mut spoken = SessionLog::open(&session::session_path(sessions.path(), "1"))
             .unwrap()
             .0;
         spoken.append(&Entry::User { text: "hi".into() }).unwrap();
@@ -664,7 +664,7 @@ mod tests {
 
         let mut ids: Vec<_> = listed
             .iter()
-            .map(|s| workspace::session_id(&s.path))
+            .map(|s| session::session_id(&s.path))
             .collect();
         ids.sort();
         assert_eq!(ids, ["1", "2"]);

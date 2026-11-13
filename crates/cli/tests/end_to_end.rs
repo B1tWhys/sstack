@@ -8,7 +8,7 @@ use std::process::{Command, Output, Stdio};
 use std::sync::{Arc, Mutex};
 
 use serde_json::json;
-use sstack::session_metadata::SessionMetadata;
+use sstack::session::SessionMetadata;
 
 const SECRET_NAME: &str = "SSTACK_E2E_KEY";
 const SECRET: &str = "e2e-secret-value";
