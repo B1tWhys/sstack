@@ -14,7 +14,7 @@ use crossterm::terminal::SetTitle;
 use ratatui::backend::Backend;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::{Frame, Terminal};
-use sstack::human_command::Command;
+use sstack::commands::Command;
 use sstack::rebuild::Checkout;
 use sstack::running_harness::{
     Exit, InSession, Outcome, Phase, Refusal, RunningHarness, SessionState,

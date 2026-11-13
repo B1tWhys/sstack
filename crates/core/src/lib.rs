@@ -4,8 +4,8 @@
 //! in [`sstack_gui`](../sstack_gui/index.html).
 
 pub mod agent;
+pub mod commands;
 pub mod connection;
-pub mod human_command;
 pub mod question;
 pub mod queue;
 pub mod rebuild;
@@ -15,7 +15,6 @@ pub mod session;
 pub mod session_controller;
 pub mod session_report;
 pub mod session_setup;
-pub mod skills;
 pub mod tools;
 pub mod vim;
 pub mod worktree;

@@ -8,7 +8,7 @@
 use std::mem;
 use std::path::PathBuf;
 
-use crate::human_command::{Command, parse_command};
+use crate::commands::{Command, parse_command};
 use crate::rebuild::Checkout;
 use crate::session_controller::{OpenSessions, SessionController};
 use crate::session_report::SessionReport;

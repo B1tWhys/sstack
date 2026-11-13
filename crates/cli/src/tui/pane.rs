@@ -8,13 +8,13 @@ use crossterm::event::KeyEvent;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use sstack::agent::{AgentHandle, TurnEnd};
+use sstack::commands::Skill;
 use sstack::connection::Connections;
 use sstack::queue::Waits;
 use sstack::running_harness::SessionState;
 use sstack::session::{self, Entry, Naming, SessionSummary};
 use sstack::session_controller::SessionController;
 use sstack::session_report::SessionReport;
-use sstack::skills::Skill;
 
 use super::component::{Component, KeyOutcome};
 use super::components::{

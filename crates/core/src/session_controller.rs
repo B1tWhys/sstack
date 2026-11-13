@@ -8,13 +8,13 @@
 //! Sessions through [`OpenSessions`], which the interface implements over however it keeps them.
 
 use crate::agent::{AgentHandle, TurnEnd};
+use crate::commands::{self, Lookup, Skill};
 use crate::connection::Connections;
 use crate::question::Response;
 use crate::running_harness::{Outcome, Refusal, SessionEvent, SessionState};
 use crate::session::Naming;
 use crate::session_report::{Reply, ReportSender, SessionReport};
 use crate::session_setup::SetupError;
-use crate::skills::{self, Lookup, Skill};
 use crate::tools::Verdict;
 
 /// Control of one open Session, which starts, pauses and cancels its Turns and keeps track of what
@@ -260,12 +260,13 @@ impl SessionController {
         let (name, added) = request
             .split_once(char::is_whitespace)
             .unwrap_or((request, ""));
-        match skills::find(&self.skills, name) {
+        match commands::find_skill(&self.skills, name) {
             Lookup::Found(skill) => {
-                let loaded = skills::load(skill).map_err(|error| Refusal::UnreadableSkill {
-                    name: name.to_owned(),
-                    error: error.to_string(),
-                })?;
+                let loaded =
+                    commands::load_skill(skill).map_err(|error| Refusal::UnreadableSkill {
+                        name: name.to_owned(),
+                        error: error.to_string(),
+                    })?;
                 Ok(format!("{loaded}\n\n{}", added.trim())
                     .trim_end()
                     .to_owned())
@@ -322,8 +323,8 @@ mod tests {
 
     use super::*;
     use crate::agent::{Agent, AgentConfig};
+    use crate::commands::Command;
     use crate::connection::scripted::ScriptedProvider;
-    use crate::human_command::Command;
     use crate::rebuild::Checkout;
     use crate::running_harness::{Exit, RunningHarness};
     use crate::session::{AssistantEntry, Entry, SessionLog, StopReason, Usage};

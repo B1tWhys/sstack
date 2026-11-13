@@ -23,11 +23,11 @@ use bon::bon;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
+use crate::commands::Skill;
 use crate::connection::{Effort, ToolSpec};
 use crate::question::Asker;
 use crate::sandbox::Sandbox;
 use crate::session::ToolCall;
-use crate::skills::Skill;
 pub use land::Land;
 use project::Project;
 pub use session_info::SessionInfo;
@@ -286,7 +286,7 @@ pub(crate) mod test_support {
 mod tests {
     use super::test_support::{disabled, git_project};
     use super::*;
-    use crate::skills::Scope;
+    use crate::commands::Scope;
     use serde_json::json;
 
     fn call(name: &str, input: Value) -> ToolCall {

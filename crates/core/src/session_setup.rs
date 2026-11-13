@@ -11,6 +11,7 @@ use std::sync::Arc;
 use bon::builder;
 
 use crate::agent::{Agent, AgentConfig};
+use crate::commands::{self, Skill};
 use crate::connection::{
     self, Config, ConfigError, Connection, Connections, MissingSecret, Provider, ProviderError,
     SystemKeyring, resolve_secret,
@@ -21,7 +22,6 @@ use crate::session::Naming;
 use crate::session::SessionMetadata;
 use crate::session::{self, SessionSummary, SkillListing};
 use crate::session::{Entry, SessionError, SessionLog};
-use crate::skills::{self, Skill};
 use crate::tools::project::Project;
 use crate::tools::{Approver, Land, SessionInfo, ToolBox};
 use crate::worktree;
@@ -433,7 +433,7 @@ struct Backend<'a> {
 #[must_use]
 pub fn installed_skills(root: &Path, directory: &Path) -> Vec<Skill> {
     let home = dirs::home_dir();
-    skills::discover(&skills::locations(root, directory, home.as_deref()))
+    commands::discover_skills(&commands::skill_locations(root, directory, home.as_deref()))
 }
 
 /// Returns the ones among `installed` that the model may load on its own.
@@ -499,7 +499,7 @@ fn agent_config(
         .with_skills(offered_skills(skills))
         .with_asker(asker);
     let home = dirs::home_dir();
-    let claude = skills::claude_directory(home.as_deref(), |name| std::env::var_os(name));
+    let claude = commands::claude_directory(home.as_deref(), |name| std::env::var_os(name));
     let system = session::system_prompt(root, claude.as_deref());
     let system = session::skills_prompt(&system, listing);
     let (tools, system) = if place.worktree.is_some() {

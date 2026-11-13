@@ -73,7 +73,7 @@ pub struct Skill {
 /// inside the project also gets that directory's Skills. A `start` outside `root` counts as
 /// `root`. `home` is the person's home directory, if known. Locations need not exist.
 #[must_use]
-pub fn locations(root: &Path, start: &Path, home: Option<&Path>) -> Vec<Location> {
+pub fn skill_locations(root: &Path, start: &Path, home: Option<&Path>) -> Vec<Location> {
     let start = if start.starts_with(root) { start } else { root };
     let project = start
         .ancestors()
@@ -123,7 +123,7 @@ pub fn claude_directory(
 /// no bare name quietly means one of them. Of two Skills with one name in the same Scope, only the
 /// first found is kept.
 #[must_use]
-pub fn discover(locations: &[Location]) -> Vec<Skill> {
+pub fn discover_skills(locations: &[Location]) -> Vec<Skill> {
     let mut search = Search::default();
     for location in locations {
         for child in subdirectories(&location.directory) {
@@ -240,7 +240,7 @@ fn split_header(text: &str) -> (Option<&str>, &str) {
     (None, text)
 }
 
-/// The most files beside a `SKILL.md` that [`load`] names, so that a Skill with a large tree of
+/// The most files beside a `SKILL.md` that [`load_skill`] names, so that a Skill with a large tree of
 /// resources does not flood the model.
 const MAX_LISTED_FILES: usize = 50;
 
@@ -249,7 +249,7 @@ const MAX_LISTED_FILES: usize = 50;
 ///
 /// # Errors
 /// Returns an error if the Skill's `SKILL.md` can no longer be read.
-pub fn load(skill: &Skill) -> io::Result<String> {
+pub fn load_skill(skill: &Skill) -> io::Result<String> {
     let text = fs::read_to_string(&skill.path)?;
     let directory = skill.path.parent().unwrap_or(Path::new(""));
     Ok(loaded(skill, directory, &text))
@@ -267,9 +267,9 @@ pub enum Lookup<'a> {
 }
 
 /// Finds the Skill in `skills` that `name` asks for. A bare name that several Skills share, which
-/// [`discover`] then names with their Scopes, finds none of them.
+/// [`discover_skills`] then names with their Scopes, finds none of them.
 #[must_use]
-pub fn find<'a>(skills: &'a [Skill], name: &str) -> Lookup<'a> {
+pub fn find_skill<'a>(skills: &'a [Skill], name: &str) -> Lookup<'a> {
     if let Some(skill) = skills.iter().find(|skill| skill.name == name) {
         return Lookup::Found(skill);
     }
@@ -351,7 +351,7 @@ mod tests {
 
     /// Returns the names of the Skills found in `locations`, in order.
     fn names(locations: &[Location]) -> Vec<String> {
-        discover(locations)
+        discover_skills(locations)
             .into_iter()
             .map(|skill| skill.name)
             .collect()
@@ -363,7 +363,7 @@ mod tests {
         let empty = dir.path().join("empty");
         fs::create_dir(&empty).unwrap();
         assert_eq!(
-            discover(&[project(&dir.path().join("missing")), project(&empty)]),
+            discover_skills(&[project(&dir.path().join("missing")), project(&empty)]),
             []
         );
     }
@@ -374,7 +374,7 @@ mod tests {
         let content = "---\nname: review\ndescription: >\n  Use when\n  reviewing.\nallowed-tools: [read]\n---\nBody\n";
         skill_at(&dir.path().join("folder"), content);
 
-        let found = discover(&[project(dir.path())]);
+        let found = discover_skills(&[project(dir.path())]);
 
         let expected = Skill {
             name: "review".into(),
@@ -394,7 +394,7 @@ mod tests {
         skill_at(&dir.path().join("unended"), "---\nname: never\n");
         skill_at(&dir.path().join("listed"), "---\n- a list\n---\n");
 
-        let found = discover(&[project(dir.path())]);
+        let found = discover_skills(&[project(dir.path())]);
 
         let found: Vec<_> = found.iter().map(|s| (&*s.name, &*s.description)).collect();
         let bare = ["broken", "listed", "plain", "unended"].map(|name| (name, ""));
@@ -408,7 +408,7 @@ mod tests {
         skill_at(&dir.path().join("by-hand"), header);
         skill_at(&dir.path().join("open"), &described("open", "o"));
 
-        let found = discover(&[project(dir.path())]);
+        let found = discover_skills(&[project(dir.path())]);
 
         let flags: Vec<_> = found
             .iter()
@@ -457,7 +457,7 @@ mod tests {
         symlink(first.join("loop"), first.join("loop")).unwrap();
         symlink(first.join("missing"), first.join("dangling")).unwrap();
 
-        let found = discover(&[project(&first), project(&second)]);
+        let found = discover_skills(&[project(&first), project(&second)]);
 
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].path, first.join("alias").join(SKILL_FILE));
@@ -501,7 +501,7 @@ mod tests {
         skill_at(&dir.path().join("a"), &described("review", "first"));
         skill_at(&dir.path().join("b"), &described("review", "second"));
 
-        let found = discover(&[project(dir.path())]);
+        let found = discover_skills(&[project(dir.path())]);
 
         let found: Vec<_> = found.iter().map(|s| (&*s.name, &*s.description)).collect();
         assert_eq!(found, [("review", "first")]);
@@ -542,17 +542,20 @@ mod tests {
             skill("quiz", Scope::Personal),
         ];
 
-        assert_eq!(find(&skills, "quiz"), Lookup::Found(&skills[2]));
-        assert_eq!(find(&skills, "personal:review"), Lookup::Found(&skills[1]));
+        assert_eq!(find_skill(&skills, "quiz"), Lookup::Found(&skills[2]));
+        assert_eq!(
+            find_skill(&skills, "personal:review"),
+            Lookup::Found(&skills[1])
+        );
         let both = vec!["project:review", "personal:review"];
-        assert_eq!(find(&skills, "review"), Lookup::Ambiguous(both));
-        assert_eq!(find(&skills, "nope"), Lookup::Missing);
+        assert_eq!(find_skill(&skills, "review"), Lookup::Ambiguous(both));
+        assert_eq!(find_skill(&skills, "nope"), Lookup::Missing);
     }
 
     #[test]
     fn locations_run_from_the_start_up_to_the_root_then_the_person() {
         let root = Path::new("/code/p");
-        let found = locations(root, &root.join("crates/cli"), Some(Path::new("/home/me")));
+        let found = skill_locations(root, &root.join("crates/cli"), Some(Path::new("/home/me")));
         let expected = [
             (
                 "/code/p/crates/cli/.agents/skills",
@@ -574,7 +577,7 @@ mod tests {
 
     #[test]
     fn a_start_outside_the_project_counts_as_its_root() {
-        let found = locations(Path::new("/code/p"), Path::new("/elsewhere"), None);
+        let found = skill_locations(Path::new("/code/p"), Path::new("/elsewhere"), None);
         assert_eq!(found, [project(Path::new("/code/p/.agents/skills"))]);
     }
 

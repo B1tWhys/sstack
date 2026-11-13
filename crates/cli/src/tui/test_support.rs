@@ -7,12 +7,12 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::backend::TestBackend;
 use ratatui::{Frame, Terminal};
 use sstack::agent::{Agent, AgentConfig, AgentHandle};
+use sstack::commands::{self, Location, Scope};
 use sstack::connection::{Config, Connections, Provider, SecretStore};
 use sstack::sandbox::Sandbox;
 use sstack::session;
 use sstack::session::{AssistantEntry, SessionLog, StopReason, ToolCall, Usage};
 use sstack::session_report::{ReportingApprover, ReportingAsker};
-use sstack::skills::{self, Location, Scope};
 use sstack::tools::project::Project;
 use sstack::tools::{Approver, ToolBox};
 
@@ -140,7 +140,7 @@ pub fn opened(path: &Path, provider: Arc<dyn Provider>, events: &EventSender) ->
         notices: Vec::new(),
         events: SessionSender::new(&id, events.clone()),
         vim: false,
-        skills: skills::discover(&[Location {
+        skills: commands::discover_skills(&[Location {
             directory: path.parent().unwrap().join(".agents/skills"),
             scope: Scope::Project,
         }]),

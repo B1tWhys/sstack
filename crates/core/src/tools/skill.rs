@@ -3,8 +3,8 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::{Tool, ToolError, parse_input};
+use crate::commands::{self, Skill};
 use crate::connection::ToolSpec;
-use crate::skills::{self, Skill};
 
 /// The tool for loading the instructions of an installed [`Skill`], which may live outside the
 /// project. It also lists the files beside the instructions, without opening anything else out
@@ -58,14 +58,15 @@ impl Tool for UseSkill {
             .iter()
             .find(|skill| skill.name == input.name)
             .ok_or_else(|| ToolError::Failed(format!("unknown skill: {}", input.name)))?;
-        skills::load(skill).map_err(|error| ToolError::Failed(format!("{}: {error}", input.name)))
+        commands::load_skill(skill)
+            .map_err(|error| ToolError::Failed(format!("{}: {error}", input.name)))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::skills::Scope;
+    use crate::commands::Scope;
     use std::fs;
     use std::path::Path;
 

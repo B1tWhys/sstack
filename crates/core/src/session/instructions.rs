@@ -4,7 +4,7 @@
 use std::fs;
 use std::path::Path;
 
-use crate::skills::Skill;
+use crate::commands::Skill;
 
 /// The instructions every Session starts with.
 const BASE_PROMPT: &str = "You are sstack, a coding agent working in the user's project. \
@@ -106,7 +106,7 @@ pub fn skills_prompt(prompt: &str, listing: &SkillListing) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::skills::Scope;
+    use crate::commands::Scope;
 
     #[test]
     fn worktree_sessions_are_told_how_to_land() {

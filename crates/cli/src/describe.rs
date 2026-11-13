@@ -3,7 +3,7 @@
 use std::fmt::Display;
 
 use sstack::agent::{ToolCallSummary, TurnEnd};
-use sstack::skills::Skill;
+use sstack::commands::Skill;
 
 /// The most characters of a tool call's input to show.
 const MAX_TOOL_INPUT_CHARS: usize = 200;
@@ -88,7 +88,7 @@ fn shorten(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sstack::skills::Scope;
+    use sstack::commands::Scope;
 
     #[test]
     fn long_tool_input_is_cut_and_short_input_is_shown_whole() {
