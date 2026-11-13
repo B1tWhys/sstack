@@ -8,8 +8,6 @@ pub mod commands;
 pub mod connection;
 pub mod open_session;
 pub mod question;
-pub mod queue;
-pub mod rebuild;
 pub mod running_harness;
 pub mod session;
 pub mod session_report;

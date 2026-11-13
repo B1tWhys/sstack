@@ -90,11 +90,13 @@ Add `mod_module_files = "deny"` to `[workspace.lints.clippy]` and convert every 
 
 Note: six files moved. Only `sandbox.rs` needed a change, its `include_str!` of the Containerfile. Snapshots needed no move.
 
-### [ ] 2. Group core's modules
+### [x] 2. Group core's modules
 
 One commit per group, moving files and fixing paths only. Make each group root a facade as it is created. `protocol.rs` and `tools.rs` come later, so the modules they replace stay in place for now.
 
 Note on `session/`: done. The facade flattens names, so functions that leaned on their module's name were renamed: `session_name::known`, `listed` and `title` became `known_name`, `listed_name` and `window_title`, and `session_metadata::relocate` became `relocate_metadata`. Where a crate already has a local module of the same name as a group (the GUI's `window::session`), import the items rather than the group.
+
+Note on the other groups: done, one commit each. More renames for the same reason: `connections::open` and `record` became `open_connection` and `record_connection`; the Skill functions became `discover_skills`, `skill_locations`, `find_skill` and `load_skill`; the worktree functions became `worktree_path`, `worktree_branch`, `rename_worktree_branch`, `create_worktree`, `remove_worktree` and `main_checkout_of`; the Rebuild functions became `source_to_build`, `build_harness` and `relaunch_into`. `agent.rs` is `agent/turn.rs`, `turn_runner.rs` is `agent/runner.rs`, and `running_harness.rs` is `running_harness/rules.rs`. `Checkout` moved to `workspace/worktree`. `.config/nextest.toml` gives the Podman tests a longer timeout by test path, so moving a test module means updating that filter. `question` and `session_report` stay top-level until step 3, and `tools` until step 5.
 
 ### [ ] 3. Extract `protocol`
 

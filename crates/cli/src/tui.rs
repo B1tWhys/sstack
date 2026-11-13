@@ -42,11 +42,10 @@ use sstack::open_session::{
     sessions_directory, starting_session,
 };
 use sstack::question::Asker;
-use sstack::rebuild::{self, Checkout};
-use sstack::running_harness::Exit;
+use sstack::running_harness::{self, Exit};
 use sstack::session_report::{ReportingApprover, ReportingAsker, SessionReport};
 use sstack::tools::Approver;
-use sstack::workspace::Containers;
+use sstack::workspace::{Checkout, Containers};
 use sstack::{session, workspace};
 use theme::ColorDepth;
 use tokio::sync::mpsc;
@@ -91,7 +90,7 @@ pub async fn run(args: &Args) -> Result<ExitCode> {
     input::spawn(sender);
     while let Exit::Rebuild(binary) = on_screen(&mut app, &mut events).await? {
         archiver.finish().await;
-        let failure = rebuild::relaunch(&binary, &args.relaunch(app.session()));
+        let failure = running_harness::relaunch_into(&binary, &args.relaunch(app.session()));
         app.relaunch_failed(&failure.to_string());
     }
     archiver.finish().await;
@@ -179,10 +178,11 @@ impl Sessions for LiveSessions<'_> {
 
     fn start_build(&mut self, checkout: Checkout, id: &str) {
         let events = self.events.clone();
-        let source = rebuild::source(checkout, &workspace::worktree_path(&self.main, id));
+        let source =
+            running_harness::source_to_build(checkout, &workspace::worktree_path(&self.main, id));
         self.build = Some(tokio::spawn(async move {
             let built = match source {
-                Ok(source) => rebuild::build(HARNESS, source).await,
+                Ok(source) => running_harness::build_harness(HARNESS, source).await,
                 Err(failure) => Err(failure),
             };
             let _ = events.send(Event::Report(SessionReport::BuildFinished(built)));

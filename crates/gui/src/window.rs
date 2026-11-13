@@ -28,13 +28,13 @@ use session::SessionView;
 use sstack::commands::Command;
 use sstack::connection::Connections;
 use sstack::open_session::{OpenSessions, Place, Run, SessionController, Start};
-use sstack::rebuild::Checkout;
 use sstack::running_harness::{
     Exit, InSession, Outcome, Phase, Refusal, RunningHarness, SessionState,
 };
 use sstack::session::{SessionSummary, window_title};
 use sstack::session_report::{ReportSender, SessionReport};
 use sstack::vim::VimEvent;
+use sstack::workspace::Checkout;
 
 use crate::asked::Controls;
 use crate::reports::Reports;

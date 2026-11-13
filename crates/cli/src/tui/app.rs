@@ -16,13 +16,13 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::{Frame, Terminal};
 use sstack::commands::Command;
 use sstack::open_session::{OpenSessions, SessionController};
-use sstack::rebuild::Checkout;
 use sstack::running_harness::{
     Exit, InSession, Outcome, Phase, Refusal, RunningHarness, SessionState,
 };
 use sstack::session;
 use sstack::session::SessionSummary;
 use sstack::vim::{VimEvent, VimFailure};
+use sstack::workspace::Checkout;
 
 use super::component::{Component, KeyOutcome};
 use super::components::{Activity, Row, SIDEBAR_WIDTH, Sidebar};

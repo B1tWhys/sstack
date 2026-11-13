@@ -29,9 +29,9 @@ use sstack::open_session::{
     starting_session,
 };
 use sstack::question::Asker;
-use sstack::rebuild::{self, Binary, Checkout};
+use sstack::running_harness::{self, Binary};
 use sstack::session_report::{ReportingApprover, ReportingAsker};
-use sstack::workspace::Containers;
+use sstack::workspace::{Checkout, Containers};
 use sstack::{session, workspace};
 use window::{Message, Opened, Ready, Sessions, Window};
 
@@ -100,7 +100,7 @@ fn run(args: &Args) -> Result<()> {
 
 /// Replaces this process with `binary`, started with `args`, returning why it could not.
 fn relaunch(binary: &Path, args: &[String]) -> anyhow::Error {
-    let failure = rebuild::relaunch(binary, args);
+    let failure = running_harness::relaunch_into(binary, args);
     anyhow!("could not relaunch into {}: {failure}", binary.display())
 }
 
@@ -198,14 +198,14 @@ impl Sessions for LiveSessions {
     }
 
     fn harness_source(&self, checkout: Checkout, id: &str) -> Result<PathBuf, String> {
-        rebuild::source(checkout, &workspace::worktree_path(&self.main, id))
+        running_harness::source_to_build(checkout, &workspace::worktree_path(&self.main, id))
     }
 }
 
 /// Builds `sstack-gui` from the checkout of the Harness Source at `source` for a Rebuild, ending
 /// in where the new binary is or in why the build failed.
 fn build_harness(source: PathBuf) -> BoxFuture<'static, Result<PathBuf, String>> {
-    rebuild::build(HARNESS, source).boxed()
+    running_harness::build_harness(HARNESS, source).boxed()
 }
 
 /// Opens the window on the readied Sessions, which iced asks for once as it starts, along with

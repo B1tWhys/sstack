@@ -26,6 +26,17 @@ pub(crate) const REPOSITORY_ENV: [&str; 3] = ["GIT_DIR", "GIT_INDEX_FILE", "GIT_
 #[error("{0}")]
 pub struct GitError(pub String);
 
+/// Which checkout of the Harness Source a Rebuild builds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Checkout {
+    /// The main checkout, which has the work landed so far. A Running Harness built from a
+    /// Session's worktree comes back to it, even once that worktree is gone.
+    Main,
+    /// The worktree of the Session the person asked from, so that they can try its work before
+    /// landing it.
+    Worktree,
+}
+
 /// Returns where the Session with id `id` has its worktree, which need not exist.
 #[must_use]
 pub fn worktree_path(main: &Path, id: &str) -> PathBuf {

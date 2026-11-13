@@ -5,7 +5,7 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use crate::workspace;
+use crate::workspace::{self, Checkout};
 
 /// How many lines of a failed build to show the person.
 const MAX_ERROR_LINES: usize = 20;
@@ -19,17 +19,6 @@ pub struct Binary {
     /// The name of the binary, which is also its file name in cargo's output directory, such as
     /// `sstack`.
     pub name: &'static str,
-}
-
-/// Which checkout of the Harness Source a Rebuild builds.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Checkout {
-    /// The main checkout, which has the work landed so far. A Running Harness built from a
-    /// Session's worktree comes back to it, even once that worktree is gone.
-    Main,
-    /// The worktree of the Session the person asked from, so that they can try its work before
-    /// landing it.
-    Worktree,
 }
 
 /// Returns the checkout of the Harness Source this code was built from, which every binary in it
@@ -46,11 +35,11 @@ fn source_dir() -> PathBuf {
 /// # Errors
 /// Fails for [`Checkout::Worktree`] if the Session's project is not the Harness Source this code
 /// was built from, or if the Session has no worktree.
-pub fn source(checkout: Checkout, worktree: &Path) -> Result<PathBuf, String> {
+pub fn source_to_build(checkout: Checkout, worktree: &Path) -> Result<PathBuf, String> {
     source_from(&source_dir(), checkout, worktree)
 }
 
-/// Returns what [`source`] does, for code built from the checkout `built_from`.
+/// Returns what [`source_to_build`] does, for code built from the checkout `built_from`.
 fn source_from(built_from: &Path, checkout: Checkout, worktree: &Path) -> Result<PathBuf, String> {
     let home = workspace::main_checkout_of(built_from).unwrap_or(built_from);
     match checkout {
@@ -126,20 +115,21 @@ const PROFILE: &str = "dev";
 /// The directory under `target` where cargo puts what [`PROFILE`] builds.
 const PROFILE_DIR: &str = "debug";
 
-/// Builds `binary` from the checkout of the Harness Source at `source`, which [`source`] gives,
-/// with the `dev` profile even if the running code is a release build. Returns where the new
-/// binary is, or what went wrong. Each checkout builds into its own `target` directory.
+/// Builds `binary` from the checkout of the Harness Source at `source`, which
+/// [`source_to_build`] gives, with the `dev` profile even if the running code is a release build.
+/// Returns where the new binary is, or what went wrong. Each checkout builds into its own `target`
+/// directory.
 ///
 /// # Errors
 /// Returns the end of cargo's output if the build fails, or why cargo could not start.
-pub async fn build(binary: Binary, source: PathBuf) -> Result<PathBuf, String> {
+pub async fn build_harness(binary: Binary, source: PathBuf) -> Result<PathBuf, String> {
     run_build(build_command(&source, binary.package, PROFILE)).await?;
     Ok(binary_path(&source, PROFILE_DIR, binary.name))
 }
 
 /// Replaces this process with `binary`. Only returns if that fails.
 #[must_use]
-pub fn relaunch(binary: &Path, args: &[String]) -> io::Error {
+pub fn relaunch_into(binary: &Path, args: &[String]) -> io::Error {
     Command::new(binary).args(args).exec()
 }
 
@@ -226,7 +216,7 @@ mod tests {
 
     #[test]
     fn relaunching_a_missing_binary_reports_the_failure() {
-        let error = relaunch(Path::new("/definitely/not/here"), &[]);
+        let error = relaunch_into(Path::new("/definitely/not/here"), &[]);
         assert_eq!(error.kind(), io::ErrorKind::NotFound);
     }
 }

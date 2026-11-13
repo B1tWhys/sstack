@@ -1,6 +1,6 @@
 //! Human Commands, told apart from input meant for the model.
 
-use crate::rebuild::Checkout;
+use crate::workspace::Checkout;
 
 /// What a line entered by the person asks for.
 #[derive(Debug, PartialEq, Eq)]

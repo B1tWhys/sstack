@@ -13,7 +13,7 @@ pub use sandbox::{
 #[cfg(test)]
 pub(crate) use worktree::test_support;
 pub use worktree::{
-    GitError, approved_commands_path, create_worktree, remove_worktree, rename_worktree_branch,
-    unfinished_work, worktree_branch, worktree_path,
+    Checkout, GitError, approved_commands_path, create_worktree, remove_worktree,
+    rename_worktree_branch, unfinished_work, worktree_branch, worktree_path,
 };
 pub(crate) use worktree::{REPOSITORY_ENV, main_checkout_of};

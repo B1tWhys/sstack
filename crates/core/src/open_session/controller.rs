@@ -325,13 +325,13 @@ mod tests {
     use crate::agent::{Agent, AgentConfig};
     use crate::commands::Command;
     use crate::connection::scripted::ScriptedProvider;
-    use crate::rebuild::Checkout;
     use crate::running_harness::{Exit, RunningHarness};
     use crate::session::{AssistantEntry, Entry, SessionLog, StopReason, Usage};
     use crate::session_report::{ApprovalRequest, QuestionRequest};
     use crate::tools::project::Project;
     use crate::tools::test_support::{disabled, git_project};
     use crate::tools::{DenyAll, ToolBox};
+    use crate::workspace::Checkout;
 
     /// Opens a new Session called `name` in `dir`, whose reports go nowhere, so that what the
     /// controller knows of it comes only from what a test reports by hand.

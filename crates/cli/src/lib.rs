@@ -12,7 +12,7 @@ use std::process::ExitCode;
 use anyhow::Result;
 use clap::Parser;
 use sstack::open_session::LATEST;
-use sstack::rebuild::Binary;
+use sstack::running_harness::Binary;
 use sstack::session;
 
 /// A coding agent that improves itself.
