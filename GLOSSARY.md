@@ -18,6 +18,10 @@ _Avoid_: Title, label
 What is kept about a Session beside its log because it is not part of the conversation the model sees, such as its Session Name.
 _Avoid_: Session info, sidecar
 
+**Open Session**:
+A Session the Running Harness has loaded and can run Turns in, as opposed to one that is only stored. A Running Harness can hold several Open Sessions at once.
+_Avoid_: Active session, live session, loaded session
+
 **Turn**:
 One drain of admitted input in a Session, ending when the model and its tools have stopped. A Turn contains zero or more Steps.
 _Avoid_: Round, exchange
