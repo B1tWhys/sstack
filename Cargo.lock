@@ -5439,6 +5439,7 @@ dependencies = [
  "dotenvy",
  "futures",
  "genai",
+ "globset",
  "home",
  "ignore",
  "keyring-core",

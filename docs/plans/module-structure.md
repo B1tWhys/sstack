@@ -104,9 +104,11 @@ Move the boundary types into `protocol.rs`, add the replay type for `Resumed`, a
 
 Note: done in two commits, the replay type first so that `protocol` could be a leaf from the start. The replay type is `Replayed`, made by `agent::replay`, which now leaves out the calls a put-off Turn never started, so `calls_not_started` is private to `agent/`. `SessionEvent` stayed in `running_harness/rules`, because no interface uses it. The `Asker` trait moved to `tools.rs` beside `Approver`, as both are ports the tools call. `ReportingApprover` and `ReportingAsker` are in `open_session/reporting.rs`. `describe_all` is used by the `ask` tool and the GUI as well as the TUI.
 
-### [ ] 4. One Protected Path rule
+### [x] 4. One Protected Path rule
 
 Add `workspace/protected` and make the Sandbox and `Project` call it.
+
+Note: done. The rule takes a path relative to the directory that holds it, because a worktree Session's root is itself inside `.sstack`, and checking absolute paths would hide everything in it. The tools now also treat `.sstack` as protected anywhere in the Workspace, as the Sandbox did. Before, git-ignore hid it from them. `globset` is a new direct dependency, already in the lockfile through `ignore`.
 
 ### [ ] 5. Invert the tool port
 

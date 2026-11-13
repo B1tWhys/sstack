@@ -9,9 +9,10 @@ use regex::Regex;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use super::project::{Project, is_protected};
+use super::project::Project;
 use super::{Tool, ToolError, parse_input};
 use crate::connection::ToolSpec;
+use crate::workspace::is_protected;
 
 /// The most results returned from one search.
 const MAX_RESULTS: usize = 500;
@@ -31,11 +32,17 @@ impl Search {
     /// Lists the project's visible files, optionally limited by `glob`.
     fn walk(&self, glob: Option<&str>) -> Result<Vec<String>, ToolError> {
         let root = self.project.root();
+        let owned_root = root.to_owned();
         let files = WalkBuilder::new(root)
             .hidden(false)
             .require_git(false)
             .overrides(file_filter(root, glob)?)
-            .filter_entry(|entry| !is_protected(entry.path()))
+            .filter_entry(move |entry| {
+                !entry
+                    .path()
+                    .strip_prefix(&owned_root)
+                    .is_ok_and(is_protected)
+            })
             .build()
             .flatten()
             .filter(|entry| entry.path().is_file())

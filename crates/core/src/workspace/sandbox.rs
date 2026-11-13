@@ -27,7 +27,8 @@ use nix::unistd::{Pid, getgid, getuid};
 use sha2::{Digest, Sha256};
 use tokio::sync::{Mutex, OnceCell};
 
-use super::worktree::{DATA_DIR, main_checkout_of};
+use super::protected::{PROTECTED_DIRECTORIES, PROTECTED_FILES};
+use super::worktree::main_checkout_of;
 #[cfg(test)]
 pub(crate) use runtime::MockContainerRuntime;
 pub use runtime::{
@@ -201,9 +202,9 @@ fn build_context(tag: &str) -> std::io::Result<PathBuf> {
 /// A `.env` file inside a directory git ignores is missed, since those directories are not
 /// searched.
 fn masks(workspace: &Path) -> Vec<Mask> {
-    let fixed = [".git", DATA_DIR].map(|name| workspace.join(name));
+    let fixed = PROTECTED_DIRECTORIES.map(|name| workspace.join(name));
     let fixed = fixed.into_iter().filter_map(mask);
-    fixed.chain(env_files(workspace)).collect()
+    fixed.chain(protected_files(workspace)).collect()
 }
 
 /// Returns how to cover `path`, whichever kind of thing it is, or nothing if it does not exist.
@@ -216,18 +217,26 @@ fn mask(path: PathBuf) -> Option<Mask> {
     })
 }
 
-/// Finds the `.env` files in `workspace`, including those git ignores, outside the directories
-/// [`masks`] covers anyway.
-fn env_files(workspace: &Path) -> Vec<Mask> {
+/// Finds the files in `workspace` that are Protected Paths wherever they are, such as `.env` files,
+/// including those git ignores, outside the directories [`masks`] covers anyway.
+fn protected_files(workspace: &Path) -> Vec<Mask> {
     let mut globs = OverrideBuilder::new(workspace);
-    let added = globs.add(".env").and_then(|g| g.add(".env.*"));
-    let Ok(overrides) = added.and_then(|g| g.build()) else {
+    for pattern in PROTECTED_FILES {
+        if globs.add(pattern).is_err() {
+            return Vec::new();
+        }
+    }
+    let Ok(overrides) = globs.build() else {
         return Vec::new();
     };
     let walk = WalkBuilder::new(workspace)
         .hidden(false)
         .overrides(overrides)
-        .filter_entry(|entry| !matches!(entry.file_name().to_str(), Some(".git" | DATA_DIR)))
+        .filter_entry(|entry| {
+            !PROTECTED_DIRECTORIES
+                .iter()
+                .any(|d| entry.file_name() == *d)
+        })
         .build();
     walk.filter_map(Result::ok)
         .filter(|entry| entry.file_type().is_some_and(|t| t.is_file()))

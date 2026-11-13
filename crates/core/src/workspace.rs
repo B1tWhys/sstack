@@ -1,9 +1,11 @@
 //! The Workspace: the directory the model works in, the Sandbox its shell commands run in, and the
 //! worktree a Session can have of its own.
 
+mod protected;
 mod sandbox;
 mod worktree;
 
+pub use protected::is_protected;
 #[cfg(test)]
 pub(crate) use sandbox::MockContainerRuntime;
 pub use sandbox::{

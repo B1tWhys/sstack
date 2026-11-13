@@ -1,12 +1,11 @@
 //! Which files the model may touch.
 
-use std::ffi::OsStr;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
 use super::ToolError;
-use crate::workspace::REPOSITORY_ENV;
+use crate::workspace::{REPOSITORY_ENV, is_protected};
 
 /// The directory a Session works in, which limits what the model can touch.
 #[derive(Debug)]
@@ -57,7 +56,7 @@ impl Project {
         let denied = || ToolError::Failed(format!("access denied: {path}"));
         let resolved = self.canonical(path).ok_or_else(denied)?;
         let visible = resolved.starts_with(&self.root)
-            && !is_protected(&resolved)
+            && !resolved.strip_prefix(&self.root).is_ok_and(is_protected)
             && !self.is_git_ignored(&resolved);
         visible.then_some(resolved).ok_or_else(denied)
     }
@@ -71,8 +70,12 @@ impl Project {
     pub fn resolve_for_reading(&self, path: &str) -> Result<PathBuf, ToolError> {
         self.resolve(path).or_else(|denied| {
             let resolved = self.canonical(path).ok_or(denied)?;
-            let readable = self.readable.iter().any(|d| resolved.starts_with(d));
-            if readable && !is_protected(&resolved) {
+            let readable = (self.readable.iter()).any(|d| {
+                resolved
+                    .strip_prefix(d)
+                    .is_ok_and(|inside| !is_protected(inside))
+            });
+            if readable {
                 Ok(resolved)
             } else {
                 Err(ToolError::Failed(format!("access denied: {path}")))
@@ -113,18 +116,6 @@ impl Project {
     }
 }
 
-/// True for paths that stay hidden even when git does not ignore them, such as a `.env` file
-/// in a directory that is not a repository.
-pub(super) fn is_protected(path: &Path) -> bool {
-    path.components().any(|c| is_protected_name(c.as_os_str()))
-}
-
-/// Returns whether a path component always stays hidden from the model.
-fn is_protected_name(name: &OsStr) -> bool {
-    let name = name.to_string_lossy();
-    name == ".git" || name == ".env" || name.starts_with(".env.")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -137,6 +128,17 @@ mod tests {
         fs::write(dir.path().join("a.txt"), "").unwrap();
         assert!(project.resolve("a.txt").is_ok());
         assert!(project.resolve("new/dir/b.txt").is_ok());
+    }
+
+    #[test]
+    fn a_root_inside_the_data_directory_still_shows_its_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join(".sstack/worktrees/1");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("a.txt"), "").unwrap();
+        let project = Project::new(&root).unwrap();
+        assert!(project.resolve("a.txt").is_ok());
+        assert!(project.resolve(".env").is_err());
     }
 
     #[test]
