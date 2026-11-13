@@ -13,6 +13,7 @@ missing_docs = "deny"
 all = { level = "deny", priority = -1 }
 pedantic = { level = "deny", priority = -1 }
 missing_docs_in_private_items = "deny"
+mod_module_files = "deny"
 
 # Unoptimized, cosmic-text and swash take seconds to shape a long transcript, and syntect takes
 # about as long to color its code blocks, which stalls the GUI on each Session switch. A Rebuild

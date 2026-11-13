@@ -44,7 +44,7 @@ pub const RUNTIMES: [&str; 4] = [
 ];
 
 /// What the Sandbox image is built from.
-const CONTAINERFILE: &str = include_str!("Containerfile");
+const CONTAINERFILE: &str = include_str!("sandbox/Containerfile");
 
 /// Where cargo keeps its files inside the container, which the [`CONTAINERFILE`] sets as
 /// `CARGO_HOME`.

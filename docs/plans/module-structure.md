@@ -84,9 +84,11 @@ Some placements need a small change to keep that direction:
 
 ## Steps
 
-### [ ] 1. Deny `mod.rs` files
+### [x] 1. Deny `mod.rs` files
 
 Add `mod_module_files = "deny"` to `[workspace.lints.clippy]` and convert every `foo/mod.rs` in the workspace to `foo.rs`.
+
+Note: six files moved. Only `sandbox.rs` needed a change, its `include_str!` of the Containerfile. Snapshots needed no move.
 
 ### [ ] 2. Group core's modules
 
