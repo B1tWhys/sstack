@@ -9,8 +9,8 @@ use std::mem;
 use std::path::PathBuf;
 
 use crate::commands::{Command, parse_command};
+use crate::open_session::{OpenSessions, SessionController};
 use crate::rebuild::Checkout;
-use crate::session_controller::{OpenSessions, SessionController};
 use crate::session_report::SessionReport;
 
 /// What a Session is doing, which decides how the person can interact with it.

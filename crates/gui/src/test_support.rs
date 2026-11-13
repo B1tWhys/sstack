@@ -14,10 +14,10 @@ use sstack::connection::{
     Config, Connections, SecretStore,
     scripted::{Scripted, ScriptedProvider},
 };
+use sstack::open_session::{Run, Start};
 use sstack::rebuild::Checkout;
 use sstack::session::{AssistantEntry, Entry, SessionLog, StopReason, ToolCall, Usage};
 use sstack::session_report::{ReportingApprover, ReportingAsker};
-use sstack::session_setup::{Run, Start};
 use sstack::tools::ToolBox;
 use sstack::tools::project::Project;
 use sstack::workspace::Sandbox;

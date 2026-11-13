@@ -7,8 +7,8 @@ use bon::bon;
 
 use crate::agent::ModelService;
 use crate::connection::{Config, Connection, Effort, Provider, SecretStore, resolve_secret};
+use crate::open_session::SetupError;
 use crate::session::SessionMetadata;
-use crate::session_setup::SetupError;
 
 /// The Connections one Session can switch between, with the one it runs on now.
 pub struct Connections {

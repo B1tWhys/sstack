@@ -10,11 +10,11 @@
 use crate::agent::{AgentHandle, TurnEnd};
 use crate::commands::{self, Lookup, Skill};
 use crate::connection::Connections;
+use crate::open_session::SetupError;
 use crate::question::Response;
 use crate::running_harness::{Outcome, Refusal, SessionEvent, SessionState};
 use crate::session::Naming;
 use crate::session_report::{Reply, ReportSender, SessionReport};
-use crate::session_setup::SetupError;
 use crate::tools::Verdict;
 
 /// Control of one open Session, which starts, pauses and cancels its Turns and keeps track of what

@@ -15,13 +15,13 @@ use ratatui::backend::Backend;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::{Frame, Terminal};
 use sstack::commands::Command;
+use sstack::open_session::{OpenSessions, SessionController};
 use sstack::rebuild::Checkout;
 use sstack::running_harness::{
     Exit, InSession, Outcome, Phase, Refusal, RunningHarness, SessionState,
 };
 use sstack::session;
 use sstack::session::SessionSummary;
-use sstack::session_controller::{OpenSessions, SessionController};
 use sstack::vim::{VimEvent, VimFailure};
 
 use super::component::{Component, KeyOutcome};
@@ -31,7 +31,7 @@ use sstack::session_report::SessionReport;
 use super::event::{Action, Event, EventReceiver};
 use super::pane::{Opened, Pane};
 use super::theme::ColorDepth;
-use sstack::session_setup::{Place, Start};
+use sstack::open_session::{Place, Start};
 
 /// The reason given to the person when a Session cannot be put away during a Turn.
 const BUSY: &str = "a Turn is running: wait for it to end, or press Alt-C to cancel it";

@@ -24,13 +24,13 @@ use clap::Parser;
 use iced::futures::future::{BoxFuture, FutureExt};
 use iced::{Application, Program, Task};
 use reports::Reports;
-use sstack::question::Asker;
-use sstack::rebuild::{self, Binary, Checkout};
-use sstack::session_report::{ReportingApprover, ReportingAsker};
-use sstack::session_setup::{
+use sstack::open_session::{
     AskedConnection, LATEST, Start, listed_sessions, main_checkout, prepare, sessions_directory,
     starting_session,
 };
+use sstack::question::Asker;
+use sstack::rebuild::{self, Binary, Checkout};
+use sstack::session_report::{ReportingApprover, ReportingAsker};
 use sstack::workspace::Containers;
 use sstack::{session, workspace};
 use window::{Message, Opened, Ready, Sessions, Window};

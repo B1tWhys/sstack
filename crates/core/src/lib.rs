@@ -6,14 +6,13 @@
 pub mod agent;
 pub mod commands;
 pub mod connection;
+pub mod open_session;
 pub mod question;
 pub mod queue;
 pub mod rebuild;
 pub mod running_harness;
 pub mod session;
-pub mod session_controller;
 pub mod session_report;
-pub mod session_setup;
 pub mod tools;
 pub mod vim;
 pub mod workspace;

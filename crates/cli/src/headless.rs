@@ -8,8 +8,8 @@ use std::sync::atomic::AtomicBool;
 
 use anyhow::Result;
 use sstack::agent::{AgentEvent, QueuedPrompts, TurnContext, TurnEnd};
+use sstack::open_session::{Place, Run, Start, prepare};
 use sstack::session;
-use sstack::session_setup::{Place, Run, Start, prepare};
 use sstack::tools::DenyAll;
 use sstack::workspace::Containers;
 use tokio_util::sync::CancellationToken;

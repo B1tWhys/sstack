@@ -11,9 +11,9 @@ use std::process::ExitCode;
 
 use anyhow::Result;
 use clap::Parser;
+use sstack::open_session::LATEST;
 use sstack::rebuild::Binary;
 use sstack::session;
-use sstack::session_setup::LATEST;
 
 /// A coding agent that improves itself.
 #[derive(Debug, Parser)]

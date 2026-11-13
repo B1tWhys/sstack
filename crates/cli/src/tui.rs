@@ -37,14 +37,14 @@ use crossterm::style::Print;
 use event::{Event, EventReceiver, EventSender, SessionSender};
 use pane::Opened;
 use sstack::agent::AgentHandle;
+use sstack::open_session::{
+    AskedConnection, Start, installed_skills, listed_sessions, main_checkout, prepare,
+    sessions_directory, starting_session,
+};
 use sstack::question::Asker;
 use sstack::rebuild::{self, Checkout};
 use sstack::running_harness::Exit;
 use sstack::session_report::{ReportingApprover, ReportingAsker, SessionReport};
-use sstack::session_setup::{
-    AskedConnection, Start, installed_skills, listed_sessions, main_checkout, prepare,
-    sessions_directory, starting_session,
-};
 use sstack::tools::Approver;
 use sstack::workspace::Containers;
 use sstack::{session, workspace};
