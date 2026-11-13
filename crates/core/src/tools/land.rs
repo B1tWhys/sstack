@@ -10,7 +10,7 @@ use tokio::process::Command;
 use super::project::Project;
 use super::{Approver, Tool, ToolError, Verdict};
 use crate::connection::ToolSpec;
-use crate::worktree::REPOSITORY_ENV;
+use crate::workspace::REPOSITORY_ENV;
 
 /// How many times to try before giving up on a main branch that keeps moving.
 const ATTEMPTS: usize = 3;
@@ -209,8 +209,7 @@ mod tests {
     use super::*;
     use crate::tools::test_support::{AllowAll, git as run};
     use crate::tools::{DenyAll, ToolBox};
-    use crate::worktree;
-    use crate::worktree::test_support::repository;
+    use crate::workspace::{self, test_support::repository};
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
 
@@ -224,7 +223,7 @@ mod tests {
     fn fixture(approver: Arc<dyn Approver>) -> Fixture {
         let dir = tempfile::tempdir().unwrap();
         repository(dir.path());
-        let worktree = worktree::create(dir.path(), "1").unwrap();
+        let worktree = workspace::create_worktree(dir.path(), "1").unwrap();
         let land = Land {
             worktree: Arc::new(Project::new(&worktree).unwrap()),
             main: dir.path().to_owned(),

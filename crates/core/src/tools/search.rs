@@ -134,8 +134,7 @@ mod tests {
     use super::*;
     use crate::tools::project::Project;
     use crate::tools::test_support::{git, git_project};
-    use crate::worktree;
-    use crate::worktree::test_support::repository;
+    use crate::workspace::{self, test_support::repository};
 
     fn populated() -> (tempfile::TempDir, Search) {
         let (dir, project) = git_project();
@@ -181,7 +180,7 @@ mod tests {
         fs::write(dir.path().join("a.txt"), "alpha\n").unwrap();
         git(dir.path(), &["add", "."]);
         git(dir.path(), &["commit", "-q", "-m", "a"]);
-        let worktree = worktree::create(dir.path(), "1").unwrap();
+        let worktree = workspace::create_worktree(dir.path(), "1").unwrap();
 
         let from_main = Search::new(Arc::new(Project::new(dir.path()).unwrap()));
         let from_worktree = Search::new(Arc::new(Project::new(&worktree).unwrap()));

@@ -5,7 +5,7 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use crate::worktree;
+use crate::workspace;
 
 /// How many lines of a failed build to show the person.
 const MAX_ERROR_LINES: usize = 20;
@@ -40,7 +40,8 @@ fn source_dir() -> PathBuf {
 }
 
 /// Returns the directory to build for a Rebuild of `checkout`, asked for from a Session whose
-/// worktree belongs at `worktree`, as [`worktree::path`] gives, whether or not it has one.
+/// worktree belongs at `worktree`, as [`workspace::worktree_path`] gives, whether or not it has
+/// one.
 ///
 /// # Errors
 /// Fails for [`Checkout::Worktree`] if the Session's project is not the Harness Source this code
@@ -51,7 +52,7 @@ pub fn source(checkout: Checkout, worktree: &Path) -> Result<PathBuf, String> {
 
 /// Returns what [`source`] does, for code built from the checkout `built_from`.
 fn source_from(built_from: &Path, checkout: Checkout, worktree: &Path) -> Result<PathBuf, String> {
-    let home = worktree::main_of(built_from).unwrap_or(built_from);
+    let home = workspace::main_checkout_of(built_from).unwrap_or(built_from);
     match checkout {
         Checkout::Main => Ok(home.to_owned()),
         Checkout::Worktree => worktree_source(home, worktree),
@@ -61,7 +62,7 @@ fn source_from(built_from: &Path, checkout: Checkout, worktree: &Path) -> Result
 /// Returns `worktree`, a Session's worktree, if it is one of the Harness Source whose main
 /// checkout is `home`.
 fn worktree_source(home: &Path, worktree: &Path) -> Result<PathBuf, String> {
-    let main = worktree::main_of(worktree);
+    let main = workspace::main_checkout_of(worktree);
     if !main.is_some_and(|main| same_directory(home, main)) {
         return Err(format!(
             "cannot build this Session's worktree: this project is not the Harness Source at {}",
@@ -193,7 +194,7 @@ mod tests {
     #[test]
     fn the_main_checkout_is_built_even_by_code_built_in_a_worktree() {
         let home = tempfile::tempdir().unwrap();
-        let built_in_worktree = worktree::path(home.path(), "7");
+        let built_in_worktree = workspace::worktree_path(home.path(), "7");
         let elsewhere = Path::new("/other");
         for built_from in [home.path(), &built_in_worktree] {
             let built = source_from(built_from, Checkout::Main, elsewhere);
@@ -204,7 +205,7 @@ mod tests {
     #[test]
     fn a_sessions_worktree_is_built_only_if_it_is_one_of_the_harness_source() {
         let home = tempfile::tempdir().unwrap();
-        let worktree = worktree::path(home.path(), "7");
+        let worktree = workspace::worktree_path(home.path(), "7");
         std::fs::create_dir_all(&worktree).unwrap();
         let elsewhere = tempfile::tempdir().unwrap();
         let build =
@@ -212,9 +213,9 @@ mod tests {
 
         assert_eq!(build(home.path(), &worktree), Ok(worktree.clone()));
         assert_eq!(build(&worktree, &worktree), Ok(worktree.clone()));
-        let none = build(home.path(), &worktree::path(home.path(), "8")).unwrap_err();
+        let none = build(home.path(), &workspace::worktree_path(home.path(), "8")).unwrap_err();
         assert!(none.contains("main checkout"), "{none}");
-        let other = worktree::path(elsewhere.path(), "7");
+        let other = workspace::worktree_path(elsewhere.path(), "7");
         std::fs::create_dir_all(&other).unwrap();
         let other_project = build(home.path(), &other).unwrap_err();
         assert!(

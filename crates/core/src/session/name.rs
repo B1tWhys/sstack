@@ -7,7 +7,7 @@ use std::sync::Arc;
 use crate::connection::{ModelRequest, Provider};
 use crate::session::Entry;
 use crate::session_report::{ReportSender, SessionReport};
-use crate::{session, worktree};
+use crate::{session, workspace};
 
 /// What a Session is called before anything names it, and while its Session Name is being made.
 pub const UNTITLED: &str = "new session";
@@ -91,7 +91,7 @@ impl Naming {
     fn rename_branch(&self, name: &str) {
         let Some(main) = &self.main else { return };
         let id = session::session_id(&self.log);
-        if worktree::rename_branch(main, &id, name).is_err() {
+        if workspace::rename_worktree_branch(main, &id, name).is_err() {
             // TODO: log that the Session's branch could not be renamed.
         }
     }
@@ -255,13 +255,13 @@ mod tests {
     #[tokio::test]
     async fn a_session_with_a_worktree_has_its_branch_renamed_too() {
         let dir = tempfile::tempdir().unwrap();
-        worktree::test_support::repository(dir.path());
-        worktree::create(dir.path(), "1").unwrap();
+        workspace::test_support::repository(dir.path());
+        workspace::create_worktree(dir.path(), "1").unwrap();
         let naming = naming(&dir, vec![Ok(reply("Add names"))]).with_branch(dir.path().into());
 
         naming.name("typed").await.unwrap();
 
-        let branch = worktree::branch(dir.path(), "1").unwrap();
+        let branch = workspace::worktree_branch(dir.path(), "1").unwrap();
         assert_eq!(branch, "session/add-names");
     }
 

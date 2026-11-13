@@ -1,8 +1,8 @@
 //! A Session's own copy of the project, so that parallel Sessions cannot disturb each other's
 //! half-finished work.
 //!
-//! A Session has a worktree exactly when the directory [`path`] names exists. Any other Session
-//! works in the main checkout.
+//! A Session has a worktree exactly when the directory [`worktree_path`] names exists. Any other
+//! Session works in the main checkout.
 
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -28,7 +28,7 @@ pub struct GitError(pub String);
 
 /// Returns where the Session with id `id` has its worktree, which need not exist.
 #[must_use]
-pub fn path(main: &Path, id: &str) -> PathBuf {
+pub fn worktree_path(main: &Path, id: &str) -> PathBuf {
     main.join(DATA_DIR).join(WORKTREES_DIR).join(id)
 }
 
@@ -36,7 +36,7 @@ pub fn path(main: &Path, id: &str) -> PathBuf {
 /// `worktree` is not where a Session's worktree goes. It reads only the path, so it still answers
 /// once the worktree has been deleted.
 #[must_use]
-pub(crate) fn main_of(worktree: &Path) -> Option<&Path> {
+pub(crate) fn main_checkout_of(worktree: &Path) -> Option<&Path> {
     let worktrees = worktree.parent()?;
     let data = worktrees.parent()?;
     let named = |dir: &Path, name: &str| dir.file_name().is_some_and(|found| found == name);
@@ -62,8 +62,8 @@ fn first_branch(id: &str) -> String {
 ///
 /// # Errors
 /// Returns an error if the Session has no worktree, or git cannot tell.
-pub fn branch(main: &Path, id: &str) -> Result<String, GitError> {
-    let current = git(&path(main, id), &["branch", "--show-current"])?;
+pub fn worktree_branch(main: &Path, id: &str) -> Result<String, GitError> {
+    let current = git(&worktree_path(main, id), &["branch", "--show-current"])?;
     Ok(current.trim().to_owned())
 }
 
@@ -74,7 +74,7 @@ pub fn branch(main: &Path, id: &str) -> Result<String, GitError> {
 /// # Errors
 /// Returns an error if `name` has nothing a branch name can use, every numbered name is taken,
 /// or git refuses.
-pub fn rename_branch(main: &Path, id: &str, name: &str) -> Result<String, GitError> {
+pub fn rename_worktree_branch(main: &Path, id: &str, name: &str) -> Result<String, GitError> {
     let slug = slug::slugify(name);
     if slug.is_empty() {
         return Err(GitError(format!(
@@ -91,7 +91,7 @@ pub fn rename_branch(main: &Path, id: &str, name: &str) -> Result<String, GitErr
     });
     let renamed = (candidates.into_iter().find(free))
         .ok_or_else(|| GitError(format!("every branch named after {slug} is taken")))?;
-    git(&path(main, id), &["branch", "-m", &renamed])?;
+    git(&worktree_path(main, id), &["branch", "-m", &renamed])?;
     Ok(renamed)
 }
 
@@ -107,9 +107,9 @@ pub fn approved_commands_path(main: &Path) -> PathBuf {
 /// # Errors
 /// Returns an error if `main` is not a git repository with a commit to branch from, or if the
 /// branch already exists.
-pub fn create(main: &Path, id: &str) -> Result<PathBuf, GitError> {
+pub fn create_worktree(main: &Path, id: &str) -> Result<PathBuf, GitError> {
     exclude_data_dir(main)?;
-    let path = path(main, id);
+    let path = worktree_path(main, id);
     let target = path.to_string_lossy();
     git(
         main,
@@ -154,7 +154,7 @@ fn append_line(path: &Path, line: &str) -> std::io::Result<()> {
 /// # Errors
 /// Returns an error if git cannot tell.
 pub fn unfinished_work(main: &Path, id: &str) -> Result<Option<String>, GitError> {
-    let worktree = path(main, id);
+    let worktree = worktree_path(main, id);
     if !worktree.exists() {
         return Ok(None);
     }
@@ -164,7 +164,7 @@ pub fn unfinished_work(main: &Path, id: &str) -> Result<Option<String>, GitError
     {
         return Ok(Some("it has uncommitted changes".to_owned()));
     }
-    let range = format!("HEAD..{}", branch(main, id)?);
+    let range = format!("HEAD..{}", worktree_branch(main, id)?);
     let unlanded = git(main, &["rev-list", "--count", &range])?;
     Ok((unlanded.trim() != "0").then(|| format!("it has {} unlanded commits", unlanded.trim())))
 }
@@ -174,12 +174,12 @@ pub fn unfinished_work(main: &Path, id: &str) -> Result<Option<String>, GitError
 ///
 /// # Errors
 /// Returns an error if git refuses.
-pub fn remove(main: &Path, id: &str) -> Result<(), GitError> {
-    let worktree = path(main, id);
+pub fn remove_worktree(main: &Path, id: &str) -> Result<(), GitError> {
+    let worktree = worktree_path(main, id);
     if !worktree.exists() {
         return Ok(());
     }
-    let branch = branch(main, id)?;
+    let branch = worktree_branch(main, id)?;
     let target = worktree.to_string_lossy();
     git(main, &["worktree", "remove", "--force", &target])?;
     git(main, &["branch", "-q", "-D", &branch])?;
@@ -230,9 +230,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         repository(dir.path());
 
-        let worktree = create(dir.path(), "7").unwrap();
+        let worktree = create_worktree(dir.path(), "7").unwrap();
 
-        assert_eq!(worktree, path(dir.path(), "7"));
+        assert_eq!(worktree, worktree_path(dir.path(), "7"));
         assert!(worktree.starts_with(dir.path().join(".sstack")));
         let current = git(&worktree, &["branch", "--show-current"]).unwrap();
         assert_eq!(current.trim(), "session/7");
@@ -243,18 +243,18 @@ mod tests {
     fn a_renamed_branch_is_named_after_the_session_and_numbered_if_taken() {
         let dir = tempfile::tempdir().unwrap();
         repository(dir.path());
-        let worktree = create(dir.path(), "1").unwrap();
-        create(dir.path(), "2").unwrap();
+        let worktree = create_worktree(dir.path(), "1").unwrap();
+        create_worktree(dir.path(), "2").unwrap();
 
-        let first = rename_branch(dir.path(), "1", "Add Session names!").unwrap();
-        let second = rename_branch(dir.path(), "2", "Add Session names").unwrap();
+        let first = rename_worktree_branch(dir.path(), "1", "Add Session names!").unwrap();
+        let second = rename_worktree_branch(dir.path(), "2", "Add Session names").unwrap();
 
         assert_eq!(first, "session/add-session-names");
         assert_eq!(second, "session/add-session-names-2");
-        assert_eq!(branch(dir.path(), "1").unwrap(), first);
+        assert_eq!(worktree_branch(dir.path(), "1").unwrap(), first);
         assert!(worktree.exists());
-        assert!(rename_branch(dir.path(), "1", "!!").is_err());
-        remove(dir.path(), "2").unwrap();
+        assert!(rename_worktree_branch(dir.path(), "1", "!!").is_err());
+        remove_worktree(dir.path(), "2").unwrap();
         let gone = ["rev-parse", "--verify", "session/add-session-names-2"];
         assert!(git(dir.path(), &gone).is_err());
     }
@@ -262,18 +262,18 @@ mod tests {
     #[test]
     fn a_worktree_path_leads_back_to_its_main_checkout() {
         let main = Path::new("/projects/app");
-        assert_eq!(main_of(&path(main, "7")), Some(main));
-        assert_eq!(main_of(main), None);
-        assert_eq!(main_of(Path::new("/projects/worktrees/7")), None);
-        assert_eq!(main_of(Path::new("/7")), None);
+        assert_eq!(main_checkout_of(&worktree_path(main, "7")), Some(main));
+        assert_eq!(main_checkout_of(main), None);
+        assert_eq!(main_checkout_of(Path::new("/projects/worktrees/7")), None);
+        assert_eq!(main_checkout_of(Path::new("/7")), None);
     }
 
     #[test]
     fn the_exclusion_is_added_only_once() {
         let dir = tempfile::tempdir().unwrap();
         repository(dir.path());
-        create(dir.path(), "1").unwrap();
-        create(dir.path(), "2").unwrap();
+        create_worktree(dir.path(), "1").unwrap();
+        create_worktree(dir.path(), "2").unwrap();
         let exclude = fs::read_to_string(dir.path().join(".git/info/exclude")).unwrap();
         assert_eq!(exclude.matches(EXCLUDE_LINE).count(), 1);
     }
@@ -281,7 +281,7 @@ mod tests {
     #[test]
     fn a_directory_that_is_not_a_repository_has_no_worktrees() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(create(dir.path(), "1").is_err());
+        assert!(create_worktree(dir.path(), "1").is_err());
     }
 
     #[test]
@@ -289,7 +289,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         repository(dir.path());
         assert_eq!(unfinished_work(dir.path(), "1"), Ok(None));
-        let worktree = create(dir.path(), "1").unwrap();
+        let worktree = create_worktree(dir.path(), "1").unwrap();
         assert_eq!(unfinished_work(dir.path(), "1"), Ok(None));
 
         fs::write(worktree.join("new.txt"), "").unwrap();
@@ -306,13 +306,13 @@ mod tests {
     fn removing_deletes_the_worktree_and_its_branch_even_with_work_in_it() {
         let dir = tempfile::tempdir().unwrap();
         repository(dir.path());
-        let worktree = create(dir.path(), "1").unwrap();
+        let worktree = create_worktree(dir.path(), "1").unwrap();
         fs::write(worktree.join("new.txt"), "").unwrap();
 
-        remove(dir.path(), "1").unwrap();
+        remove_worktree(dir.path(), "1").unwrap();
 
         assert!(!worktree.exists());
         assert!(git(dir.path(), &["rev-parse", "--verify", "session/1"]).is_err());
-        assert_eq!(remove(dir.path(), "1"), Ok(()));
+        assert_eq!(remove_worktree(dir.path(), "1"), Ok(()));
     }
 }

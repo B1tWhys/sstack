@@ -40,14 +40,14 @@ use sstack::agent::AgentHandle;
 use sstack::question::Asker;
 use sstack::rebuild::{self, Checkout};
 use sstack::running_harness::Exit;
-use sstack::sandbox::Containers;
 use sstack::session_report::{ReportingApprover, ReportingAsker, SessionReport};
 use sstack::session_setup::{
     AskedConnection, Start, installed_skills, listed_sessions, main_checkout, prepare,
     sessions_directory, starting_session,
 };
 use sstack::tools::Approver;
-use sstack::{session, worktree};
+use sstack::workspace::Containers;
+use sstack::{session, workspace};
 use theme::ColorDepth;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -158,7 +158,7 @@ impl Sessions for LiveSessions<'_> {
     }
 
     fn check_archive(&self, id: &str) -> Result<()> {
-        match worktree::unfinished_work(&self.main, id)? {
+        match workspace::unfinished_work(&self.main, id)? {
             Some(reason) => bail!("{reason}: land it, or use /archive --force"),
             None => Ok(()),
         }
@@ -179,7 +179,7 @@ impl Sessions for LiveSessions<'_> {
 
     fn start_build(&mut self, checkout: Checkout, id: &str) {
         let events = self.events.clone();
-        let source = rebuild::source(checkout, &worktree::path(&self.main, id));
+        let source = rebuild::source(checkout, &workspace::worktree_path(&self.main, id));
         self.build = Some(tokio::spawn(async move {
             let built = match source {
                 Ok(source) => rebuild::build(HARNESS, source).await,
@@ -203,7 +203,7 @@ impl Sessions for LiveSessions<'_> {
 /// Returns an error if git refuses to delete the worktree, or the log cannot be moved. If the
 /// worktree survives, the log stays where it was.
 fn put_away(main: &Path, directory: &Path, id: &str) -> Result<()> {
-    worktree::remove(main, id)?;
+    workspace::remove_worktree(main, id)?;
     session::archive_session(directory, id)?;
     Ok(())
 }

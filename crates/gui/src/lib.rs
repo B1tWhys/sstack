@@ -26,13 +26,13 @@ use iced::{Application, Program, Task};
 use reports::Reports;
 use sstack::question::Asker;
 use sstack::rebuild::{self, Binary, Checkout};
-use sstack::sandbox::Containers;
 use sstack::session_report::{ReportingApprover, ReportingAsker};
 use sstack::session_setup::{
     AskedConnection, LATEST, Start, listed_sessions, main_checkout, prepare, sessions_directory,
     starting_session,
 };
-use sstack::{session, worktree};
+use sstack::workspace::Containers;
+use sstack::{session, workspace};
 use window::{Message, Opened, Ready, Sessions, Window};
 
 // The flags match the TUI's, except `--prompt`, but are defined apart from the CLI's, because
@@ -181,14 +181,14 @@ impl Sessions for LiveSessions {
     }
 
     fn check_archive(&self, id: &str) -> Result<()> {
-        match worktree::unfinished_work(&self.main, id)? {
+        match workspace::unfinished_work(&self.main, id)? {
             Some(reason) => bail!("{reason}: land it, or use /archive --force"),
             None => Ok(()),
         }
     }
 
     fn archive(&mut self, id: &str) -> Result<()> {
-        worktree::remove(&self.main, id)?;
+        workspace::remove_worktree(&self.main, id)?;
         session::archive_session(&self.directory, id)?;
         Ok(())
     }
@@ -198,7 +198,7 @@ impl Sessions for LiveSessions {
     }
 
     fn harness_source(&self, checkout: Checkout, id: &str) -> Result<PathBuf, String> {
-        rebuild::source(checkout, &worktree::path(&self.main, id))
+        rebuild::source(checkout, &workspace::worktree_path(&self.main, id))
     }
 }
 

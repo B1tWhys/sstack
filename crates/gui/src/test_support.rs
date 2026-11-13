@@ -15,12 +15,12 @@ use sstack::connection::{
     scripted::{Scripted, ScriptedProvider},
 };
 use sstack::rebuild::Checkout;
-use sstack::sandbox::Sandbox;
 use sstack::session::{AssistantEntry, Entry, SessionLog, StopReason, ToolCall, Usage};
 use sstack::session_report::{ReportingApprover, ReportingAsker};
 use sstack::session_setup::{Run, Start};
 use sstack::tools::ToolBox;
 use sstack::tools::project::Project;
+use sstack::workspace::Sandbox;
 
 use crate::reports::Reports;
 use crate::window::{Message, Opened, Ready, Sessions};

@@ -240,8 +240,8 @@ fn split_header(text: &str) -> (Option<&str>, &str) {
     (None, text)
 }
 
-/// The most files beside a `SKILL.md` that [`load_skill`] names, so that a Skill with a large tree of
-/// resources does not flood the model.
+/// The most files beside a `SKILL.md` that [`load_skill`] names, so that a Skill with a large tree
+/// of resources does not flood the model.
 const MAX_LISTED_FILES: usize = 50;
 
 /// Returns what the model is given when `skill` is loaded: its instructions, the directory they

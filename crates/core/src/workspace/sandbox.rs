@@ -27,7 +27,7 @@ use nix::unistd::{Pid, getgid, getuid};
 use sha2::{Digest, Sha256};
 use tokio::sync::{Mutex, OnceCell};
 
-use crate::worktree::{DATA_DIR, main_of};
+use super::worktree::{DATA_DIR, main_checkout_of};
 #[cfg(test)]
 pub(crate) use runtime::MockContainerRuntime;
 pub use runtime::{
@@ -255,7 +255,7 @@ fn crate_downloads(cargo_home: &Path) -> Vec<ReadOnly> {
 /// to. A Session worktree and the main checkout it came from name the same volume, so the cache
 /// is shared only within one project.
 fn cache_volume(workspace: &Path) -> String {
-    let project = main_of(workspace).unwrap_or(workspace);
+    let project = main_checkout_of(workspace).unwrap_or(workspace);
     let digest = Sha256::digest(project.as_os_str().as_encoded_bytes());
     let mut hex = String::new();
     for byte in &digest[..6] {

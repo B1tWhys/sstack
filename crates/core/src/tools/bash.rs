@@ -12,7 +12,7 @@ use tokio::process::Command;
 use super::project::Project;
 use super::{Approver, Tool, ToolError, Verdict, parse_input};
 use crate::connection::ToolSpec;
-use crate::sandbox::{Failure, Sandbox};
+use crate::workspace::{Failure, Sandbox};
 
 /// How long a command may run before it is stopped.
 const TIMEOUT: Duration = Duration::from_mins(10);
@@ -171,9 +171,9 @@ impl Tool for Bash {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sandbox::{Containers, MockContainerRuntime};
     use crate::tools::DenyAll;
     use crate::tools::test_support::{AllowAll, disabled, git_project};
+    use crate::workspace::{Containers, MockContainerRuntime};
     use std::os::unix::process::ExitStatusExt;
     use std::process::ExitStatus;
     use std::sync::Mutex;

@@ -6,7 +6,7 @@ use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
 use super::ToolError;
-use crate::worktree::REPOSITORY_ENV;
+use crate::workspace::REPOSITORY_ENV;
 
 /// The directory a Session works in, which limits what the model can touch.
 #[derive(Debug)]

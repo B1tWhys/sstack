@@ -9,12 +9,12 @@ use ratatui::{Frame, Terminal};
 use sstack::agent::{Agent, AgentConfig, AgentHandle};
 use sstack::commands::{self, Location, Scope};
 use sstack::connection::{Config, Connections, Provider, SecretStore};
-use sstack::sandbox::Sandbox;
 use sstack::session;
 use sstack::session::{AssistantEntry, SessionLog, StopReason, ToolCall, Usage};
 use sstack::session_report::{ReportingApprover, ReportingAsker};
 use sstack::tools::project::Project;
 use sstack::tools::{Approver, ToolBox};
+use sstack::workspace::Sandbox;
 
 use super::component::{Component, KeyOutcome};
 use super::event::{EventSender, SessionSender};

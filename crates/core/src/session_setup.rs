@@ -17,14 +17,13 @@ use crate::connection::{
     SystemKeyring, resolve_secret,
 };
 use crate::question::Asker;
-use crate::sandbox::{Containers, Sandbox};
 use crate::session::Naming;
 use crate::session::SessionMetadata;
 use crate::session::{self, SessionSummary, SkillListing};
 use crate::session::{Entry, SessionError, SessionLog};
 use crate::tools::project::Project;
 use crate::tools::{Approver, Land, SessionInfo, ToolBox};
-use crate::worktree;
+use crate::workspace::{self, Containers, Sandbox};
 
 /// The Session id that asks to resume the newest Session, archived or not.
 pub const LATEST: &str = "latest";
@@ -202,13 +201,13 @@ struct Workplace {
 /// Finds or makes the place for the Session with id `id` to work. A project that cannot have
 /// worktrees still works, in the main checkout.
 fn workplace(main: &Path, id: &str, wants_worktree: bool) -> Workplace {
-    let existing = worktree::path(main, id);
+    let existing = workspace::worktree_path(main, id);
     let (worktree, notice) = if existing.exists() {
         (Some(existing), None)
     } else if !wants_worktree {
         (None, None)
     } else {
-        match worktree::create(main, id) {
+        match workspace::create_worktree(main, id) {
             Ok(path) => (Some(path), None),
             Err(error) => (None, Some(format!("working in the main checkout: {error}"))),
         }
@@ -384,7 +383,7 @@ pub fn listed_sessions(main: &Path, directory: &Path) -> io::Result<Vec<SessionS
     stored.retain(|summary| {
         let id = session::session_id(&summary.path);
         let named = summary.first_prompt.is_some() || summary.name.is_some();
-        named || worktree::path(main, &id).exists()
+        named || workspace::worktree_path(main, &id).exists()
     });
     Ok(stored)
 }
@@ -614,7 +613,7 @@ mod tests {
         assert_eq!(fallback.worktree, None);
         assert!(fallback.notice.unwrap().contains("main checkout"));
 
-        let existing = worktree::path(main, "2");
+        let existing = workspace::worktree_path(main, "2");
         std::fs::create_dir_all(&existing).unwrap();
         let found = workplace(main, "2", false);
         assert_eq!(found.worktree, Some(existing));
@@ -658,7 +657,7 @@ mod tests {
             .0;
         spoken.append(&Entry::User { text: "hi".into() }).unwrap();
         drop(spoken);
-        std::fs::create_dir_all(worktree::path(main.path(), "2")).unwrap();
+        std::fs::create_dir_all(workspace::worktree_path(main.path(), "2")).unwrap();
 
         let listed = listed_sessions(main.path(), sessions.path()).unwrap();
 

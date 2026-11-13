@@ -26,8 +26,8 @@ use serde_json::Value;
 use crate::commands::Skill;
 use crate::connection::{Effort, ToolSpec};
 use crate::question::Asker;
-use crate::sandbox::Sandbox;
 use crate::session::ToolCall;
+use crate::workspace::Sandbox;
 pub use land::Land;
 use project::Project;
 pub use session_info::SessionInfo;
@@ -236,7 +236,7 @@ pub(crate) mod test_support {
     use super::project::Project;
     use super::{Approver, Verdict};
 
-    use crate::sandbox::Sandbox;
+    use crate::workspace::Sandbox;
 
     /// A Sandbox that never runs anything, so every shell command asks.
     pub fn disabled() -> Arc<Sandbox> {
@@ -275,7 +275,7 @@ pub(crate) mod test_support {
     pub fn git(root: &Path, args: &[&str]) {
         let mut command = Command::new("git");
         command.arg("-C").arg(root).args(args);
-        for name in crate::worktree::REPOSITORY_ENV {
+        for name in crate::workspace::REPOSITORY_ENV {
             command.env_remove(name);
         }
         assert!(command.status().unwrap().success());
