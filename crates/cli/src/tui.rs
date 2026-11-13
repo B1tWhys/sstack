@@ -44,6 +44,7 @@ use sstack::open_session::{
 use sstack::open_session::{ReportingApprover, ReportingAsker};
 use sstack::protocol::SessionReport;
 use sstack::running_harness::{self, Exit};
+use sstack::standard_tools::standard;
 use sstack::tools::{Approver, Asker};
 use sstack::workspace::{Checkout, Containers};
 use sstack::{session, workspace};
@@ -138,6 +139,7 @@ impl Sessions for LiveSessions<'_> {
             .approver(approver)
             .asker(asker)
             .containers(self.containers.clone())
+            .tools(&standard)
             .call()?;
         let id = session::session_id(&run.session);
         Ok(Opened {

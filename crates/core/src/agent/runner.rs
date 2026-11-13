@@ -172,11 +172,8 @@ mod tests {
     use crate::agent::AgentConfig;
     use crate::connection::{Effort, scripted::ScriptedProvider};
     use crate::session::{AssistantEntry, SessionLog, StopReason, Usage};
-    use crate::tools::{
-        DenyAll, ToolBox,
-        project::Project,
-        test_support::{disabled, git_project},
-    };
+    use crate::standard_tools::test_support::git_project;
+    use crate::tools::DenyAll;
 
     /// Returns a model that says `text` once.
     fn model(text: &str) -> Arc<ScriptedProvider> {
@@ -198,11 +195,7 @@ mod tests {
             provider: first.clone(),
             model: "first".into(),
             system: String::new(),
-            tools: ToolBox::standard()
-                .project(Arc::new(Project::new(dir.path()).unwrap()))
-                .sandbox(disabled())
-                .approver(Arc::new(DenyAll))
-                .call(),
+            tools: crate::standard_tools::test_support::toolbox(dir.path(), Arc::new(DenyAll)),
             context_limit: 1000,
         };
         let log = SessionLog::create(&dir.path().join("1.jsonl")).unwrap();

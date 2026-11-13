@@ -4,9 +4,10 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use super::{Asker, Tool, ToolError, parse_input};
+use super::parse_input;
 use crate::connection::ToolSpec;
 use crate::protocol::{self, Question, Response};
+use crate::tools::{Asker, Tool, ToolError};
 
 /// The most Questions the model may ask at once, so the person is not buried in them.
 const MAX_QUESTIONS: usize = 4;

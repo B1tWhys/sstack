@@ -11,6 +11,7 @@ use sstack::agent::{QueuedPrompts, TurnContext};
 use sstack::open_session::{Place, Run, Start, prepare};
 use sstack::protocol::{AgentEvent, TurnEnd};
 use sstack::session;
+use sstack::standard_tools::standard;
 use sstack::tools::DenyAll;
 use sstack::workspace::Containers;
 use tokio_util::sync::CancellationToken;
@@ -41,6 +42,7 @@ pub async fn run(args: &Args, prompt: &str) -> Result<ExitCode> {
         .approver(|_| Arc::new(DenyAll))
         .asker(|_| None)
         .containers(Arc::new(Containers::new(Vec::new())))
+        .tools(&standard)
         .call()?;
     let cancel = CancellationToken::new();
     let out = stdout();

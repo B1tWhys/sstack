@@ -9,9 +9,11 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::process::Command;
 
+use super::parse_input;
 use super::project::Project;
-use super::{Approver, Tool, ToolError, Verdict, parse_input};
 use crate::connection::ToolSpec;
+use crate::protocol::Verdict;
+use crate::tools::{Approver, Tool, ToolError};
 use crate::workspace::{Failure, Sandbox};
 
 /// How long a command may run before it is stopped.
@@ -171,10 +173,8 @@ impl Tool for Bash {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tools::{
-        DenyAll,
-        test_support::{AllowAll, disabled, git_project},
-    };
+    use crate::standard_tools::test_support::{AllowAll, disabled, git_project};
+    use crate::tools::DenyAll;
     use crate::workspace::{Containers, MockContainerRuntime};
     use std::os::unix::process::ExitStatusExt;
     use std::process::ExitStatus;

@@ -326,11 +326,8 @@ mod tests {
     use crate::protocol::{ApprovalRequest, QuestionRequest};
     use crate::running_harness::{Exit, RunningHarness};
     use crate::session::{AssistantEntry, Entry, SessionLog, StopReason, Usage};
-    use crate::tools::{
-        DenyAll, ToolBox,
-        project::Project,
-        test_support::{disabled, git_project},
-    };
+    use crate::standard_tools::{project::Project, test_support::git_project};
+    use crate::tools::DenyAll;
     use crate::workspace::Checkout;
 
     /// Opens a new Session called `name` in `dir`, whose reports go nowhere, so that what the
@@ -341,11 +338,7 @@ mod tests {
             provider: Arc::new(ScriptedProvider::new(vec![])),
             model: "scripted".into(),
             system: String::new(),
-            tools: ToolBox::standard()
-                .project(project)
-                .sandbox(disabled())
-                .approver(Arc::new(DenyAll))
-                .call(),
+            tools: crate::standard_tools::test_support::toolbox(project.root(), Arc::new(DenyAll)),
             context_limit: 1000,
         };
         let log = SessionLog::create(&dir.path().join(name).with_extension("jsonl")).unwrap();

@@ -6,7 +6,7 @@
 
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use bon::builder;
 
@@ -19,7 +19,7 @@ use crate::connection::{
 use crate::session::{
     self, Entry, Naming, SessionError, SessionLog, SessionMetadata, SessionSummary, SkillListing,
 };
-use crate::tools::{Approver, Asker, Land, SessionInfo, ToolBox, project::Project};
+use crate::tools::{Approver, Asker, SessionInfo, ToolBox, ToolContext, ToolFactory};
 use crate::workspace::{self, Containers, Sandbox};
 
 /// The Session id that asks to resume the newest Session, archived or not.
@@ -239,6 +239,8 @@ pub fn prepare(
     asker: impl FnOnce(&str) -> Option<Arc<dyn Asker>>,
     /// The runtime for the Session's Sandbox, shared with every other Session of the run.
     containers: Arc<Containers>,
+    /// Makes the tools the model may use in the Session.
+    tools: &ToolFactory,
 ) -> Result<Run, SetupError> {
     let config = load_settings()?;
     if let Some(asked) = connection {
@@ -270,6 +272,7 @@ pub fn prepare(
         .approver(approver(&id))
         .maybe_asker(asker(&id))
         .containers(containers)
+        .tools(tools)
         .skills(&installed)
         .listing(&listing)
         .call()?;
@@ -358,7 +361,7 @@ fn wants_name(session: &OpenedLog) -> bool {
 /// # Errors
 /// Fails if `directory` cannot be read.
 pub fn main_checkout(directory: &Path) -> Result<PathBuf, SetupError> {
-    Ok(Project::new(directory)?.root().to_owned())
+    Ok(directory.canonicalize()?)
 }
 
 /// Returns where the Sessions of the project that `directory` is in are stored.
@@ -465,6 +468,8 @@ fn agent_config(
     asker: Option<Arc<dyn Asker>>,
     /// The runtime for the Session's Sandbox.
     containers: Arc<Containers>,
+    /// Makes the tools the model may use in the Session.
+    tools: &ToolFactory,
     /// Every Skill installed for the Session. The model may read the files of all of them, since
     /// a person may run any of them, but is offered only those it may load on its own.
     skills: &[Skill],
@@ -475,39 +480,32 @@ fn agent_config(
     SystemKeyring::connect();
     let secret = resolve_secret(&connection.secret, &SystemKeyring, backend.main)?;
     let root = place.worktree.as_deref().unwrap_or(backend.main);
-    let skill_directories = skills
-        .iter()
-        .filter_map(|s| s.path.parent().map(Path::to_owned));
-    let project = Arc::new(Project::new(root)?.with_readable(skill_directories));
-    let secret_env = backend.secrets.clone();
-    let sandbox = Sandbox::new(containers, id, project.root());
-    let tools = ToolBox::standard()
-        .project(project.clone())
-        .sandbox(Arc::new(sandbox))
-        .approver(approver.clone())
-        .secret_env(secret_env.clone())
-        .call()
-        .with_session_info(SessionInfo {
+    let workspace = root.canonicalize()?;
+    let context = ToolContext {
+        readable: (skills.iter())
+            .filter_map(|s| s.path.parent().map(Path::to_owned))
+            .collect(),
+        sandbox: Arc::new(Sandbox::new(containers, id, &workspace)),
+        root: workspace,
+        approver,
+        asker,
+        skills: offered_skills(skills),
+        main_checkout: place.worktree.as_ref().map(|_| backend.main.to_owned()),
+        secret_env: backend.secrets.clone(),
+        session_info: Arc::new(Mutex::new(SessionInfo {
             session_id: id.to_owned(),
             model: backend.model.clone(),
             effort: Some(connection.effort),
-        })
-        .with_skills(offered_skills(skills))
-        .with_asker(asker);
+        })),
+    };
+    let tools = ToolBox::new(tools(&context)?, context.session_info);
     let home = dirs::home_dir();
     let claude = commands::claude_directory(home.as_deref(), |name| std::env::var_os(name));
     let system = session::system_prompt(root, claude.as_deref());
     let system = session::skills_prompt(&system, listing);
-    let (tools, system) = if place.worktree.is_some() {
-        let land = Land {
-            worktree: project,
-            main: backend.main.to_owned(),
-            approver,
-            secret_env,
-        };
-        (tools.with_land(land), session::worktree_prompt(&system))
-    } else {
-        (tools, system)
+    let system = match place.worktree {
+        Some(_) => session::worktree_prompt(&system),
+        None => system,
     };
     let opened = connection::open_connection(connection, secret)?;
     Ok(Configured {

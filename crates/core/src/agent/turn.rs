@@ -424,10 +424,8 @@ mod tests {
     use super::*;
     use crate::connection::scripted::{Scripted, ScriptedProvider};
     use crate::session::Usage;
-    use crate::tools::{
-        Approver, DenyAll,
-        test_support::{AllowAll, DeferAll, git_project},
-    };
+    use crate::standard_tools::test_support::{AllowAll, DeferAll, git_project};
+    use crate::tools::{Approver, DenyAll};
     use async_trait::async_trait;
     use serde_json::json;
     use std::path::Path;
@@ -467,7 +465,7 @@ mod tests {
         let (dir, project) = git_project();
         let session = dir.path().join("ignored/session.jsonl");
         let provider = Arc::new(ScriptedProvider::new(script));
-        let agent = agent_on(&session, config(provider.clone(), project, approver));
+        let agent = agent_on(&session, config(provider.clone(), &project, approver));
         Harness {
             dir,
             agent,
@@ -498,18 +496,14 @@ mod tests {
 
     fn config(
         provider: Arc<dyn Provider>,
-        project: Arc<crate::tools::project::Project>,
+        project: &crate::standard_tools::project::Project,
         approver: Arc<dyn Approver>,
     ) -> AgentConfig {
         AgentConfig {
             provider,
             model: "scripted".into(),
             system: "system".into(),
-            tools: ToolBox::standard()
-                .project(project)
-                .sandbox(crate::tools::test_support::disabled())
-                .approver(approver)
-                .call(),
+            tools: crate::standard_tools::test_support::toolbox(project.root(), approver),
             context_limit: LIMIT,
         }
     }
@@ -687,7 +681,7 @@ mod tests {
     async fn cancelling_a_model_request_ends_the_turn() {
         let (dir, project) = git_project();
         let session = dir.path().join("ignored/session.jsonl");
-        let config = config(Arc::new(NeverResponds), project, Arc::new(DenyAll));
+        let config = config(Arc::new(NeverResponds), &project, Arc::new(DenyAll));
         let mut agent = agent_on(&session, config);
         let cancel = CancellationToken::new();
         cancel.cancel();
@@ -708,7 +702,7 @@ mod tests {
 
         let (log, entries) = SessionLog::open(&path).unwrap();
         let provider = Arc::new(ScriptedProvider::default());
-        let config = config(provider, project, Arc::new(DenyAll));
+        let config = config(provider, &project, Arc::new(DenyAll));
         let agent = Agent::new(config, log, entries).unwrap();
 
         assert_eq!(tool_results(agent.entries()), [("1", INTERRUPTED, true)]);
@@ -747,7 +741,7 @@ mod tests {
         pause.store(false, Ordering::SeqCst);
         let (log, entries) = SessionLog::open(&h.session).unwrap();
         let (dir, project) = git_project();
-        let config = config(h.provider.clone(), project, Arc::new(AllowAll));
+        let config = config(h.provider.clone(), &project, Arc::new(AllowAll));
         let mut resumed = Agent::new(config, log, entries).unwrap();
         let mut context = TurnContext {
             cancel: &cancel,
@@ -773,8 +767,8 @@ mod tests {
         } = h;
         drop(agent);
         let (log, entries) = SessionLog::open(&session).unwrap();
-        let project = Arc::new(crate::tools::project::Project::new(dir.path()).unwrap());
-        let config = config(provider.clone(), project, approver);
+        let project = Arc::new(crate::standard_tools::project::Project::new(dir.path()).unwrap());
+        let config = config(provider.clone(), &project, approver);
         Harness {
             agent: Agent::new(config, log, entries).unwrap(),
             dir,

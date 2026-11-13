@@ -1,39 +1,20 @@
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::PoisonError;
 
 use async_trait::async_trait;
-use serde::Serialize;
 use serde_json::{Value, json};
 
-use super::{Tool, ToolError};
-use crate::connection::{Effort, ToolSpec};
-
-/// What the model can learn about the Session it is working in, so that it can record in what it
-/// leaves behind, such as a commit, which Session made it and with which model.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct SessionInfo {
-    /// The id of the Session, which names its log and is what `--resume` takes.
-    pub session_id: String,
-    /// The identifier of the model the Running Harness requests, such as `claude-opus-4-5`.
-    pub model: String,
-    /// How much effort the model is asked to spend on each response. Missing where the
-    /// Connection sets none, and then left out of what the model sees.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub effort: Option<Effort>,
-}
-
-/// What the [`ShowSessionInfo`] tool tells the model, shared with whoever keeps it up to date
-/// when the Session moves to another Connection.
-pub(super) type SharedInfo = Arc<Mutex<SessionInfo>>;
+use crate::connection::ToolSpec;
+use crate::tools::{SharedSessionInfo, Tool, ToolError};
 
 /// The tool that tells the model about the Session it is working in.
 pub(super) struct ShowSessionInfo {
     /// What the tool tells the model, as of the moment it is called.
-    info: SharedInfo,
+    info: SharedSessionInfo,
 }
 
 impl ShowSessionInfo {
     /// Creates the tool, telling the model whatever `info` holds when it is called.
-    pub(super) fn new(info: SharedInfo) -> Self {
+    pub(super) fn new(info: SharedSessionInfo) -> Self {
         Self { info }
     }
 }
@@ -60,6 +41,10 @@ impl Tool for ShowSessionInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
+
+    use crate::connection::Effort;
+    use crate::tools::SessionInfo;
 
     /// Returns what the tool tells the model when it knows `effort`.
     async fn shown(effort: Option<Effort>) -> Value {

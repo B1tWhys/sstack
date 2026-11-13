@@ -10,6 +10,7 @@ pub mod open_session;
 pub mod protocol;
 pub mod running_harness;
 pub mod session;
+pub mod standard_tools;
 pub mod tools;
 pub mod vim;
 pub mod workspace;

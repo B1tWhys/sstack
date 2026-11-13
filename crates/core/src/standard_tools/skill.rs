@@ -2,9 +2,10 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use super::{Tool, ToolError, parse_input};
+use super::parse_input;
 use crate::commands::{self, Skill};
 use crate::connection::ToolSpec;
+use crate::tools::{Tool, ToolError};
 
 /// The tool for loading the instructions of an installed [`Skill`], which may live outside the
 /// project. It also lists the files beside the instructions, without opening anything else out

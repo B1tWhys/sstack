@@ -219,7 +219,7 @@ fn git(directory: &Path, args: &[&str]) -> Result<String, GitError> {
 pub(crate) mod test_support {
     use std::path::Path;
 
-    use crate::tools::test_support::git;
+    use crate::standard_tools::test_support::git;
 
     /// Makes `root` a repository with one commit, with identity set so that commits work anywhere.
     pub fn repository(root: &Path) {
@@ -234,7 +234,7 @@ pub(crate) mod test_support {
 mod tests {
     use super::test_support::repository;
     use super::*;
-    use crate::tools::test_support::git as run;
+    use crate::standard_tools::test_support::git as run;
 
     #[test]
     fn a_worktree_is_a_branch_from_the_main_checkout_that_git_status_ignores() {

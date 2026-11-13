@@ -9,9 +9,10 @@ use regex::Regex;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
+use super::parse_input;
 use super::project::Project;
-use super::{Tool, ToolError, parse_input};
 use crate::connection::ToolSpec;
+use crate::tools::{Tool, ToolError};
 use crate::workspace::is_protected;
 
 /// The most results returned from one search.
@@ -139,7 +140,7 @@ impl Tool for Search {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tools::{
+    use crate::standard_tools::{
         project::Project,
         test_support::{git, git_project},
     };

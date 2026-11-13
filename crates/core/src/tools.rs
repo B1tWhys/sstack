@@ -1,26 +1,13 @@
-//! The tools the model can use to work on a project.
+//! The port through which the agent uses tools: what a tool is, what it is given for a Session,
+//! and how the agent calls the ones it was given. The tools themselves live elsewhere and are
+//! handed in by whoever sets the Session up, so core never names one.
 
-/// The tool that puts Questions to the person.
-mod ask;
-/// The tool that runs shell commands.
-mod bash;
-/// The tools that read and change files.
-mod files;
-/// The tool that moves a worktree Session's commits onto the main branch.
-mod land;
-pub mod project;
-/// The tool that finds files and text.
-mod search;
-/// The tool that tells the model about the Session it is in.
-mod session_info;
-/// The tool that hands the model a Skill's instructions.
-mod skill;
-
+use std::io;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use async_trait::async_trait;
-use bon::bon;
-use serde::de::DeserializeOwned;
+use serde::Serialize;
 use serde_json::Value;
 
 use crate::commands::Skill;
@@ -28,9 +15,6 @@ use crate::connection::{Effort, ToolSpec};
 use crate::protocol::{Question, Response, Verdict};
 use crate::session::ToolCall;
 use crate::workspace::Sandbox;
-pub use land::Land;
-use project::Project;
-pub use session_info::SessionInfo;
 
 /// Someone who decides whether the model may run a command on the host, outside the Sandbox.
 #[async_trait]
@@ -86,110 +70,90 @@ pub struct ToolOutput {
 
 /// Something the model can call.
 #[async_trait]
-trait Tool: Send + Sync {
+pub trait Tool: Send + Sync {
     /// Returns the definition offered to the model.
     fn spec(&self) -> ToolSpec;
+    /// Runs the tool on `input`, returning what the model is told.
     async fn run(&self, input: Value) -> Result<String, ToolError>;
 }
 
-/// Parses a tool's JSON input into its input type.
-fn parse_input<T: DeserializeOwned>(input: Value) -> Result<T, ToolError> {
-    serde_json::from_value(input)
-        .map_err(|error| ToolError::Failed(format!("invalid input: {error}")))
+/// What the model can learn about the Session it is working in, so that it can record in what it
+/// leaves behind, such as a commit, which Session made it and with which model.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SessionInfo {
+    /// The id of the Session, which names its log and is what `--resume` takes.
+    pub session_id: String,
+    /// The identifier of the model the Running Harness requests, such as `claude-opus-4-5`.
+    pub model: String,
+    /// How much effort the model is asked to spend on each response. Missing where the
+    /// Connection sets none, and then left out of what the model sees.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effort: Option<Effort>,
 }
+
+/// The [`SessionInfo`] a Session's tools read, which core keeps current when the Session moves to
+/// another Connection.
+pub type SharedSessionInfo = Arc<Mutex<SessionInfo>>;
+
+/// What core knows about a Session that its tools may need.
+#[derive(bon::Builder)]
+pub struct ToolContext {
+    /// The Workspace: the directory the model works in.
+    pub root: PathBuf,
+    /// Directories outside the Workspace that the model may read but not change, such as those
+    /// of installed Skills.
+    #[builder(default)]
+    pub readable: Vec<PathBuf>,
+    /// Where the Session's shell commands run without asking.
+    pub sandbox: Arc<Sandbox>,
+    /// Who decides on shell commands that would run on the host.
+    pub approver: Arc<dyn Approver>,
+    /// Who answers the model's Questions, if anyone does.
+    pub asker: Option<Arc<dyn Asker>>,
+    /// The Skills the model may load on its own.
+    #[builder(default)]
+    pub skills: Vec<Skill>,
+    /// The main checkout, when the Session works in a worktree of its own and lands its work
+    /// there. Missing for a Session in the main checkout.
+    pub main_checkout: Option<PathBuf>,
+    /// Environment variables holding secrets, withheld from anything the model runs.
+    #[builder(default)]
+    pub secret_env: Vec<String>,
+    /// Facts about the Session, kept current as it moves between Connections.
+    pub session_info: SharedSessionInfo,
+}
+
+/// Makes the tools for one Session from what core knows about it. Whoever sets Sessions up
+/// supplies one, so that core never depends on the tools themselves.
+pub type ToolFactory = dyn Fn(&ToolContext) -> io::Result<Vec<Box<dyn Tool>>> + Send + Sync;
 
 /// Everything the model can do to the project during a Session.
 pub struct ToolBox {
     /// The tools, in the order they are offered to the model.
     tools: Vec<Box<dyn Tool>>,
-    /// What the `session_info` tool tells the model, if it is offered.
-    session_info: Option<session_info::SharedInfo>,
+    /// The facts about the Session that its tools read.
+    session_info: SharedSessionInfo,
 }
 
-#[bon]
 impl ToolBox {
-    /// Builds the standard tools for a project.
-    #[builder]
-    pub fn standard(
-        /// The project the tools work on.
-        project: Arc<Project>,
-        /// Where shell commands run without asking.
-        sandbox: Arc<Sandbox>,
-        /// Who decides on shell commands that would run on the host.
-        approver: Arc<dyn Approver>,
-        /// Environment variables withheld from shell commands run on the host.
-        #[builder(default)]
-        secret_env: Vec<String>,
-    ) -> Self {
-        let seen = Arc::new(files::Seen::default());
-        let bash = bash::Bash::builder()
-            .project(project.clone())
-            .sandbox(sandbox)
-            .approver(approver)
-            .secret_env(secret_env)
-            .build();
+    /// Offers the model `tools`, in order, for the Session that `session_info` describes.
+    #[must_use]
+    pub fn new(tools: Vec<Box<dyn Tool>>, session_info: SharedSessionInfo) -> Self {
         Self {
-            tools: vec![
-                Box::new(files::Read::new(project.clone(), seen.clone())),
-                Box::new(files::Write::new(project.clone(), seen.clone())),
-                Box::new(files::Edit::new(project.clone(), seen)),
-                Box::new(search::Search::new(project)),
-                Box::new(bash),
-            ],
-            session_info: None,
+            tools,
+            session_info,
         }
     }
-}
 
-impl ToolBox {
-    /// Adds the ability to land commits, for a Session that works in a worktree.
-    #[must_use]
-    pub fn with_land(mut self, land: Land) -> Self {
-        self.tools.push(Box::new(land));
-        self
-    }
-
-    /// Adds the ability to learn `info` about the Session, so that the model can record in its
-    /// commits which Session made them and with which model.
-    #[must_use]
-    pub fn with_session_info(mut self, info: SessionInfo) -> Self {
-        let info = Arc::new(Mutex::new(info));
-        self.tools
-            .push(Box::new(session_info::ShowSessionInfo::new(info.clone())));
-        self.session_info = Some(info);
-        self
-    }
-
-    /// Tells the model from now on that `model` serves the Session, asked for `effort`. Changes
-    /// nothing if the model cannot learn about the Session.
+    /// Records that `model`, asked for `effort`, serves the Session from now on, so that tools
+    /// telling the model about the Session say so.
     pub fn served_by(&self, model: &str, effort: Option<Effort>) {
-        if let Some(info) = &self.session_info {
-            let mut info = info.lock().unwrap_or_else(PoisonError::into_inner);
-            model.clone_into(&mut info.model);
-            info.effort = effort;
-        }
+        let mut info = (self.session_info.lock()).unwrap_or_else(PoisonError::into_inner);
+        model.clone_into(&mut info.model);
+        info.effort = effort;
     }
 
-    /// Adds the ability to read the instructions of `skills`. With none, offers nothing new.
-    #[must_use]
-    pub fn with_skills(mut self, skills: Vec<Skill>) -> Self {
-        if !skills.is_empty() {
-            self.tools.push(Box::new(skill::UseSkill::new(skills)));
-        }
-        self
-    }
-
-    /// Adds the ability to put Questions to the person through `asker`. With none, as when
-    /// nobody is there to answer, offers nothing new.
-    #[must_use]
-    pub fn with_asker(mut self, asker: Option<Arc<dyn Asker>>) -> Self {
-        if let Some(asker) = asker {
-            self.tools.push(Box::new(ask::Ask::new(asker)));
-        }
-        self
-    }
-
-    /// Returns the definitions offered to the model.
+    /// Returns the definitions offered to the model, in order.
     #[must_use]
     pub fn specs(&self) -> Vec<ToolSpec> {
         self.tools.iter().map(|tool| tool.spec()).collect()
@@ -217,205 +181,5 @@ impl ToolBox {
             }),
             Err(ToolError::Deferred) => Err(Deferred),
         }
-    }
-}
-
-#[cfg(test)]
-pub(crate) mod test_support {
-    use std::path::Path;
-    use std::process::Command;
-    use std::sync::Arc;
-
-    use async_trait::async_trait;
-
-    use super::project::Project;
-    use super::{Approver, Verdict};
-
-    use crate::workspace::Sandbox;
-
-    /// A Sandbox that never runs anything, so every shell command asks.
-    pub fn disabled() -> Arc<Sandbox> {
-        Arc::new(Sandbox::disabled())
-    }
-
-    /// An [`Approver`] that lets every command run, as a person who always says yes.
-    pub struct AllowAll;
-
-    #[async_trait]
-    impl Approver for AllowAll {
-        async fn approve(&self, _command: &str, _note: Option<&str>) -> Verdict {
-            Verdict::Allow
-        }
-    }
-
-    /// An [`Approver`] that puts off every question, as a Rebuild does.
-    pub struct DeferAll;
-
-    #[async_trait]
-    impl Approver for DeferAll {
-        async fn approve(&self, _command: &str, _note: Option<&str>) -> Verdict {
-            Verdict::Defer
-        }
-    }
-
-    /// A temporary git repository holding `.gitignore` rules for `ignored/` and `*.log`.
-    pub fn git_project() -> (tempfile::TempDir, Arc<Project>) {
-        let dir = tempfile::tempdir().unwrap();
-        git(dir.path(), &["init", "-q"]);
-        std::fs::write(dir.path().join(".gitignore"), "ignored/\n*.log\n").unwrap();
-        let project = Arc::new(Project::new(dir.path()).unwrap());
-        (dir, project)
-    }
-
-    pub fn git(root: &Path, args: &[&str]) {
-        let mut command = Command::new("git");
-        command.arg("-C").arg(root).args(args);
-        for name in crate::workspace::REPOSITORY_ENV {
-            command.env_remove(name);
-        }
-        assert!(command.status().unwrap().success());
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::test_support::{disabled, git_project};
-    use super::*;
-    use crate::commands::Scope;
-    use serde_json::json;
-
-    fn call(name: &str, input: Value) -> ToolCall {
-        ToolCall {
-            id: "1".into(),
-            name: name.into(),
-            input,
-        }
-    }
-
-    #[tokio::test]
-    async fn dispatches_by_name_and_reports_failures_as_results() {
-        let (dir, project) = git_project();
-        std::fs::write(dir.path().join("a.txt"), "hello").unwrap();
-        let tools = ToolBox::standard()
-            .project(project)
-            .sandbox(disabled())
-            .approver(Arc::new(DenyAll))
-            .call();
-
-        let run = async |name, input| tools.run(&call(name, input)).await.unwrap();
-        let read = run("read", json!({"path": "a.txt"})).await;
-        let unknown = run("nope", json!({})).await;
-        let invalid = run("read", json!({"wrong": 1})).await;
-        let denied = run("bash", json!({"command": "true"})).await;
-
-        assert_eq!(read.text, "1\thello");
-        assert!(!read.is_error);
-        assert_eq!(unknown.text, "unknown tool: nope");
-        assert!(unknown.is_error);
-        assert!(invalid.is_error);
-        assert!(denied.is_error);
-    }
-
-    #[tokio::test]
-    async fn a_call_whose_question_was_put_off_has_no_result() {
-        let (_dir, project) = git_project();
-        let tools = ToolBox::standard()
-            .project(project)
-            .sandbox(disabled())
-            .approver(Arc::new(super::test_support::DeferAll))
-            .call();
-
-        let put_off = tools.run(&call("bash", json!({"command": "true"}))).await;
-
-        assert_eq!(put_off, Err(Deferred));
-    }
-
-    #[test]
-    fn offers_the_standard_tools() {
-        let (_dir, project) = git_project();
-        let tools = ToolBox::standard()
-            .project(project)
-            .sandbox(disabled())
-            .approver(Arc::new(DenyAll))
-            .call();
-        let names: Vec<_> = tools.specs().into_iter().map(|spec| spec.name).collect();
-        assert_eq!(names, ["read", "write", "edit", "search", "bash"]);
-    }
-
-    #[tokio::test]
-    async fn offers_the_session_info_when_given_some_and_keeps_it_current() {
-        let (_dir, project) = git_project();
-        let tools = ToolBox::standard()
-            .project(project)
-            .sandbox(disabled())
-            .approver(Arc::new(DenyAll))
-            .call();
-        assert!(!tools.specs().iter().any(|spec| spec.name == "session_info"));
-        tools.served_by("ignored", None);
-
-        let tools = tools.with_session_info(SessionInfo {
-            session_id: "42".into(),
-            model: "m".into(),
-            effort: None,
-        });
-        let output = tools.run(&call("session_info", json!({}))).await.unwrap();
-        assert_eq!(output.text, r#"{"session_id":"42","model":"m"}"#);
-
-        tools.served_by("other", Some(Effort::Low));
-        let output = tools.run(&call("session_info", json!({}))).await.unwrap();
-        assert_eq!(
-            output.text,
-            r#"{"session_id":"42","model":"other","effort":"low"}"#
-        );
-    }
-
-    #[test]
-    fn offers_the_skill_tool_only_when_there_are_skills() {
-        let (_dir, project) = git_project();
-        let tools = ToolBox::standard()
-            .project(project)
-            .sandbox(disabled())
-            .approver(Arc::new(DenyAll))
-            .call()
-            .with_skills(vec![]);
-        assert!(!tools.specs().iter().any(|spec| spec.name == "skill"));
-
-        let skill = Skill {
-            name: "review".into(),
-            description: String::new(),
-            path: "SKILL.md".into(),
-            scope: Scope::Project,
-            model_invocable: true,
-        };
-        let tools = tools.with_skills(vec![skill]);
-        assert!(tools.specs().iter().any(|spec| spec.name == "skill"));
-    }
-
-    #[test]
-    fn offers_the_ask_tool_only_with_someone_to_ask() {
-        /// An Asker that never answers.
-        struct Silent;
-
-        #[async_trait]
-        impl Asker for Silent {
-            async fn ask(
-                &self,
-                _questions: Vec<crate::protocol::Question>,
-            ) -> crate::protocol::Response {
-                crate::protocol::Response::Declined
-            }
-        }
-
-        let (_dir, project) = git_project();
-        let tools = ToolBox::standard()
-            .project(project)
-            .sandbox(disabled())
-            .approver(Arc::new(DenyAll))
-            .call()
-            .with_asker(None);
-        assert!(!tools.specs().iter().any(|spec| spec.name == "ask"));
-
-        let tools = tools.with_asker(Some(Arc::new(Silent)));
-        assert!(tools.specs().iter().any(|spec| spec.name == "ask"));
     }
 }

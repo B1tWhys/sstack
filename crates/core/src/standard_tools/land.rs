@@ -8,8 +8,9 @@ use serde_json::{Value, json};
 use tokio::process::Command;
 
 use super::project::Project;
-use super::{Approver, Tool, ToolError, Verdict};
 use crate::connection::ToolSpec;
+use crate::protocol::Verdict;
+use crate::tools::{Approver, Tool, ToolError};
 use crate::workspace::REPOSITORY_ENV;
 
 /// How many times to try before giving up on a main branch that keeps moving.
@@ -207,10 +208,8 @@ impl Tool for Land {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tools::{
-        DenyAll, ToolBox,
-        test_support::{AllowAll, git as run},
-    };
+    use crate::standard_tools::test_support::{AllowAll, git as run};
+    use crate::tools::DenyAll;
     use crate::workspace::{self, test_support::repository};
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
@@ -393,19 +392,5 @@ mod tests {
         let kept = tail(&long);
         assert_eq!(kept.chars().count(), MAX_OUTPUT_CHARS);
         assert!(kept.ends_with("end"));
-    }
-
-    #[test]
-    fn the_tool_is_offered_alongside_the_standard_ones() {
-        let f = fixture(Arc::new(DenyAll));
-        let project = f.land.worktree.clone();
-        let tools = ToolBox::standard()
-            .project(project)
-            .sandbox(crate::tools::test_support::disabled())
-            .approver(Arc::new(DenyAll))
-            .call()
-            .with_land(f.land);
-        let last = tools.specs().pop().unwrap();
-        assert_eq!(last.name, "land");
     }
 }

@@ -110,9 +110,11 @@ Add `workspace/protected` and make the Sandbox and `Project` call it.
 
 Note: done. The rule takes a path relative to the directory that holds it, because a worktree Session's root is itself inside `.sstack`, and checking absolute paths would hide everything in it. The tools now also treat `.sstack` as protected anywhere in the Workspace, as the Sandbox did. Before, git-ignore hid it from them. `globset` is a new direct dependency, already in the lockfile through `ignore`.
 
-### [ ] 5. Invert the tool port
+### [x] 5. Invert the tool port
 
 Make `tools.rs` the port, add `ToolContext` and the factory parameter to setup, reverse the session info update, and give core's tests fake tools. The tools still live in core at the end of this step, under a module the factory points at.
+
+Note: done, except the fake tools, which move to step 6. Core's agent tests rely on what `read`, `write` and `bash` really do, so they keep using the real tools while those are still in core. The adapters live in `standard_tools.rs` beside `standard_tools/`, which becomes the new crate's `lib.rs` and modules. `standard_tools::standard` is the factory, and each interface passes `.tools(&standard)` to `prepare`. `ToolContext` has a `bon` builder. `SessionInfo` and `SharedSessionInfo` are in the port, so `ToolBox::served_by` updates the shared handle without naming the tool, and the `session_info` tool is now always offered. Core's tests outside `standard_tools` use `standard_tools::test_support` (`toolbox`, `git_project`, `git`, `AllowAll`, `DeferAll`), including the worktree tests' `git`. Step 6 must replace each of those in core.
 
 ### [ ] 6. Move the tools into `sstack-tools`
 

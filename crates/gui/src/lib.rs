@@ -30,6 +30,7 @@ use sstack::open_session::{
 };
 use sstack::open_session::{ReportingApprover, ReportingAsker};
 use sstack::running_harness::{self, Binary};
+use sstack::standard_tools::standard;
 use sstack::tools::Asker;
 use sstack::workspace::{Checkout, Containers};
 use sstack::{session, workspace};
@@ -172,6 +173,7 @@ impl Sessions for LiveSessions {
             .approver(|_| approver)
             .asker(|_| Some(asker))
             .containers(Arc::clone(&self.containers))
+            .tools(&standard)
             .call()?;
         Ok(Opened {
             run,

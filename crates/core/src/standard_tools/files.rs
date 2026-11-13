@@ -9,9 +9,10 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
+use super::parse_input;
 use super::project::Project;
-use super::{Tool, ToolError, parse_input};
 use crate::connection::ToolSpec;
+use crate::tools::{Tool, ToolError};
 
 /// The most lines `read` returns unless asked for fewer or more.
 const DEFAULT_LINE_LIMIT: usize = 2000;
@@ -341,7 +342,7 @@ impl Tool for Edit {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tools::test_support::git_project;
+    use crate::standard_tools::test_support::git_project;
 
     #[tokio::test]
     async fn read_numbers_lines_and_honours_the_window() {

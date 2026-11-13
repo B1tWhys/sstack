@@ -1,7 +1,7 @@
 //! Helpers for testing components and the [`App`](crate::tui::app::App) without a real terminal.
 
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::backend::TestBackend;
@@ -11,7 +11,8 @@ use sstack::commands::{self, Location, Scope};
 use sstack::connection::{Config, Connections, Provider, SecretStore};
 use sstack::open_session::{ReportingApprover, ReportingAsker};
 use sstack::session::{self, AssistantEntry, SessionLog, StopReason, ToolCall, Usage};
-use sstack::tools::{Approver, ToolBox, project::Project};
+use sstack::standard_tools::standard;
+use sstack::tools::{Approver, Asker, SessionInfo, ToolBox, ToolContext};
 use sstack::workspace::Sandbox;
 
 use super::component::{Component, KeyOutcome};
@@ -129,8 +130,8 @@ pub fn opened(path: &Path, provider: Arc<dyn Provider>, events: &EventSender) ->
     let asker = Arc::new(ReportingAsker::new(
         SessionSender::new(&id, events.clone()).reporter(),
     ));
-    let mut config = agent_config(path.parent().unwrap(), provider, approver);
-    config.tools = config.tools.with_asker(Some(asker));
+    let tools = toolbox(path.parent().unwrap(), approver, Some(asker));
+    let config = agent_config(provider, tools);
     let agent = Agent::new(config, log, entries).unwrap();
     Opened {
         agent: AgentHandle::spawn(agent, SessionSender::new(&id, events.clone()).reporter()),
@@ -169,22 +170,34 @@ pub fn connections(path: &Path) -> Connections {
         .build()
 }
 
-/// Returns what a test agent working in `directory` runs on, with no system prompt.
-fn agent_config(
+/// Returns the standard tools for a test agent working in `directory`, asking `approver` about
+/// commands and `asker`, if given, the model's Questions.
+fn toolbox(
     directory: &Path,
-    provider: Arc<dyn Provider>,
     approver: Arc<dyn Approver>,
-) -> AgentConfig {
-    let project = Arc::new(Project::new(directory).unwrap());
+    asker: Option<Arc<dyn Asker>>,
+) -> ToolBox {
+    let context = ToolContext::builder()
+        .root(directory.to_owned())
+        .sandbox(Arc::new(Sandbox::disabled()))
+        .approver(approver)
+        .maybe_asker(asker)
+        .session_info(Arc::new(Mutex::new(SessionInfo {
+            session_id: "1".into(),
+            model: "scripted".into(),
+            effort: None,
+        })))
+        .build();
+    ToolBox::new(standard(&context).unwrap(), context.session_info)
+}
+
+/// Returns what a test agent runs on with `tools`, and no system prompt.
+fn agent_config(provider: Arc<dyn Provider>, tools: ToolBox) -> AgentConfig {
     AgentConfig {
         provider,
         model: "scripted".into(),
         system: String::new(),
-        tools: ToolBox::standard()
-            .project(project)
-            .sandbox(Arc::new(Sandbox::disabled()))
-            .approver(approver)
-            .call(),
+        tools,
         context_limit: 1000,
     }
 }
