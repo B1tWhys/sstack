@@ -13,9 +13,10 @@ Write each doc comment for a reader deciding whether to use the item, who can se
 4. **Callers' view.** Private items follow the same rules, written from the point of view of their caller: name the job done for the caller, and stop before how it is done. Neighboring internal concepts are fine to name; the steps are not.
 5. **What the reader cannot infer.** Keep units, defaults, surprising behavior and gotchas, and state leaky abstractions plainly. For a field, give its meaning and any unit or trap.
 6. **Add meaning.** A doc on an obvious item gives its role or units, so that it says more than its name and signature do.
-7. **Glossary terms.** Use the terms in `GLOSSARY.md`, capitalized as they are there.
-8. **`# Errors` and `# Panics`.** State the condition in caller terms.
-9. **Prose.** Apply the rules in `.agents/skills/writing-prose/SKILL.md`.
+7. **Modules say what belongs in them.** A module's doc tells a reader whether new code goes there. It also carries the detail an ADR leaves out, such as what a layer is for, so that the detail changes in the same commit as the code.
+8. **Glossary terms.** Use the terms in `GLOSSARY.md`, capitalized as they are there.
+9. **`# Errors` and `# Panics`.** State the condition in caller terms.
+10. **Prose.** Apply the rules in `.agents/skills/writing-prose/SKILL.md`.
 
 ## Examples
 

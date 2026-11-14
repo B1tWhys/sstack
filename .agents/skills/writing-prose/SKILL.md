@@ -69,6 +69,7 @@ Terms in `GLOSSARY.md` beat these rules, so Harness and Turn stay as they are th
 28. **Over-compression.** Write whole sentences with their articles and verbs, and spell out arrows and abbreviations. "Parser rejects bad date -> exit 2, no write" becomes "The parser rejects a bad date, exits with code 2, and writes nothing."
 29. **One reading.** Make every "it", "they" and "this" point at one obvious thing, repeating the noun when in doubt. Keep "only" and "not" next to the word they change.
 30. **Rhythm and view.** Mix sentence lengths: short ones state a point, and longer ones carry a fact with its condition. Where the text weighs a trade-off, as an ADR does, say what you make of it.
+31. **Inline lists.** A sentence that lists more than three items, or items with clauses of their own, makes the reader hold the list open while parsing each item. First cut the list to what the reader needs here, which is often one or two named examples. If every item matters, make it a bulleted list.
 
 ## Example
 

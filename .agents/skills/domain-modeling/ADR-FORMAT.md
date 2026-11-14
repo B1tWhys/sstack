@@ -23,3 +23,7 @@ ADRs live in `docs/adr/` as `NNNN-slug.md`, numbered one past the highest existi
 ```
 
 An ADR can be one paragraph. Add a `## Consequences` section only for effects downstream that a reader would not foresee.
+
+## What stays out
+
+An ADR records a decision and its reasons, so it should stay true while the code under it changes. Name the pieces the decision rests on, such as the trait that is the port or the module that is the leaf. Leave out what is cheap to change, such as which types a module holds, a struct's fields, or which cases a function handles. That detail goes in the module's or the item's doc comment, which changes in the same commit as the code. If adding a type or renaming a field would make a sentence in the ADR stale, that sentence belongs in a doc comment.
